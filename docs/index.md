@@ -8,6 +8,7 @@ This repo is documentation-first. Specs and decisions are the source of truth.
 - [MVP v0.1 spec](./specs/mvp-v0.1.md)
 - [Architecture](./architecture.md) (optional, evolves)
 - [Decisions (ADRs)](./decisions/) (why we chose things)
+- [Evolution notes](./evolution.md) — how the system may evolve, without committing to a roadmap
 
 ## Working agreements
 
