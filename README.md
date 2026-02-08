@@ -9,6 +9,8 @@ the server is a dumb relay and mailbox, while clients own their keys, history, a
 
 There is no central database, no plaintext on the server, and no required phone numbers or email addresses.
 
+This project treats documentation as the primary interface — for humans and machines alike.
+
 ## Architecture (high level)
 
 - End-to-end encryption on the client (browser-first)

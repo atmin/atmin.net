@@ -63,6 +63,12 @@ Media (encrypted by client):
 
 - `backups/{user_id}/{device_id}/...`
 
+## Message immutability and state reconstruction
+
+The system is append-only: the server stores immutable encrypted events,
+and clients continuously sync and replay them to materialize chat state.
+There is no server-side history rewriting (no “force push”).
+
 ## Envelope format
 
 Server-visible routing header + opaque encrypted payload.
