@@ -1,0 +1,17 @@
+{
+  "name": "atmin-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:wasm": "cd crypto && wasm-pack build --target web --release && wasm-pack build --target nodejs --release --out-dir pkg-node",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^3.0.6"
+  }
+}
