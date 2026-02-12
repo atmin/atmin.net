@@ -60,13 +60,13 @@ Users and devices:
 
 Inbox (per user, not per device):
 
-- `inbox/{user_id}/live/{YYYY}/{MM}/{DD}/{msg_id}.msg`
-- `inbox/{user_id}/archive/{YYYY}/{MM}/{DD}.blob`
+- `inbox/{user_id}/live/{msg_id}`
+- `inbox/{user_id}/archive/{YYYY}-{MM}-{DD}`
 
 Key backup (Megolm session keys, encrypted with backup key):
 
-- `backups/{user_id}/keys/live/{session_id}.enc`
-- `backups/{user_id}/keys/archive/{batch_id}.blob`
+- `backups/{user_id}/keys/live/{session_id}`
+- `backups/{user_id}/keys/archive/{YYYY}-{MM}-{DD}`
 
 Invites (lookup index):
 
@@ -145,7 +145,7 @@ decrypted, the client syncs the key backup for new keys from sibling devices.
 ### Key backup
 
 Each Megolm session key is also written as an individual encrypted object
-under `backups/{user_id}/keys/live/`. Compacted into archive blobs like everything else.
+under `backups/{user_id}/keys/live/`. Compacted into daily archive objects like everything else.
 
 On restore, the new device decrypts key backups with the backup encryption key,
 then syncs the inbox normally — decrypting messages with the restored Megolm keys.
@@ -325,7 +325,9 @@ Realtime hint (optional):
 
 1. Restore Megolm session keys from `backups/{user_id}/keys/` (archive + live).
 2. Sync `inbox/{user_id}/live/` — most recent messages appear first.
-3. Sync `inbox/{user_id}/archive/` in reverse date order — history fills in backwards.
+3. Sync `inbox/{user_id}/archive/` in reverse date order — client walks backwards
+   by constructing month prefixes (`archive/2025-06`, `archive/2025-05`, …).
+   History fills in backwards.
 4. Older archives can be fetched lazily (on scroll or in background).
 
 ## Reliability & idempotency
