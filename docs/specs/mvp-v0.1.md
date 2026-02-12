@@ -68,9 +68,13 @@ Key backup (Megolm session keys, encrypted with backup key):
 - `backups/{user_id}/keys/live/{session_id}.enc`
 - `backups/{user_id}/keys/archive/{batch_id}.blob`
 
+Invites (lookup index):
+
+- `invites/{invite_handle}.json` — `{ "user_id": "..." }`
+
 Media (encrypted by client):
 
-- `media/{sha256}/{filename}`
+- `media/{user_id}/{sha256}/{filename}`
 
 ## Multi-device
 
@@ -121,6 +125,23 @@ Key shares are regular envelopes with a distinct `content_type`.
 They flow through the same inbox, sync, and compaction as messages.
 ULID ordering ensures key shares precede the messages they unlock.
 
+### Megolm sessions are per-device
+
+Each device creates its own Megolm session for sending. A new session is created
+on app start and rotated after 100 messages, whichever comes first.
+Rotation triggers a key backup write, key shares to active contacts, and
+optionally a compaction request.
+
+Megolm tracks a message index internally, so two devices cannot share a session
+without index collisions.
+
+If Alice has a phone (session S2) and a laptop (session S3), Bob receives
+key shares for both and can decrypt messages from either device transparently.
+
+Alice's phone gets S3 from the key backup (written by the laptop before its
+first message). The normal sync algorithm handles this: if a message can't be
+decrypted, the client syncs the key backup for new keys from sibling devices.
+
 ### Key backup
 
 Each Megolm session key is also written as an individual encrypted object
@@ -154,12 +175,12 @@ Fields:
 
 All data follows the same lifecycle: write immutable object → compact into archive → delete originals.
 
-Compaction is triggered by Megolm session rotation:
+Compaction is triggered by the client (e.g. on Megolm session rotation,
+or after syncing and backing up received keys):
 
-1. Client rotates Megolm session.
-2. Client writes new session key to key backup.
-3. Client calls `POST /v1/inbox/compact` with a cursor.
-4. Server (any stateless instance) reads live objects up to cursor,
+1. Client ensures all Megolm keys for messages up to cursor are in key backup.
+2. Client calls `POST /v1/store/compact` with prefix and cursor.
+3. Server (any stateless instance) reads live objects up to cursor,
    writes archive blob, deletes originals.
 
 Safety properties:
@@ -176,6 +197,11 @@ Safety properties:
 
 - Bearer token per device.
 - Token issued at device registration.
+- Tokens are long-lived and do not expire.
+- Device revocation and token rotation are deferred to v0.2.
+  A compromised device already holds the sharing private key and backup
+  encryption key — revoking its token alone does not contain the breach.
+  Meaningful revocation requires backup secret rotation (re-keying).
 
 ### Register (first device)
 
@@ -230,57 +256,70 @@ Server behavior:
 Sender includes a self-addressed envelope for their own inbox,
 so sent messages are available on all devices via normal sync.
 
-### Inbox peek (sync)
+### Storage API (generic S3 proxy)
 
-`GET /v1/inbox/peek?limit=50&cursor=...`
+The server exposes three generic endpoints for all S3 operations.
+Authorization is prefix-scoped: a user's token grants access only to their own prefixes
+(`inbox/{user_id}/`, `backups/{user_id}/`, `media/{user_id}/`).
+
+The server has no knowledge of what the data means — it is an authenticated S3 proxy.
+
+#### List objects
+
+`GET /v1/store/list?prefix=...&limit=50&cursor=...`
 
 Output:
 
-- list of inbox keys (live and/or archive)
+- list of object keys matching prefix
 - `next_cursor`
 
-### Inbox fetch (by key)
+#### Get object
 
-`GET /v1/inbox/object?key=...`
+`GET /v1/store/object?key=...`
 (or redirect to presigned GET)
 
-### Inbox compact
+#### Presign PUT
 
-`POST /v1/inbox/compact`
+`POST /v1/store/presign`
 
 Input:
 
+- `key` (S3 object key)
+- `bytes` (content length, for quota enforcement)
+
+Output:
+
+- presigned PUT URL
+
+#### Compact
+
+`POST /v1/store/compact`
+
+Input:
+
+- `prefix` (e.g. `inbox/alice01/live/`)
 - `up_to` (cursor / msg_id)
 
 Server behavior:
 
-- list live objects up to cursor
+- list live objects under prefix up to cursor
 - write archive blob
 - delete compacted live objects
-
-### Media presign
-
-`POST /v1/media/presign`
-
-Input:
-
-- `sha256`, `filename`, `bytes`
-
-Output:
-
-- presigned PUT URL (and optionally GET)
 
 ## Client sync algorithm
 
 ### Normal sync (existing device)
 
-1. Call `inbox/peek` to get newest keys from live prefix.
-2. Fetch objects, decrypt payloads, store locally.
-3. Persist cursor and `msg_id` de-dup set.
+1. List `inbox/{user_id}/live/` via `store/list`, fetch new objects via `store/object`.
+2. Process key-share envelopes first (decrypt with sharing private key, store Megolm keys).
+   Write newly received Megolm keys to key backup via `store/presign`.
+3. Decrypt message envelopes, store locally. Persist cursor and `msg_id` de-dup set.
+4. If a message can't be decrypted (unknown session key from a sibling device),
+   sync key backup (`store/list` on `backups/{user_id}/keys/`) for new keys, retry.
 
 Realtime hint (optional):
 
-- if WS connected, server can push `"new_mail": true`; client then peeks.
+- if WS connected, server can push `"new_mail": true`; client then syncs.
 
 ### New device sync
 
