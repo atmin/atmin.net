@@ -35,8 +35,7 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 
 ## Open questions
 
-- Crypto stack integration approach for web (library choice, WASM packaging, key storage).
-- Inbox indexing strategy on S3 (per-message objects vs segment logs vs reverse-time keys).
+- Crypto library choice for web (Megolm via WASM — packaging, key storage).
 - Abuse controls (quotas, rate limiting) without compromising simplicity.
 
 ## Milestones (very rough)

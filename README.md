@@ -14,7 +14,7 @@ This project treats documentation as the primary interface — for humans and ma
 ## Architecture (high level)
 
 - End-to-end encryption on the client (browser-first)
-- Cryptography based on the Matrix E2EE stack (Olm/Megolm via WASM)
+- Megolm message encryption, backup-secret-derived key sharing
 - Stateless Go server
 - S3-compatible storage for messages and media
 - Sync-first delivery model (offline-friendly by design)

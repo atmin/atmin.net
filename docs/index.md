@@ -18,6 +18,9 @@ This repo is documentation-first. Specs and decisions are the source of truth.
 
 ## Glossary (minimal)
 
-- **Envelope**: an opaque, end-to-end encrypted payload plus minimal routing metadata.
-- **Inbox**: an S3 prefix where recipient device envelopes are stored for sync.
+- **Envelope**: an opaque, end-to-end encrypted payload plus minimal routing metadata. Addressed to a user, not a device.
+- **Inbox**: an S3 prefix per user where encrypted envelopes are stored for sync. All of a user's devices read from the same inbox.
 - **Sync-first**: delivery is based on syncing inbox objects; realtime is best-effort.
+- **Key backup**: Megolm session keys encrypted with the user's backup encryption key, stored on S3. Enables new devices to decrypt history.
+- **Backup secret**: a user-held secret (word list or base64) from which auth, sharing, and backup keys are derived. The single root of trust for account ownership and E2E.
+- **Compaction**: grouping live immutable objects into daily archive blobs. Triggered by session rotation, executed by any stateless server instance. Idempotent, lock-free.
