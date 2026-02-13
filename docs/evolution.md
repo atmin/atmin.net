@@ -44,7 +44,7 @@ not data loss. Index objects follow a convention:
 
 ## Usernames (invite handles → stable identifiers)
 
-- v0.1 invite handles are server-generated opaque strings.
+- v0.1 invite handles are two BIP39 words (e.g. `copper-falcon`), server-generated.
 - If users could choose their handle (with uniqueness enforcement), handles become usernames.
 - The resolve infrastructure (`invites/{handle}.json` → user_id) already supports this.
 - A user could claim multiple handles (aliases).

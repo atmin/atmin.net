@@ -46,6 +46,10 @@ See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime d
 - `device_id`: ULID
 - `msg_id`: ULID (sender-generated)
 - `session_id`: Megolm session identifier
+- `invite_handle`: two BIP39 words joined by hyphen (e.g. `copper-falcon`).
+  Server-generated from the same 2048-word English wordlist used for backup mnemonics.
+  ~22 bits of entropy (~4M combinations); sufficient for v0.1 namespace.
+  Server retries on collision.
 
 ## Storage layout (S3 keys)
 
