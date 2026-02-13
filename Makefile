@@ -1,6 +1,6 @@
-.PHONY: all build test lint fmt clean
+.PHONY: all build test lint fmt clean dev
 .PHONY: server server-build server-test server-lint server-fmt
-.PHONY: web-wasm web-build web-test web-lint web-fmt
+.PHONY: web-dev web-wasm web-build web-test web-lint web-fmt
 .PHONY: up down
 
 # --- Aggregates ---
@@ -18,7 +18,7 @@ fmt: server-fmt web-fmt
 # --- Server (Go) ---
 
 server:
-	cd server && go run .
+	set -a; . ./.env; set +a; cd server && go run .
 
 server-build:
 	cd server && go build -o ../bin/server .
@@ -34,6 +34,9 @@ server-fmt:
 
 # --- Web (TypeScript) ---
 
+web-dev:
+	cd web && npm run dev
+
 web-wasm:
 	cd web && npm run build:wasm
 
@@ -48,6 +51,16 @@ web-lint:
 
 web-fmt:
 	cd web && npm run lint:fix
+
+# --- Dev (all-in-one) ---
+
+dev:
+	docker compose up -d
+	@set -a; . ./.env; set +a; \
+	trap 'kill 0' EXIT; \
+	(cd server && go run .) & \
+	(cd web && npm run dev) & \
+	wait
 
 # --- Docker (local dev) ---
 
