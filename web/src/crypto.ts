@@ -36,7 +36,14 @@ function wrapPkcs8(prefix: Bytes, seed: Bytes): Bytes {
     return out;
 }
 
-function base64UrlDecode(s: string): Uint8Array {
+export function base64UrlEncode(bytes: Uint8Array): string {
+    return btoa(String.fromCharCode(...bytes))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+}
+
+export function base64UrlDecode(s: string): Uint8Array {
     const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
     const pad = '='.repeat((4 - (b64.length % 4)) % 4);
     return Uint8Array.from(atob(b64 + pad), (c) => c.charCodeAt(0));
