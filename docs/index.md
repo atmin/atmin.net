@@ -10,6 +10,7 @@ This repo is documentation-first. Specs and decisions are the source of truth.
 - [Decisions (ADRs)](./decisions/) (why we chose things)
 - [Evolution notes](./evolution.md) — how the system may evolve, without committing to a roadmap
 - [Scenarios](./scenarios/) — step-by-step walkthroughs, also used to generate tests
+- [Operations](./ops.md) — infrastructure, deployment, CI
 
 ## Working agreements
 
