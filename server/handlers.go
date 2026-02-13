@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -425,8 +426,78 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 			return
 		}
 
-		// TODO: implement compaction (list, read, CBOR encode, write archive, delete originals)
-		// For now, return 501 Not Implemented
-		writeError(w, APIError{http.StatusNotImplemented, "not_implemented", "Compaction not yet implemented"})
+		// Collect all keys under prefix up to boundary (inclusive).
+		// Archive keys sort after ULIDs ('a' > '0') so they are naturally excluded.
+		boundary := req.Prefix + req.UpTo
+		var toCompact []string
+		cursor := ""
+		for {
+			keys, nextCursor, err := store.ListObjects(r.Context(), req.Prefix, 100, cursor)
+			if err != nil {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "List failed"})
+				return
+			}
+			for _, k := range keys {
+				if k <= boundary {
+					toCompact = append(toCompact, k)
+				}
+			}
+			if nextCursor == "" || (len(keys) > 0 && keys[len(keys)-1] > boundary) {
+				break
+			}
+			cursor = nextCursor
+		}
+
+		if len(toCompact) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"archived":    0,
+				"archive_key": "",
+			})
+			return
+		}
+
+		// Read all objects, decode JSON into generic maps for CBOR encoding.
+		objects := make([]any, 0, len(toCompact))
+		for _, key := range toCompact {
+			data, err := store.GetObject(r.Context(), key)
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue // deleted between list and get, skip
+				}
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Read failed"})
+				return
+			}
+			var obj any
+			if err := json.Unmarshal(data, &obj); err != nil {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Decode failed"})
+				return
+			}
+			objects = append(objects, obj)
+		}
+
+		// Encode as CBOR array
+		archive, err := cbor.Marshal(objects)
+		if err != nil {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "CBOR encode failed"})
+			return
+		}
+
+		// Write archive — no object is deleted before the archive is durably written.
+		archiveKey := req.Prefix + "archive/" + time.Now().UTC().Format("2006-01-02")
+		if err := store.PutObject(r.Context(), archiveKey, archive, "application/cbor"); err != nil {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Write archive failed"})
+			return
+		}
+
+		// Delete originals
+		if err := store.DeleteObjects(r.Context(), toCompact); err != nil {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Delete failed"})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"archived":    len(objects),
+			"archive_key": archiveKey,
+		})
 	}
 }

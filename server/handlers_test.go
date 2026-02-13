@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fxamacker/cbor/v2"
+	"github.com/oklog/ulid/v2"
 )
 
 func testServer(t *testing.T) (*MemStore, http.Handler, Config) {
@@ -512,5 +515,223 @@ func TestStoreReadUserProfile(t *testing.T) {
 		"/v1/store/object?key=users/"+bob.UserID+"/profile.json", alice.Token, ""))
 	if w.Code != http.StatusOK {
 		t.Fatalf("reading other user's profile: status = %d, want 200", w.Code)
+	}
+}
+
+// --- Compaction tests ---
+
+// sendTestMessages sends n messages to the user's own inbox and returns msg_ids in order.
+func sendTestMessages(t *testing.T, mux http.Handler, user testUserInfo, n int) []string {
+	t.Helper()
+	ids := make([]string, n)
+	for i := range n {
+		msgID := ulid.Make().String()
+		ids[i] = msgID
+		envelope := map[string]any{
+			"v": 1, "to_user": user.UserID,
+			"from_user": user.UserID, "from_device": user.DeviceID,
+			"msg_id": msgID, "content_type": "megolm.message",
+			"payload": map[string]string{"session_id": "S1", "ciphertext": "dGVzdA"},
+		}
+		body, _ := json.Marshal(map[string]any{"envelopes": []any{envelope}})
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/send", user.Token, string(body)))
+		if w.Code != http.StatusOK {
+			t.Fatalf("send message %d: status = %d; body = %s", i, w.Code, w.Body.String())
+		}
+	}
+	return ids
+}
+
+func TestCompactBasic(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Send 3 messages
+	ids := sendTestMessages(t, mux, alice, 3)
+	prefix := "inbox/" + alice.UserID + "/live/"
+
+	// Compact all 3 (up_to = last msg_id)
+	body, _ := json.Marshal(map[string]any{
+		"prefix": prefix,
+		"up_to":  ids[2],
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp.Archived != 3 {
+		t.Fatalf("archived = %d, want 3", resp.Archived)
+	}
+	if resp.ArchiveKey == "" {
+		t.Fatal("archive_key is empty")
+	}
+
+	// Originals should be deleted
+	for _, id := range ids {
+		if _, err := store.GetObject(nil, prefix+id); err == nil {
+			t.Fatalf("original %s should have been deleted", id)
+		}
+	}
+
+	// Archive should exist and be valid CBOR
+	archiveData, err := store.GetObject(nil, resp.ArchiveKey)
+	if err != nil {
+		t.Fatalf("archive not found: %v", err)
+	}
+
+	var decoded []map[string]any
+	if err := cbor.Unmarshal(archiveData, &decoded); err != nil {
+		t.Fatalf("CBOR decode failed: %v", err)
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("decoded %d objects, want 3", len(decoded))
+	}
+
+	// Verify round-trip: msg_ids match
+	for i, obj := range decoded {
+		if obj["msg_id"] != ids[i] {
+			t.Fatalf("decoded[%d].msg_id = %v, want %s", i, obj["msg_id"], ids[i])
+		}
+	}
+}
+
+func TestCompactPartial(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Send 5 messages
+	ids := sendTestMessages(t, mux, alice, 5)
+	prefix := "inbox/" + alice.UserID + "/live/"
+
+	// Compact only the first 3 (up_to = ids[2])
+	body, _ := json.Marshal(map[string]any{
+		"prefix": prefix,
+		"up_to":  ids[2],
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Archived int `json:"archived"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Archived != 3 {
+		t.Fatalf("archived = %d, want 3", resp.Archived)
+	}
+
+	// First 3 deleted
+	for _, id := range ids[:3] {
+		if _, err := store.GetObject(nil, prefix+id); err == nil {
+			t.Fatalf("original %s should have been deleted", id)
+		}
+	}
+
+	// Last 2 still present
+	for _, id := range ids[3:] {
+		if _, err := store.GetObject(nil, prefix+id); err != nil {
+			t.Fatalf("message %s should still exist", id)
+		}
+	}
+}
+
+func TestCompactEmpty(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Compact an empty prefix
+	body, _ := json.Marshal(map[string]any{
+		"prefix": "inbox/" + alice.UserID + "/live/",
+		"up_to":  "ZZZZZZZZ",
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact empty status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Archived int `json:"archived"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Archived != 0 {
+		t.Fatalf("archived = %d, want 0 for empty prefix", resp.Archived)
+	}
+}
+
+func TestCompactOtherUserForbidden(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	bob := registerTestUser(t, mux, "Bob")
+
+	body, _ := json.Marshal(map[string]any{
+		"prefix": "inbox/" + bob.UserID + "/live/",
+		"up_to":  "ZZZZZZZZ",
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for other user's prefix", w.Code)
+	}
+}
+
+func TestCompactIdempotent(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	ids := sendTestMessages(t, mux, alice, 2)
+	prefix := "inbox/" + alice.UserID + "/live/"
+	compactBody, _ := json.Marshal(map[string]any{
+		"prefix": prefix,
+		"up_to":  ids[1],
+	})
+
+	// First compaction
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(compactBody)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("first compact: status = %d", w.Code)
+	}
+
+	var resp1 struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp1)
+	archive1, _ := store.GetObject(nil, resp1.ArchiveKey)
+
+	// Second compaction of same prefix — originals already deleted, so archived=0
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(compactBody)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second compact: status = %d", w.Code)
+	}
+
+	var resp2 struct {
+		Archived int `json:"archived"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp2)
+	if resp2.Archived != 0 {
+		t.Fatalf("second compact archived = %d, want 0 (originals already gone)", resp2.Archived)
+	}
+
+	// Original archive still intact
+	archive1After, err := store.GetObject(nil, resp1.ArchiveKey)
+	if err != nil {
+		t.Fatalf("archive disappeared after second compact: %v", err)
+	}
+	if string(archive1) != string(archive1After) {
+		t.Fatal("archive was modified by second compaction")
 	}
 }
