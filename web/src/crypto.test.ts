@@ -1,16 +1,16 @@
-import { describe, it, expect } from 'vitest';
 import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
+import { describe, expect, it } from 'vitest';
 import {
-    generateBackupSecret,
+    backupDecrypt,
+    backupEncrypt,
     deriveKeys,
+    eciesDecrypt,
+    eciesEncrypt,
+    generateBackupSecret,
+    importX25519PublicKey,
     signAuthProof,
     verifyAuthProof,
-    eciesEncrypt,
-    eciesDecrypt,
-    backupEncrypt,
-    backupDecrypt,
-    importX25519PublicKey,
 } from './crypto.js';
 
 describe('Web Crypto', () => {

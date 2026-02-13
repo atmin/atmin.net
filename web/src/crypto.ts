@@ -103,6 +103,7 @@ export async function deriveKeys(secret: Uint8Array): Promise<DerivedKeys> {
         ['sign'],
     );
     const authJwk = await crypto.subtle.exportKey('jwk', authPrivateKey);
+    // biome-ignore lint/style/noNonNullAssertion: Ed25519 JWK always has x
     const authPublicKeyBytes = base64UrlDecode(authJwk.x!);
     const authPublicKey = await crypto.subtle.importKey(
         'raw',
@@ -121,6 +122,7 @@ export async function deriveKeys(secret: Uint8Array): Promise<DerivedKeys> {
         ['deriveBits'],
     );
     const sharingJwk = await crypto.subtle.exportKey('jwk', sharingPrivateKey);
+    // biome-ignore lint/style/noNonNullAssertion: X25519 JWK always has x
     const sharingPublicKeyBytes = base64UrlDecode(sharingJwk.x!);
     const sharingPublicKey = await crypto.subtle.importKey(
         'raw',
