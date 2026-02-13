@@ -285,16 +285,68 @@ Libraries: Go `github.com/fxamacker/cbor`, JS `cbor-x`.
 - Readers tolerate duplicates via `msg_id` de-duplication.
 - No locking required. Stateless instances can compact independently.
 
+## Binary encoding
+
+All binary values in JSON API requests and responses (public keys, ciphertexts, IVs)
+are encoded as **unpadded base64url** (RFC 4648 §5). This matches Web Crypto's
+native export format and is URL-safe.
+
+## Object schemas
+
+### `users/{user_id}/profile.json`
+
+```json
+{
+  "user_id": "01HWQA...",
+  "auth_public_key": "<base64url Ed25519, 32 bytes>",
+  "sharing_public_key": "<base64url X25519, 32 bytes>",
+  "created_at": "2025-01-15T10:00:00Z"
+}
+```
+
+### `users/{user_id}/devices/{device_id}.json`
+
+```json
+{
+  "device_id": "01HWQA...",
+  "device_label": "Alice's laptop",
+  "created_at": "2025-01-15T10:00:00Z"
+}
+```
+
+## Error responses
+
+All error responses use a consistent shape:
+
+```json
+{
+  "error": "device_revoked",
+  "message": "Device has been revoked"
+}
+```
+
+Error codes used by the server:
+
+| HTTP | `error` | Meaning |
+|------|---------|---------|
+| 400 | `bad_request` | Malformed input, missing fields |
+| 401 | `unauthorized` | Missing or invalid token |
+| 403 | `device_revoked` | Device file deleted (triggers client self-wipe) |
+| 403 | `forbidden` | Prefix access denied |
+| 404 | `not_found` | Object or invite does not exist |
+| 413 | `quota_exceeded` | Upload exceeds storage quota |
+
 ## API (HTTP)
 
 ### Auth
 
-- Bearer token per device.
-- Token issued at device registration.
-- Tokens are long-lived and do not expire.
-- Server validates device existence on each request:
-  `users/{user_id}/devices/{device_id}.json` — S3 HEAD, cached with short TTL.
-  Missing file = reject request.
+- Bearer token per device: `Authorization: Bearer <token>`.
+- Token issued at device registration; long-lived, no expiry.
+- **Token format**: `base64url(user_id || "." || device_id || "." || HMAC-SHA256(server_secret, user_id || "." || device_id))`.
+  Opaque to the client. Server parses `user_id` and `device_id` from the token
+  and verifies the HMAC — no database lookup needed.
+- **Revocation check**: server does S3 HEAD on `users/{user_id}/devices/{device_id}.json`,
+  cached with short TTL. Missing file = `403 device_revoked`.
 - Backup secret rotation (re-keying) is deferred.
   See [evolution notes](../evolution.md#device-revocation-and-key-rotation).
 
@@ -305,12 +357,32 @@ Libraries: Go `github.com/fxamacker/cbor`, JS `cbor-x`.
 Input:
 
 - `device_label`
-- `auth_public_key`
-- `sharing_public_key`
+- `auth_public_key` (base64url Ed25519)
+- `sharing_public_key` (base64url X25519)
+
+Server generates `user_id`, `device_id` (both ULIDs), `invite_handle` (two BIP39 words),
+and `token`.
 
 Output:
 
 - `user_id`, `device_id`, `token`, `invite_handle`
+
+This is the only unauthenticated endpoint (no existing token to present).
+
+### Auth proof
+
+Add-device and revoke-device require an `auth_proof`: an Ed25519 signature
+over a JSON payload containing a timestamp.
+
+```json
+{
+  "payload": { "user_id": "...", "device_id": "...", "timestamp": "2025-01-15T10:30:00Z" },
+  "signature": "<base64url Ed25519 signature>"
+}
+```
+
+Server verifies the signature against `auth_public_key` from `profile.json`.
+**Replay protection**: reject if `timestamp` is more than 5 minutes from server time.
 
 ### Add device
 
@@ -319,7 +391,7 @@ Output:
 Input:
 
 - `user_id`
-- `auth_proof` (signature over `{ user_id, device_id, timestamp }`)
+- `auth_proof` (client generates `device_id` as ULID, includes it in signed payload)
 - `device_label`
 
 Output:
@@ -333,7 +405,7 @@ Output:
 Input:
 
 - `device_id`
-- `auth_proof` (signature over `{ user_id, device_id, timestamp }`)
+- `auth_proof`
 
 Server deletes `users/{user_id}/devices/{device_id}.json`.
 Subsequent API calls from the revoked device are rejected with `403 device_revoked`.
@@ -363,7 +435,11 @@ Input:
 Server behavior:
 
 - validate sender token
-- write each envelope to recipient's inbox prefix
+- verify `from_user` matches token's `user_id` and `from_device` matches token's `device_id`
+- write each envelope to the addressed user's inbox prefix
+
+Send is the only endpoint that writes to other users' prefixes.
+The storage API (below) is restricted to the caller's own prefixes.
 
 Sender includes a self-addressed envelope for their own inbox,
 so sent messages are available on all devices via normal sync.
