@@ -288,10 +288,11 @@ Libraries: Go `github.com/fxamacker/cbor`, JS `cbor-x`.
 - Bearer token per device.
 - Token issued at device registration.
 - Tokens are long-lived and do not expire.
-- Device revocation and token rotation are deferred to v0.2.
-  A compromised device already holds the sharing private key and backup
-  encryption key — revoking its token alone does not contain the breach.
-  Meaningful revocation requires backup secret rotation (re-keying).
+- Server validates device existence on each request:
+  `users/{user_id}/devices/{device_id}.json` — S3 HEAD, cached with short TTL.
+  Missing file = reject request.
+- Backup secret rotation (re-keying) is deferred.
+  See [evolution notes](../evolution.md#device-revocation-and-key-rotation).
 
 ### Register (first device)
 
@@ -320,6 +321,18 @@ Input:
 Output:
 
 - `device_id`, `token`
+
+### Revoke device
+
+`POST /v1/devices/revoke`
+
+Input:
+
+- `device_id`
+- `auth_proof` (signature over `{ user_id, device_id, timestamp }`)
+
+Server deletes `users/{user_id}/devices/{device_id}.json`.
+Subsequent API calls from the revoked device are rejected (device existence check).
 
 ### Resolve invite
 

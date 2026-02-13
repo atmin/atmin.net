@@ -38,6 +38,28 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 - No attempt to hide who talks to whom (traffic analysis resistance is out of scope).
 - If all devices are lost and no backup key exists, history is unrecoverable by design.
 
+### Device compromise
+
+A compromised device (lost phone, unlocked browser) gives the attacker:
+
+- All locally stored chat history (IndexedDB plaintext).
+- Sharing private key → can decrypt all key shares (past and in-flight).
+- Backup encryption key → can decrypt all key backups on S3.
+- Device token → can sync inbox, read new messages, send as the user.
+
+The attacker **cannot** add new devices (requires the backup secret, which is not on-device).
+
+**v0.1 mitigation**: token revocation. Revoking a device deletes its device file;
+the server rejects all subsequent API calls. Without API access, the attacker's
+cryptographic keys are useless — they cannot obtain new ciphertexts to decrypt.
+Damage is limited to whatever was already downloaded before revocation.
+
+Backup secret rotation (defense-in-depth against compound threats) is deferred.
+See [evolution notes](./evolution.md#device-revocation-and-key-rotation).
+
+This is inherent to any E2E messenger where keys must be available on-device for operation.
+OS-level device lock (PIN, biometrics) is the first line of defense — not the application.
+
 ## Open questions
 
 - Abuse controls (quotas, rate limiting) without compromising simplicity.
