@@ -11,11 +11,7 @@ Status: draft (living document)
 
 ## Non-goals
 
-- Phone discovery / address book matching
-- Groups
-- Presence / typing indicators
-- Server-side search
-- Perfect realtime delivery (best-effort only)
+See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime delivery (best-effort only).
 
 ## Components
 
@@ -38,12 +34,11 @@ Status: draft (living document)
 - Stateless HTTP API (and optional WS).
 - S3 client (S3-compatible endpoint).
 - Minimal auth (device token).
-- No crypto awareness — server handles opaque blobs.
 
 ### Storage (S3-compatible)
 
 - Bucket/prefix layout; objects are immutable.
-- One storage pattern everywhere: write immutable object → compact into archive → delete originals.
+- Single lifecycle everywhere: write → compact → delete (see [Compaction](#compaction)).
 
 ## IDs & naming
 
@@ -180,9 +175,6 @@ and clients continuously sync and replay them to materialize chat state.
 There is no server-side history rewriting.
 
 ## Envelope format
-
-Messages and key shares are addressed to users, not devices.
-The server does not need to know the recipient's device topology.
 
 Live envelopes are JSON (one per S3 object):
 

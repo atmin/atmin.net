@@ -13,11 +13,16 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 - Simple, horizontally scalable server (stateless where possible).
 - S3-compatible storage for messages and media.
 
-## Non-goals (near-term)
+## Non-goals
+
+**Deferred** (likely future, not v0.1):
 
 - Phone number or address book based discovery.
-- Groups, presence (typing/online), read receipts UX polish.
-- Server-side search, moderation, content analysis.
+- Groups, presence (typing/online), read receipts.
+
+**Out of scope** (no plans):
+
+- Server-side search, moderation, or content analysis (server can't read E2E content).
 - Compatibility with Signal/Matrix networks.
 
 ## Principles
@@ -35,7 +40,6 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 
 ## Open questions
 
-- Crypto library choice for web (Megolm via WASM — packaging, key storage).
 - Abuse controls (quotas, rate limiting) without compromising simplicity.
 
 ## Milestones (very rough)
