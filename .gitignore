@@ -38,3 +38,6 @@ node_modules/
 web/crypto/target/
 web/crypto/pkg/
 web/crypto/pkg-node/
+
+# Build output
+bin/
