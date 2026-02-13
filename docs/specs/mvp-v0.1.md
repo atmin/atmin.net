@@ -22,9 +22,10 @@ Status: draft (living document)
 ### Client (PWA)
 
 - Crypto:
-    - Megolm for message encryption (even for 1:1)
-    - Key shares encrypted with recipient's public key (derived from backup secret)
-    - Via WASM (library TBD)
+    - Megolm for message encryption (even for 1:1) — via vodozemac WASM (~188KB)
+    - Key shares encrypted with ECIES (X25519 + HKDF-SHA256 + AES-256-GCM) — via Web Crypto API
+    - No Olm: the user-level sharing key replaces device-to-device key exchange
+    - HKDF key derivation, Ed25519 signing, AES-256-GCM — all via Web Crypto API
 - Storage:
     - Keys/session state: IndexedDB
     - Chat history: IndexedDB
@@ -80,18 +81,29 @@ Media (encrypted by client):
 
 ### Backup secret
 
-At first registration, the client generates a random backup secret
-(displayed as a word list or base64). The user saves it in a password manager.
+At first registration, the client generates a random backup secret:
+128 bits (16 bytes), encoded as a 12-word BIP39 mnemonic.
+The user saves it in a password manager.
 
-Three keys are derived from the backup secret via HKDF:
+Three keys are derived from the backup secret via HKDF-SHA256:
 
-- **Auth key** (asymmetric) — proves account ownership when adding devices.
+```
+PRK = HKDF-Extract(salt="atmin.net", ikm=backup_secret)
+
+auth_seed    = HKDF-Expand(PRK, info="auth-v1",    L=32)  → Ed25519 keypair
+sharing_seed = HKDF-Expand(PRK, info="sharing-v1", L=32)  → X25519 keypair
+backup_key   = HKDF-Expand(PRK, info="backup-v1",  L=32)  → AES-256-GCM key
+```
+
+Version suffixes (`-v1`) allow future derivation path changes without changing the backup secret.
+
+- **Auth key** (Ed25519) — proves account ownership when adding devices.
   Public half stored in `profile.json`.
   Private half used only transiently during device addition, then discarded.
-- **Sharing key** (asymmetric) — public half stored in `profile.json`.
-  Other users encrypt Megolm session keys with it.
+- **Sharing key** (X25519) — public half stored in `profile.json`.
+  Other users encrypt Megolm session keys with it via ECIES.
   Private half stored on device (IndexedDB) for ongoing key-share decryption.
-- **Backup encryption key** (symmetric) — encrypts key backups on S3.
+- **Backup encryption key** (AES-256-GCM) — encrypts key backups on S3.
   Stored on device (IndexedDB) for ongoing key backup writes.
   Never transmitted.
 
@@ -114,12 +126,23 @@ Server verifies against the stored public key.
 ### Key sharing
 
 When Bob starts a conversation with Alice, he creates a Megolm session
-and encrypts the session key with Alice's sharing public key (from her profile).
-He sends this as a key-share envelope to Alice's inbox.
+and encrypts the session key with Alice's sharing public key (from her profile)
+using ECIES:
+
+1. Generate ephemeral X25519 keypair
+2. ECDH: `shared = ephemeral_private × alice_sharing_public`
+3. `key = HKDF-SHA256(ikm=shared, salt="", info="atmin.net key share", L=32)`
+4. `ciphertext = AES-256-GCM(key, session_key_bytes)`
+
+He sends this as a key-share envelope to Alice's inbox (ephemeral public key + IV + ciphertext).
 
 All of Alice's devices can decrypt it — they all derive the same sharing private key
 from the backup secret. No device enumeration needed. New devices added later
 can decrypt old key shares from the inbox archive.
+
+No Olm (Double Ratchet) is used. The sharing key is static and user-level,
+so Olm's per-message forward secrecy provides no benefit — if the sharing private key
+leaks, the backup secret is already compromised.
 
 Key shares are regular envelopes with a distinct `content_type`.
 They flow through the same inbox, sync, and compaction as messages.
@@ -161,15 +184,72 @@ There is no server-side history rewriting.
 Messages and key shares are addressed to users, not devices.
 The server does not need to know the recipient's device topology.
 
-Fields:
+Live envelopes are JSON (one per S3 object):
 
-- `v`
-- `to_user`
-- `from_user`, `from_device`
-- `msg_id`
-- `sent_at`
-- `content_type` (e.g. `megolm.message`, `megolm.key_share`)
-- `payload` (opaque to server)
+```json
+{
+  "v": 1,
+  "to_user": "01HWQA...",
+  "from_user": "01HWQA...",
+  "from_device": "01HWQA...",
+  "msg_id": "01HWQA...",
+  "sent_at": "2025-01-15T10:30:00Z",
+  "content_type": "megolm.message",
+  "payload": { ... }
+}
+```
+
+### Payload by content type
+
+**`megolm.message`** — Megolm-encrypted content:
+
+```json
+"payload": {
+  "session_id": "...",
+  "ciphertext": "<base64 Megolm ciphertext>"
+}
+```
+
+Megolm inner plaintext (what gets encrypted/decrypted):
+
+```json
+{"type": "text", "body": "Hey Alice"}
+```
+
+Media reference (inside Megolm-encrypted plaintext):
+
+```json
+{
+  "type": "media",
+  "body": "photo.jpg",
+  "file": {
+    "url": "media/<user_id>/<sha256>/photo.jpg",
+    "key": "<base64 AES-256-GCM key>",
+    "iv": "<base64 12-byte IV>",
+    "sha256": "<hex>"
+  }
+}
+```
+
+**`megolm.key_share`** — ECIES-encrypted Megolm session key:
+
+```json
+"payload": {
+  "ephemeral_key": "<base64 X25519 public key, 32 bytes>",
+  "iv": "<base64 12-byte IV>",
+  "ciphertext": "<base64 AES-256-GCM ciphertext of session key>"
+}
+```
+
+### Key backup objects
+
+Individual live key backups are JSON, encrypted with the backup encryption key:
+
+```json
+{"iv": "<base64 12-byte IV>", "ciphertext": "<base64 AES-256-GCM>"}
+```
+
+The plaintext is the Megolm session key (base64, as returned by `session_key()`).
 
 ## Compaction
 
@@ -180,10 +260,30 @@ or after syncing and backing up received keys):
 
 1. Client ensures all Megolm keys for messages up to cursor are in key backup.
 2. Client calls `POST /v1/store/compact` with prefix and cursor.
-3. Server (any stateless instance) reads live objects up to cursor,
-   writes archive blob, deletes originals.
+3. Server (any stateless instance) reads live JSON objects up to cursor,
+   writes CBOR archive, deletes originals.
 
-Safety properties:
+### Archive format
+
+Archives use CBOR (RFC 8949) — a binary format that supports raw byte strings
+(no base64 overhead), is self-describing, and extensible.
+
+Each archive object is a CBOR array of envelope maps:
+
+```
+CBOR array [
+  {v: 1, to_user: h'...', from_user: h'...', msg_id: h'...', ...
+   payload: {session_id: h'...', ciphertext: h'...'}},
+  ...
+]
+```
+
+ULIDs and ciphertext are stored as CBOR byte strings (raw, not base64).
+This saves ~40% over JSON+base64 for typical messages.
+
+Libraries: Go `github.com/fxamacker/cbor`, JS `cbor-x`.
+
+### Safety properties
 
 - Compaction is idempotent. Two instances compacting the same messages produce identical output.
 - No object is deleted before the archive is durably written.

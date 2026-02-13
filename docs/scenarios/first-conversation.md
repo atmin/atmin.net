@@ -9,8 +9,9 @@ Two users register, exchange an invite, establish E2E, and send messages.
 
 ## 1. Alice registers
 
-Client generates a backup secret, derives three keys via HKDF,
-displays the backup secret for Alice to save in her password manager.
+Client generates a 128-bit backup secret (displayed as a 12-word BIP39 mnemonic),
+derives three keys via HKDF-SHA256 (auth Ed25519, sharing X25519, backup AES-256-GCM),
+displays the mnemonic for Alice to save in her password manager.
 
 ```
 POST /v1/register
@@ -74,7 +75,7 @@ POST /v1/store/presign
 → { "presigned_url": "..." }
 
 PUT <presigned_url>
-← S1 session key, encrypted with Bob's backup encryption key
+← {"iv": "<base64>", "ciphertext": "<base64 AES-256-GCM of S1 session key>"}
 ```
 
 **Send** — three envelopes in one call:
@@ -90,7 +91,11 @@ POST /v1/send
       "msg_id": "msg001",
       "sent_at": "...",
       "content_type": "megolm.key_share",
-      "payload": "<S1 session key encrypted with alice_sharing_pub>"
+      "payload": {
+        "ephemeral_key": "<base64 X25519 pub>",
+        "iv": "<base64 12-byte IV>",
+        "ciphertext": "<base64 ECIES(alice_sharing_pub, S1 session key)>"
+      }
     },
     {
       "v": 1,
@@ -99,7 +104,10 @@ POST /v1/send
       "msg_id": "msg002",
       "sent_at": "...",
       "content_type": "megolm.message",
-      "payload": "<'Hey Alice' encrypted with Megolm session S1>"
+      "payload": {
+        "session_id": "S1",
+        "ciphertext": "<base64 Megolm(S1, {type: 'text', body: 'Hey Alice'})>"
+      }
     },
     {
       "v": 1,
@@ -108,7 +116,10 @@ POST /v1/send
       "msg_id": "msg002",
       "sent_at": "...",
       "content_type": "megolm.message",
-      "payload": "<'Hey Alice' encrypted with Megolm session S1>"
+      "payload": {
+        "session_id": "S1",
+        "ciphertext": "<base64 Megolm(S1, {type: 'text', body: 'Hey Alice'})>"
+      }
     }
   ]
 }
@@ -135,7 +146,7 @@ GET /v1/store/object?key=inbox/alice01/live/msg002
 ```
 
 Processing:
-1. `msg001` has `content_type: megolm.key_share` — Alice decrypts with her sharing private key, stores Bob's Megolm session key `S1` in IndexedDB.
+1. `msg001` has `content_type: megolm.key_share` — Alice does ECDH (ephemeral_key × sharing_private), derives AES key via HKDF, decrypts to get Megolm session key `S1`. Stores in IndexedDB.
 2. Alice writes the received key to her own backup:
    ```
    POST /v1/store/presign
@@ -172,19 +183,29 @@ POST /v1/send
       "to_user": "bob01", ...,
       "content_type": "megolm.key_share",
       "msg_id": "msg003",
-      "payload": "<S2 session key encrypted with bob_sharing_pub>"
+      "payload": {
+        "ephemeral_key": "<base64 X25519 pub>",
+        "iv": "<base64>",
+        "ciphertext": "<base64 ECIES(bob_sharing_pub, S2 session key)>"
+      }
     },
     {
       "to_user": "bob01", ...,
       "content_type": "megolm.message",
       "msg_id": "msg004",
-      "payload": "<'Hey Bob' encrypted with Megolm session S2>"
+      "payload": {
+        "session_id": "S2",
+        "ciphertext": "<base64 Megolm(S2, {type: 'text', body: 'Hey Bob'})>"
+      }
     },
     {
       "to_user": "alice01", ...,
       "content_type": "megolm.message",
       "msg_id": "msg004",
-      "payload": "<'Hey Bob' encrypted with Megolm session S2>"
+      "payload": {
+        "session_id": "S2",
+        "ciphertext": "<base64 Megolm(S2, {type: 'text', body: 'Hey Bob'})>"
+      }
     }
   ]
 }
