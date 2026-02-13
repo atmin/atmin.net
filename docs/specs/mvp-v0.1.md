@@ -332,7 +332,12 @@ Input:
 - `auth_proof` (signature over `{ user_id, device_id, timestamp }`)
 
 Server deletes `users/{user_id}/devices/{device_id}.json`.
-Subsequent API calls from the revoked device are rejected (device existence check).
+Subsequent API calls from the revoked device are rejected with `403 device_revoked`.
+
+When a client receives `403 device_revoked`, it must wipe all local state
+(IndexedDB keys, session keys, chat history, device token) and return to
+the welcome screen. This is best-effort — an offline attacker won't trigger it —
+but any network request from the stolen device causes self-wipe.
 
 ### Resolve invite
 
