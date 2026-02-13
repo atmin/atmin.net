@@ -135,9 +135,7 @@ All of Alice's devices can decrypt it — they all derive the same sharing priva
 from the backup secret. No device enumeration needed. New devices added later
 can decrypt old key shares from the inbox archive.
 
-No Olm (Double Ratchet) is used. The sharing key is static and user-level,
-so Olm's per-message forward secrecy provides no benefit — if the sharing private key
-leaks, the backup secret is already compromised.
+No Olm — see [ADR-0002](../decisions/adr-0002-ecies-not-olm.md) for the full rationale.
 
 Key shares are regular envelopes with a distinct `content_type`.
 They flow through the same inbox, sync, and compaction as messages.
