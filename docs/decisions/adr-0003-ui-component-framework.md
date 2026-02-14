@@ -1,14 +1,14 @@
 # ADR-0003: UI component framework
 
-Status: **In Progress**
-Date: 2026-02-13
+Status: **Accepted**
+Date: 2026-02-14
 
 ## Context
 
-The web client needs interactive UI components (dialogs, menus, toasts, form inputs)
-and eventually a markdown-capable message composer. Building these from scratch would
-be an unwise spending of innovation tokens -- accessibility, keyboard navigation, focus
-management, and touch handling are hard, solved problems.
+The web client needs interactive UI components (dialogs, menus, toasts, form inputs).
+Building these from scratch would be an unwise spending of innovation tokens --
+accessibility, keyboard navigation, focus management, and touch handling are hard,
+solved problems.
 
 We currently have React 19 + Tailwind CSS v4. Tailwind is negotiable -- if the chosen
 framework provides its own design system, Tailwind may be redundant.
@@ -18,7 +18,10 @@ layer already adds weight. Mobile support is critical.
 
 ## Decision
 
-TBD -- evaluating options below.
+Use **shadcn/ui** (Radix Primitives + Tailwind) for UI components.
+
+Add **`@tanstack/react-virtual`** when message list virtualization is needed (rendering
+1000+ messages efficiently).
 
 ## Options: Component Framework
 
@@ -104,51 +107,9 @@ What shadcn/ui wraps, without the pre-styling. ~30+ unstyled components.
 - Note: original Radix maintainers joined MUI; Base UI positioned as successor.
 - If using Radix, shadcn/ui is strictly better (same primitives + free styling).
 
-## Options: Message Composer
-
-Start with a plain `<textarea>` + `marked` for rendering. Upgrade path:
-
-### textarea + marked (start here)
-
-- **Bundle:** ~12 kB (marked) + 0 (native textarea)
-- **Mobile:** Perfect (native element)
-- **Compact input:** Trivial (rows="1" + auto-resize)
-- **Markdown:** Source editing, rendered on display. No syntax highlighting in input.
-- **Shortcuts:** DIY (~50 lines for Ctrl+B/I/K)
-
-How Discord and Reddit originally worked. Minimal, proven, zero risk.
-
-### Tiptap (upgrade path)
-
-- **Bundle:** ~30-45 kB gzipped (headless, tree-shakeable)
-- **Mobile:** Good (v3.0 explicit mobile improvements)
-- **Compact input:** Best fit -- headless means you build exactly the chat input you want
-- **Markdown:** WYSIWYG with `tiptap-markdown` for serialization. Input rules auto-convert
-  `**bold**` as you type.
-- **Shortcuts:** Built-in (Ctrl+B/I/K and more)
-
-Best option if we want Slack-like WYSIWYG composer. Headless = style it as compact input.
-Mantine includes `@mantine/tiptap` integration if we go that route.
-
-### CodeMirror 6 (alternative)
-
-- **Bundle:** ~40-50 kB gzipped (minimal markdown setup)
-- **Mobile:** Good (v6 rework for mobile)
-- **Compact input:** Doable with effort
-- **Markdown:** Source editing with excellent syntax highlighting
-- **Shortcuts:** DIY
-
-Best if users are technical and we want raw markdown with syntax highlighting.
-
-### Not recommended
-
-- **MDXEditor** -- 851 kB gzipped, document-oriented
-- **Milkdown** -- document-editor paradigm, poor chat fit
-- **Monaco** -- 4 MB+, broken mobile support
-
 ## Analysis
 
-The real choice for component framework is between two approaches:
+The real choice for component framework is between three approaches:
 
 **A) shadcn/ui** -- Keep Tailwind, copy-paste components, lightest bundle, largest
 ecosystem. Add tanstack-virtual for message list. Styling is already done for you.
@@ -156,22 +117,43 @@ ecosystem. Add tanstack-virtual for message list. Styling is already done for yo
 **B) React Aria** -- Drop or keep Tailwind, best accessibility + mobile, built-in
 virtualization. More upfront styling work. Smaller community.
 
-**C) Mantine** -- Drop Tailwind, get everything out of the box including tiptap
-integration. Medium bundle. Risk: opinionated styling may need fighting later.
-
-For message composer: start with textarea + marked (zero risk), upgrade to Tiptap
-when WYSIWYG becomes a priority.
-
-## Leaning
-
-TBD -- need to weigh:
-- Is built-in virtualization (React Aria) worth the smaller ecosystem?
-- Is Mantine's batteries-included approach worth the styling opinions?
-- Is shadcn/ui's Tailwind + copy-paste model the right balance of control and speed?
+**C) Mantine** -- Drop Tailwind, get everything out of the box. Medium bundle. Risk:
+opinionated styling may need fighting later.
 
 ## Consequences
 
-TBD pending decision.
+### Positive
+
+- **Minimal bundle impact** -- Only ship components we actually use. Each component is
+  ~2-10 kB (Radix primitive + Tailwind classes). No framework runtime overhead.
+- **Full control** -- Component code lives in our repo. We can read it, modify it, and fix
+  bugs without waiting for upstream. No black box.
+- **Tailwind stays** -- We already have it wired. No need to remove it or learn a new
+  styling system. shadcn/ui is designed for Tailwind.
+- **Consistent design** -- All components share the same theme system via CSS variables.
+  Cherry-pick components and they follow common design principles.
+- **Huge ecosystem** -- Large community with 3rd-party component collections, themes, and
+  examples. shadcn/ui has become the de facto standard for Tailwind + React projects.
+- **Excellent accessibility** -- Radix Primitives provide WAI-ARIA, keyboard navigation,
+  focus management, and screen reader support out of the box.
+- **No lock-in** -- It's just code in our repo. Migrating away means replacing components
+  one at a time, not a framework rewrite.
+
+### Negative
+
+- **No built-in virtualization** -- Must add `@tanstack/react-virtual` separately for
+  long message lists. This adds ~5 kB and integration work.
+- **Manual updates** -- Updating a component means re-running the CLI to copy new source.
+  Not automatic like npm package updates. In practice, Radix API changes are rare and
+  we can choose when to update.
+- **Component code in our repo** -- Each added component increases our codebase size. We
+  own the maintenance (but also the control). Estimated 10-15 components needed for v0.1.
+
+### Neutral
+
+- **Styling work** -- Components come pre-styled with Tailwind, but fine-tuning colors,
+  spacing, and animations for our brand will require CSS variable tweaks. This is expected
+  for any headless/unstyled framework.
 
 ## References
 
@@ -181,5 +163,3 @@ TBD pending decision.
 - [Mantine v7](https://mantine.dev)
 - [Base UI v1.0](https://base-ui.com) (new, from MUI team + ex-Radix maintainers)
 - [Headless UI](https://headlessui.com)
-- [Tiptap](https://tiptap.dev)
-- [CodeMirror 6](https://codemirror.net)
