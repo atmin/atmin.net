@@ -67,6 +67,7 @@ export interface Envelope {
     from_device: string;
     msg_id: string;
     content_type: string;
+    timestamp?: number; // Unix timestamp in milliseconds
     payload: Record<string, string>;
 }
 
@@ -188,6 +189,7 @@ export async function sendTextMessage(
         from_device: fromDeviceId,
         msg_id: crypto.randomUUID(),
         content_type: 'text/plain',
+        timestamp: Date.now(),
         payload: {
             ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
             iv: base64UrlEncode(encrypted.iv),
@@ -196,4 +198,70 @@ export async function sendTextMessage(
     };
 
     return send(token, [envelope]);
+}
+
+// Helper to fetch and decrypt messages from inbox
+export interface DecryptedMessage {
+    id: string;
+    fromUser: string;
+    fromDevice: string;
+    text: string;
+    timestamp: Date;
+}
+
+export async function fetchMessages(
+    token: string,
+    userId: string,
+    sharingPrivateKey: CryptoKey,
+): Promise<DecryptedMessage[]> {
+    const { eciesDecrypt, base64UrlDecode } = await import('./crypto');
+
+    // List all messages in inbox
+    const prefix = `inbox/${userId}/live/`;
+    const listRes = await storeList(token, prefix);
+
+    const messages: DecryptedMessage[] = [];
+
+    // Fetch and decrypt each message
+    for (const key of listRes.keys) {
+        try {
+            // Fetch envelope
+            const blob = await storeGet(token, key);
+            const envelope = JSON.parse(
+                new TextDecoder().decode(blob),
+            ) as Envelope;
+
+            // Only handle text/plain messages for now
+            if (envelope.content_type !== 'text/plain') continue;
+
+            // Decrypt payload
+            const encryptedPayload = {
+                ephemeralKey: base64UrlDecode(envelope.payload.ephemeral_key),
+                iv: base64UrlDecode(envelope.payload.iv),
+                ciphertext: base64UrlDecode(envelope.payload.ciphertext),
+            };
+
+            const plaintext = await eciesDecrypt(
+                sharingPrivateKey,
+                encryptedPayload,
+            );
+            const text = new TextDecoder().decode(plaintext);
+
+            messages.push({
+                id: envelope.msg_id,
+                fromUser: envelope.from_user,
+                fromDevice: envelope.from_device,
+                text,
+                timestamp: new Date(envelope.timestamp ?? 0),
+            });
+        } catch (error) {
+            console.error(`Failed to decrypt message ${key}:`, error);
+            // Skip messages we can't decrypt
+        }
+    }
+
+    // Sort by timestamp
+    return messages.sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    );
 }

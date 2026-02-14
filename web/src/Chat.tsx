@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { resolve, sendTextMessage } from './api';
+import { fetchMessages, resolve, sendTextMessage } from './api';
+import { loadMessages as loadFromDB, saveMessages } from './db';
 import type { Session } from './session';
 
 interface Message {
@@ -21,6 +22,46 @@ export default function Chat({ session }: Props) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputValue, setInputValue] = useState('');
     const [sending, setSending] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    // Load messages on mount: IndexedDB first (instant), then sync from server
+    useEffect(() => {
+        const loadAndSync = async () => {
+            try {
+                // Load from IndexedDB first (instant)
+                const cached = await loadFromDB(session.userId);
+                if (cached.length > 0) {
+                    setMessages(
+                        cached.map((m) => ({
+                            id: m.id,
+                            text: m.text,
+                            timestamp: new Date(m.timestamp),
+                        })),
+                    );
+                    setLoading(false);
+                }
+
+                // Fetch from server (source of truth)
+                const synced = await fetchMessages(
+                    session.token,
+                    session.userId,
+                    session.sharingPrivateKey,
+                );
+
+                // Update state with server messages
+                setMessages(synced);
+
+                // Save to IndexedDB
+                await saveMessages(session.userId, synced);
+            } catch (error) {
+                console.error('Failed to load messages:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadAndSync();
+    }, [session.token, session.userId, session.sharingPrivateKey]);
 
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -58,13 +99,16 @@ export default function Chat({ session }: Props) {
                 text,
             );
 
-            // Add to local display
-            const newMessage: Message = {
-                id: crypto.randomUUID(),
-                text,
-                timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, newMessage]);
+            // Refetch messages to show the sent message
+            const synced = await fetchMessages(
+                session.token,
+                session.userId,
+                session.sharingPrivateKey,
+            );
+
+            // Update state and IndexedDB
+            setMessages(synced);
+            await saveMessages(session.userId, synced);
             setInputValue('');
         } catch (error) {
             console.error('Failed to send message:', error);
@@ -94,7 +138,13 @@ export default function Chat({ session }: Props) {
             {/* Messages area */}
             <div className="flex-1 overflow-y-auto">
                 <div className="mx-auto max-w-2xl p-4">
-                    {messages.length === 0 ? (
+                    {loading ? (
+                        <div className="flex h-96 items-center justify-center text-stone-400">
+                            <div className="text-center">
+                                <p>Loading messages...</p>
+                            </div>
+                        </div>
+                    ) : messages.length === 0 ? (
                         <div className="flex h-96 items-center justify-center rounded border border-dashed border-stone-300 text-center text-stone-400">
                             <div>
                                 <p className="mb-2">No messages yet</p>
@@ -114,7 +164,9 @@ export default function Chat({ session }: Props) {
                                 >
                                     <p className="text-sm">{msg.text}</p>
                                     <p className="mt-1 text-xs text-stone-400">
-                                        {msg.timestamp.toLocaleTimeString()}
+                                        {msg.timestamp.getTime() === 0
+                                            ? 'No timestamp'
+                                            : msg.timestamp.toLocaleTimeString()}
                                     </p>
                                 </div>
                             ))}

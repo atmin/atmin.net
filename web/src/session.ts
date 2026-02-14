@@ -1,3 +1,5 @@
+import { clearKeys, getKey, putKey } from './db';
+
 export interface Session {
     token: string;
     userId: string;
@@ -6,69 +8,6 @@ export interface Session {
     sharingPrivateKey: CryptoKey;
     sharingPublicKeyBytes: Uint8Array;
     backupKey: CryptoKey;
-}
-
-const DB_NAME = 'atmin';
-const STORE_NAME = 'keys';
-const DB_VERSION = 1;
-
-function openDB(): Promise<IDBDatabase> {
-    return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = () => {
-            req.result.createObjectStore(STORE_NAME);
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-    });
-}
-
-async function putKey(name: string, key: CryptoKey): Promise<void> {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).put(key, name);
-        tx.oncomplete = () => {
-            db.close();
-            resolve();
-        };
-        tx.onerror = () => {
-            db.close();
-            reject(tx.error);
-        };
-    });
-}
-
-async function getKey(name: string): Promise<CryptoKey | undefined> {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const req = tx.objectStore(STORE_NAME).get(name);
-        req.onsuccess = () => {
-            db.close();
-            resolve(req.result as CryptoKey | undefined);
-        };
-        req.onerror = () => {
-            db.close();
-            reject(req.error);
-        };
-    });
-}
-
-async function clearKeys(): Promise<void> {
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).clear();
-        tx.oncomplete = () => {
-            db.close();
-            resolve();
-        };
-        tx.onerror = () => {
-            db.close();
-            reject(tx.error);
-        };
-    });
 }
 
 const LS_PREFIX = 'atmin:';
