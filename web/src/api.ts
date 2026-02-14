@@ -80,10 +80,32 @@ export interface CompactResponse {
     archive_key: string;
 }
 
+export interface AddDeviceRequest {
+    user_id: string;
+    device_label: string;
+    auth_proof: {
+        payload: {
+            user_id: string;
+            device_id: string;
+            timestamp: string;
+        };
+        signature: string;
+    };
+}
+
+export interface AddDeviceResponse {
+    device_id: string;
+    token: string;
+}
+
 // --- API functions ---
 
 export function register(req: RegisterRequest): Promise<RegisterResponse> {
     return request('POST', '/v1/register', { body: req });
+}
+
+export function addDevice(req: AddDeviceRequest): Promise<AddDeviceResponse> {
+    return request('POST', '/v1/devices', { body: req });
 }
 
 export function resolve(handle: string): Promise<ResolveResponse> {

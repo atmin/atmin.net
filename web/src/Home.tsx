@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import type { Session } from './session';
-import { clearSession } from './session';
 
 interface Props {
     session: Session;
@@ -21,11 +20,6 @@ export default function Home({ session, onLogout }: Props) {
         navigator.clipboard.writeText(session.inviteHandle);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-    };
-
-    const handleLogout = async () => {
-        await clearSession();
-        onLogout();
     };
 
     return (
@@ -68,7 +62,7 @@ export default function Home({ session, onLogout }: Props) {
 
                 <button
                     type="button"
-                    onClick={handleLogout}
+                    onClick={onLogout}
                     className="mt-8 text-xs text-stone-400 hover:text-red-600"
                 >
                     Sign out
