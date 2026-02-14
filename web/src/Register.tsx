@@ -148,6 +148,7 @@ export default function Register() {
                         </Alert>
 
                         <div className="mb-6 space-y-3">
+                            {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix UI Checkbox handles accessibility */}
                             <label className="flex items-start gap-3">
                                 <Checkbox
                                     checked={understood}
@@ -161,6 +162,7 @@ export default function Register() {
                                 </span>
                             </label>
 
+                            {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix UI Checkbox handles accessibility */}
                             <label className="flex items-start gap-3">
                                 <Checkbox
                                     checked={stored}
