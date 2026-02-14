@@ -19,7 +19,8 @@ func testServer(t *testing.T) (*MemStore, http.Handler, Config) {
 	cfg := Config{
 		ServerSecret: []byte("test-secret"),
 	}
-	mux := newMux(store, cfg)
+	hub := NewEventHub()
+	mux := newMux(store, cfg, hub)
 	return store, mux, cfg
 }
 
@@ -266,7 +267,7 @@ func TestRevokeDevice(t *testing.T) {
 	}
 
 	// Verify phone gets 403 device_revoked (need fresh mux to clear cache)
-	freshMux := newMux(store, cfg)
+	freshMux := newMux(store, cfg, NewEventHub())
 	w = httptest.NewRecorder()
 	freshMux.ServeHTTP(w, authedRequest(t, "GET",
 		"/v1/store/list?prefix=inbox/"+alice.UserID+"/live/", phoneToken, ""))

@@ -63,6 +63,35 @@ export default function Chat({ session }: Props) {
         loadAndSync();
     }, [session.token, session.userId, session.sharingPrivateKey]);
 
+    // Real-time sync via Server-Sent Events
+    useEffect(() => {
+        // EventSource doesn't support custom headers, so pass token as query param
+        const url = `/v1/events?token=${encodeURIComponent(session.token)}`;
+        const events = new EventSource(url);
+
+        events.addEventListener('new_message', async () => {
+            // Sync messages when notified
+            try {
+                const synced = await fetchMessages(
+                    session.token,
+                    session.userId,
+                    session.sharingPrivateKey,
+                );
+                setMessages(synced);
+                await saveMessages(session.userId, synced);
+            } catch (error) {
+                console.error('Failed to sync on SSE notification:', error);
+            }
+        });
+
+        events.onerror = () => {
+            console.error('SSE connection error');
+            events.close();
+        };
+
+        return () => events.close();
+    }, [session.token, session.userId, session.sharingPrivateKey]);
+
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
         const text = inputValue.trim();

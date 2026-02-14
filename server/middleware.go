@@ -26,16 +26,26 @@ func deviceIDFrom(ctx context.Context) string {
 }
 
 // requireAuth wraps a handler with token verification and device revocation check.
+// Supports token from Authorization header (Bearer token) or query parameter (for SSE).
 func requireAuth(next http.HandlerFunc, store Store, cfg Config) http.HandlerFunc {
 	cache := &deviceCache{entries: make(map[string]time.Time)}
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		var token string
+
+		// Try Authorization header first
 		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
+		if strings.HasPrefix(auth, "Bearer ") {
+			token = strings.TrimPrefix(auth, "Bearer ")
+		} else {
+			// Fall back to query parameter (for EventSource which can't set headers)
+			token = r.URL.Query().Get("token")
+		}
+
+		if token == "" {
 			writeError(w, errUnauthorized)
 			return
 		}
-		token := strings.TrimPrefix(auth, "Bearer ")
 
 		userID, deviceID, err := parseToken(cfg.ServerSecret, token)
 		if err != nil {
@@ -108,4 +118,11 @@ type statusWriter struct {
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+// Flush implements http.Flusher for SSE support
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }

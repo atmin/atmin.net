@@ -242,7 +242,7 @@ func handleResolve(store Store) http.HandlerFunc {
 }
 
 // POST /v1/send
-func handleSend(store Store) http.HandlerFunc {
+func handleSend(store Store, hub *EventHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := userIDFrom(r.Context())
 		deviceID := deviceIDFrom(r.Context())
@@ -254,6 +254,9 @@ func handleSend(store Store) http.HandlerFunc {
 			writeError(w, errBadRequest)
 			return
 		}
+
+		// Track unique recipients for notifications
+		recipients := make(map[string]bool)
 
 		for _, raw := range req.Envelopes {
 			var env struct {
@@ -278,6 +281,13 @@ func handleSend(store Store) http.HandlerFunc {
 				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write envelope"})
 				return
 			}
+
+			recipients[env.ToUser] = true
+		}
+
+		// Notify recipients of new messages via SSE
+		for toUser := range recipients {
+			hub.Notify(toUser, "new_message")
 		}
 
 		w.WriteHeader(http.StatusOK)

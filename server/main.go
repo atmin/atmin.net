@@ -18,7 +18,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	mux := newMux(s3c, cfg)
+	hub := NewEventHub()
+
+	mux := newMux(s3c, cfg, hub)
 
 	slog.Info("starting server", "addr", cfg.ListenAddr)
 	if err := http.ListenAndServe(cfg.ListenAddr, mux); err != nil {
