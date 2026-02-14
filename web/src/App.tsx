@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import Home from './Home';
+import Chat from './Chat';
+import Chats from './Chats';
 import Landing from './Landing';
 import Login from './Login';
 import Register from './Register';
@@ -26,27 +27,59 @@ function App() {
     return (
         <BrowserRouter>
             <Routes>
+                {/* Auth routes */}
+                <Route
+                    path="/register"
+                    element={
+                        session ? (
+                            <Navigate to="/" replace />
+                        ) : (
+                            <Register onSuccess={setSession} />
+                        )
+                    }
+                />
+                <Route
+                    path="/login"
+                    element={
+                        session ? (
+                            <Navigate to="/" replace />
+                        ) : (
+                            <Login onSuccess={setSession} />
+                        )
+                    }
+                />
+
+                {/* Chat routes */}
                 <Route
                     path="/"
                     element={
                         session ? (
-                            <Home session={session} onLogout={handleLogout} />
+                            <Chats session={session} onLogout={handleLogout} />
                         ) : (
                             <Landing />
                         )
                     }
                 />
                 <Route
-                    path="/register"
+                    path="/saved"
                     element={
-                        session ? <Navigate to="/" replace /> : <Register />
+                        session ? (
+                            <Chat session={session} />
+                        ) : (
+                            <Navigate to="/login" replace />
+                        )
                     }
                 />
                 <Route
-                    path="/login"
-                    element={session ? <Navigate to="/" replace /> : <Login />}
+                    path="/:handle"
+                    element={
+                        session ? (
+                            <Chat session={session} />
+                        ) : (
+                            <Navigate to="/login" replace />
+                        )
+                    }
                 />
-                <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
         </BrowserRouter>
     );

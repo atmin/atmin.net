@@ -16,6 +16,10 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { base64UrlEncode, deriveKeys, generateBackupSecret } from '@/crypto';
 import { type Session, saveSession } from '@/session';
 
+interface Props {
+    onSuccess: (session: Session) => void;
+}
+
 type Step = 'generate' | 'registering' | 'done';
 
 function detectDeviceLabel(): string {
@@ -29,7 +33,7 @@ function detectDeviceLabel(): string {
     return 'Browser';
 }
 
-export default function Register() {
+export default function Register({ onSuccess }: Props) {
     const navigate = useNavigate();
     const [step, setStep] = useState<Step>('generate');
     const [mnemonic, setMnemonic] = useState('');
@@ -77,6 +81,7 @@ export default function Register() {
             };
 
             await saveSession(session);
+            onSuccess(session);
             setStep('done');
 
             // Redirect to home after short delay

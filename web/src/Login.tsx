@@ -16,6 +16,10 @@ import {
 import { base64UrlEncode, deriveKeys, signAuthProof } from '@/crypto';
 import { type Session, saveSession } from '@/session';
 
+interface Props {
+    onSuccess: (session: Session) => void;
+}
+
 function detectDeviceLabel(): string {
     const ua = navigator.userAgent;
     if (/iPhone/.test(ua)) return 'iPhone';
@@ -27,7 +31,7 @@ function detectDeviceLabel(): string {
     return 'Browser';
 }
 
-export default function Login() {
+export default function Login({ onSuccess }: Props) {
     const navigate = useNavigate();
     const [inviteHandle, setInviteHandle] = useState('');
     const [mnemonic, setMnemonic] = useState('');
@@ -83,6 +87,7 @@ export default function Login() {
             };
 
             await saveSession(session);
+            onSuccess(session);
 
             // Redirect to home
             navigate('/');

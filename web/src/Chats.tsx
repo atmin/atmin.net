@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { Session } from './session';
 
 interface Props {
@@ -6,7 +7,7 @@ interface Props {
     onLogout: () => void;
 }
 
-export default function Home({ session, onLogout }: Props) {
+export default function Chats({ session, onLogout }: Props) {
     const [copied, setCopied] = useState(false);
     const [serverOk, setServerOk] = useState<boolean | null>(null);
 
@@ -56,8 +57,32 @@ export default function Home({ session, onLogout }: Props) {
                     </div>
                 </div>
 
-                <div className="rounded border border-dashed border-stone-300 p-8 text-center text-stone-400">
-                    Conversations will appear here
+                {/* Chat list */}
+                <div className="space-y-2">
+                    {/* Saved Messages */}
+                    <Link
+                        to="/saved"
+                        className="block rounded border border-stone-200 bg-white p-4 hover:bg-stone-50"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+                                📝
+                            </div>
+                            <div className="flex-1">
+                                <div className="font-medium">
+                                    Saved Messages
+                                </div>
+                                <div className="text-xs text-stone-500">
+                                    Your private notes
+                                </div>
+                            </div>
+                        </div>
+                    </Link>
+
+                    {/* Placeholder for other chats */}
+                    <div className="rounded border border-dashed border-stone-300 p-8 text-center text-stone-400">
+                        Other chats will appear here
+                    </div>
                 </div>
 
                 <button
