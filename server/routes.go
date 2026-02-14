@@ -24,5 +24,8 @@ func newMux(store Store, cfg Config) http.Handler {
 	mux.HandleFunc("POST /v1/store/presign", auth(handleStorePresign(store)))
 	mux.HandleFunc("POST /v1/store/compact", auth(handleStoreCompact(store)))
 
+	// Static web app (catch-all, lowest priority)
+	mux.Handle("GET /", serveStatic())
+
 	return logRequests(mux)
 }

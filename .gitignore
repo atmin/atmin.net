@@ -42,3 +42,5 @@ web/crypto/pkg-node/
 # Build output
 bin/
 server/server
+server/dist/
+web/dist/

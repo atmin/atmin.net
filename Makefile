@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt clean dev
+.PHONY: all build test lint fmt clean dev run
 .PHONY: server server-build server-test server-lint server-fmt
 .PHONY: web-dev web-wasm web-build web-test web-lint web-fmt
 .PHONY: up down
@@ -7,7 +7,7 @@
 
 all: lint test build
 
-build: server-build web-wasm
+build: web-build server-build
 
 test: server-test web-test
 
@@ -21,7 +21,9 @@ server:
 	set -a; . ./.env; set +a; cd server && go run .
 
 server-build:
-	cd server && go build -o ../bin/server .
+	rm -rf server/dist
+	cp -r web/dist server/dist
+	cd server && go build -o ../bin/atmin .
 
 server-test:
 	cd server && go test ./...
@@ -61,6 +63,9 @@ dev:
 	(cd server && go run .) & \
 	(cd web && npm run dev) & \
 	wait
+
+run:
+	set -a; . ./.env; set +a; ./bin/atmin
 
 # --- Docker (local dev) ---
 
