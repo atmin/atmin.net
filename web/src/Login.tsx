@@ -83,6 +83,7 @@ export default function Login({ onSuccess }: Props) {
                 deviceId: deviceRes.device_id,
                 inviteHandle: inviteHandle.trim(),
                 sharingPrivateKey: keys.sharing.privateKey,
+                sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,
             };
 

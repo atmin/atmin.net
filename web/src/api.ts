@@ -157,3 +157,43 @@ export function storeCompact(
         body: { prefix, up_to: upTo },
     });
 }
+
+// Helper to send an encrypted text message
+export async function sendTextMessage(
+    token: string,
+    fromUserId: string,
+    fromDeviceId: string,
+    toUserId: string,
+    toPublicKeyBytes: Uint8Array,
+    messageText: string,
+): Promise<void> {
+    // Import crypto functions
+    const { eciesEncrypt, importX25519PublicKey, base64UrlEncode } =
+        await import('./crypto');
+
+    // Import recipient's public key
+    const recipientPubKey = await importX25519PublicKey(toPublicKeyBytes);
+
+    // Encrypt the message
+    const encrypted = await eciesEncrypt(
+        recipientPubKey,
+        new TextEncoder().encode(messageText),
+    );
+
+    // Create envelope
+    const envelope: Envelope = {
+        v: 1,
+        to_user: toUserId,
+        from_user: fromUserId,
+        from_device: fromDeviceId,
+        msg_id: crypto.randomUUID(),
+        content_type: 'text/plain',
+        payload: {
+            ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
+            iv: base64UrlEncode(encrypted.iv),
+            ciphertext: base64UrlEncode(encrypted.ciphertext),
+        },
+    };
+
+    return send(token, [envelope]);
+}

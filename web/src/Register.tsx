@@ -77,6 +77,7 @@ export default function Register({ onSuccess }: Props) {
                 deviceId: res.device_id,
                 inviteHandle: res.invite_handle,
                 sharingPrivateKey: keys.sharing.privateKey,
+                sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,
             };
 

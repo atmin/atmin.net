@@ -1,14 +1,78 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { resolve, sendTextMessage } from './api';
 import type { Session } from './session';
+
+interface Message {
+    id: string;
+    text: string;
+    timestamp: Date;
+}
 
 interface Props {
     session: Session;
 }
 
-export default function Chat({ session: _session }: Props) {
+export default function Chat({ session }: Props) {
     const { handle } = useParams<{ handle: string }>();
     const isSaved = handle === 'saved';
     const chatTitle = isSaved ? 'Saved Messages' : handle;
+
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [inputValue, setInputValue] = useState('');
+    const [sending, setSending] = useState(false);
+
+    const handleSend = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const text = inputValue.trim();
+        if (!text || sending) return;
+
+        setSending(true);
+        try {
+            // Determine recipient
+            let recipientUserId: string;
+            let recipientPubKeyBytes: Uint8Array;
+
+            if (isSaved) {
+                // Sending to yourself
+                recipientUserId = session.userId;
+                recipientPubKeyBytes = session.sharingPublicKeyBytes;
+            } else {
+                // Sending to another user
+                if (!handle) throw new Error('No recipient handle');
+                const resolveRes = await resolve(handle);
+                recipientUserId = resolveRes.user_id;
+                // Decode base64url public key
+                const pubKeyB64 = resolveRes.sharing_public_key;
+                const { base64UrlDecode } = await import('./crypto');
+                recipientPubKeyBytes = base64UrlDecode(pubKeyB64);
+            }
+
+            // Send encrypted message
+            await sendTextMessage(
+                session.token,
+                session.userId,
+                session.deviceId,
+                recipientUserId,
+                recipientPubKeyBytes,
+                text,
+            );
+
+            // Add to local display
+            const newMessage: Message = {
+                id: crypto.randomUUID(),
+                text,
+                timestamp: new Date(),
+            };
+            setMessages((prev) => [...prev, newMessage]);
+            setInputValue('');
+        } catch (error) {
+            console.error('Failed to send message:', error);
+            alert('Failed to send message. Please try again.');
+        } finally {
+            setSending(false);
+        }
+    };
 
     return (
         <div className="flex min-h-screen flex-col bg-stone-50">
@@ -30,29 +94,56 @@ export default function Chat({ session: _session }: Props) {
             {/* Messages area */}
             <div className="flex-1 overflow-y-auto">
                 <div className="mx-auto max-w-2xl p-4">
-                    <div className="flex h-96 items-center justify-center rounded border border-dashed border-stone-300 text-center text-stone-400">
-                        <div>
-                            <p className="mb-2">No messages yet</p>
-                            <p className="text-xs">
-                                {isSaved
-                                    ? 'Send yourself notes and reminders'
-                                    : `Start a conversation with ${handle}`}
-                            </p>
+                    {messages.length === 0 ? (
+                        <div className="flex h-96 items-center justify-center rounded border border-dashed border-stone-300 text-center text-stone-400">
+                            <div>
+                                <p className="mb-2">No messages yet</p>
+                                <p className="text-xs">
+                                    {isSaved
+                                        ? 'Send yourself notes and reminders'
+                                        : `Start a conversation with ${handle}`}
+                                </p>
+                            </div>
                         </div>
-                    </div>
+                    ) : (
+                        <div className="space-y-3">
+                            {messages.map((msg) => (
+                                <div
+                                    key={msg.id}
+                                    className="rounded bg-white p-3 shadow-sm"
+                                >
+                                    <p className="text-sm">{msg.text}</p>
+                                    <p className="mt-1 text-xs text-stone-400">
+                                        {msg.timestamp.toLocaleTimeString()}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
 
             {/* Message input */}
             <div className="border-t border-stone-200 bg-white px-4 py-3">
-                <div className="mx-auto max-w-2xl">
+                <form
+                    onSubmit={handleSend}
+                    className="mx-auto flex max-w-2xl gap-2"
+                >
                     <input
                         type="text"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
                         placeholder="Type a message..."
-                        disabled
-                        className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
+                        className="flex-1 rounded border border-stone-300 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
                     />
-                </div>
+                    <button
+                        type="submit"
+                        disabled={!inputValue.trim() || sending}
+                        className="rounded bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:bg-stone-300"
+                    >
+                        {sending ? 'Sending...' : 'Send'}
+                    </button>
+                </form>
             </div>
         </div>
     );

@@ -61,16 +61,6 @@ function App() {
                     }
                 />
                 <Route
-                    path="/saved"
-                    element={
-                        session ? (
-                            <Chat session={session} />
-                        ) : (
-                            <Navigate to="/login" replace />
-                        )
-                    }
-                />
-                <Route
                     path="/:handle"
                     element={
                         session ? (
