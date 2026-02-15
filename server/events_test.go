@@ -237,6 +237,77 @@ func TestHandleEventsReceivesNotification(t *testing.T) {
 	}
 }
 
+func TestEventsUpdatesLastActive(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/v1/events?token="+alice.Token, nil)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	// Give goroutine time to update last_active
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+
+	profileData, err := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	if err != nil {
+		t.Fatalf("reading profile: %v", err)
+	}
+	var profile map[string]string
+	json.Unmarshal(profileData, &profile)
+	if profile["last_active"] == "" {
+		t.Fatal("last_active not set after SSE connect")
+	}
+}
+
+func TestEventsSkipsRecentLastActive(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Pre-set last_active to 30 minutes ago
+	recentTime := time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
+	profileData, _ := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	var profile map[string]string
+	json.Unmarshal(profileData, &profile)
+	profile["last_active"] = recentTime
+	updated, _ := json.Marshal(profile)
+	store.PutObject(context.Background(), "users/"+alice.UserID+"/profile.json", updated, "application/json")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/v1/events?token="+alice.Token, nil)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+
+	// last_active should be unchanged (still 30 min ago)
+	profileData, _ = store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	json.Unmarshal(profileData, &profile)
+	if profile["last_active"] != recentTime {
+		t.Fatalf("last_active = %q, want %q (should not update within 1 hour)", profile["last_active"], recentTime)
+	}
+}
+
 // TestHandleEventsRequiresAuth tests that the SSE endpoint requires authentication.
 func TestHandleEventsRequiresAuth(t *testing.T) {
 	_, mux, _ := testServer(t)
