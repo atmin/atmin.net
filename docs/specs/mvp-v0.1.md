@@ -601,6 +601,16 @@ Realtime hint:
 - Profiles:
     - set display name
     - resolve handle shows display name
+    - delete account, resolve returns 404, inbox and invite gone
+- Write isolation:
+    - presign upload to own `users/{uid}/contacts.json` succeeds
+    - presign upload to another user's `users/` prefix returns 403
+- Contacts:
+    - encrypt contact list, upload via presigned PUT to `users/{uid}/contacts.json`
+    - second device downloads and decrypts same contacts
+- Activity tracking:
+    - SSE connect sets `last_active` in profile
+    - second SSE connect within 1 hour does not update `last_active`
 - Media:
     - upload encrypted blob via presigned PUT
     - send reference inside encrypted payload
