@@ -56,6 +56,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 		// Write profile
 		profile, _ := json.Marshal(map[string]string{
 			"user_id":            userID,
+			"invite_handle":      inviteHandle,
 			"auth_public_key":    req.AuthPublicKey,
 			"sharing_public_key": req.SharingPublicKey,
 			"created_at":         time.Now().UTC().Format(time.RFC3339),
@@ -77,7 +78,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 		}
 
 		// Write invite
-		invite, _ := json.Marshal(map[string]string{"user_id": userID})
+		invite, _ := json.Marshal(map[string]string{"user_id": userID, "sharing_public_key": req.SharingPublicKey})
 		if err := store.PutObject(r.Context(), "invites/"+inviteHandle+".json", invite, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write invite"})
 			return

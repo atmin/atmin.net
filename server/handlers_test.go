@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"net/http"
@@ -116,13 +117,35 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestRegisterAndResolve(t *testing.T) {
-	_, mux, _ := testServer(t)
+	store, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice's laptop")
 
 	// Invite handle should be two words
 	parts := strings.Split(alice.InviteHandle, "-")
 	if len(parts) != 2 {
 		t.Fatalf("invite_handle = %q, want two-word format", alice.InviteHandle)
+	}
+
+	// Verify profile.json contains invite_handle
+	profileData, err := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	if err != nil {
+		t.Fatalf("reading profile: %v", err)
+	}
+	var profile map[string]string
+	json.Unmarshal(profileData, &profile)
+	if profile["invite_handle"] != alice.InviteHandle {
+		t.Fatalf("profile invite_handle = %q, want %q", profile["invite_handle"], alice.InviteHandle)
+	}
+
+	// Verify invite file contains sharing_public_key
+	inviteData, err := store.GetObject(context.Background(), "invites/"+alice.InviteHandle+".json")
+	if err != nil {
+		t.Fatalf("reading invite: %v", err)
+	}
+	var invite map[string]string
+	json.Unmarshal(inviteData, &invite)
+	if invite["sharing_public_key"] == "" {
+		t.Fatal("invite sharing_public_key is empty")
 	}
 
 	// Resolve
