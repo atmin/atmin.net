@@ -22,7 +22,7 @@ We adopt a **sync-first mailbox architecture** backed by **S3-compatible object 
 
 Messages are stored as immutable encrypted envelopes in **per-user** inbox prefixes.
 Clients periodically sync their inboxes to retrieve new messages.
-Real-time delivery (e.g. WebSocket push) is treated as an optional optimization, not a guarantee.
+Real-time delivery (e.g. SSE push) is treated as an optional optimization, not a guarantee.
 
 S3-compatible storage is the primary and authoritative persistence layer.
 The server acts as a stateless relay and writer of mailbox objects.

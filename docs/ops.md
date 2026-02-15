@@ -49,5 +49,5 @@ TBD
 
 ## Future considerations
 
-- **Redis**: only needed for realtime (presence, typing indicators, push routing). Not MVP. Scaleway Managed Redis available on Private Networks when needed.
+- **Redis/NATS**: only needed for multi-instance SSE fanout, presence, and typing indicators. Single-instance uses in-memory EventHub. Scaleway Managed Redis available on Private Networks when needed.
 - **Scaling**: S3 is source of truth, container is stateless — horizontal scaling is just more containers behind DNS. No shared mutable state to coordinate.

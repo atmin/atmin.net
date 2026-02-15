@@ -8,15 +8,14 @@ so future changes do not require rediscovering the same discussions.
 
 ---
 
-## Real-time delivery (optional optimization)
+## Real-time delivery
 
-- v0.1 treats realtime delivery as a best-effort optimization.
-- Sync from storage is the authoritative delivery mechanism.
-- Future improvements may include:
-  - WebSocket-based "new mail" hints,
-  - cross-instance fanout via a shared pub/sub layer.
+- Realtime delivery is best-effort; sync from storage is authoritative.
+- v0.1 uses SSE for instant "new message" hints (see [ADR-0004](decisions/adr-0004-sse-realtime-notifications.md)).
+- Multi-instance scaling requires a pub/sub layer (Redis, NATS) for
+  cross-instance fanout. The EventHub API stays unchanged.
 
-These optimizations must not become correctness dependencies.
+Realtime must not become a correctness dependency.
 
 ---
 

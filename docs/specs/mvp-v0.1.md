@@ -27,11 +27,11 @@ See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime d
     - Chat history: IndexedDB
 - Networking:
     - HTTP control plane
-    - Optional WS for new-mail hints
+    - SSE for realtime new-message hints
 
 ### Server (Go)
 
-- Stateless HTTP API (and optional WS).
+- Stateless HTTP API + in-memory SSE hub.
 - S3 client (S3-compatible endpoint).
 - Minimal auth (device token).
 
@@ -70,7 +70,8 @@ Key backup (Megolm session keys, encrypted with backup key):
 
 Invites (lookup index):
 
-- `invites/{invite_handle}.json` — `{ "user_id": "..." }`
+- `invites/{invite_handle}.json` — denormalized public profile (user_id, sharing key, display name, avatar)
+- `users/{user_id}/contacts.json` — encrypted contacts blob (client-side AES-256-GCM)
 
 Media (encrypted by client):
 
@@ -295,14 +296,22 @@ native export format and is URL-safe.
 
 ### `users/{user_id}/profile.json`
 
+Source of truth for all profile data (see [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md)).
+
 ```json
 {
   "user_id": "01HWQA...",
+  "invite_handle": "copper-falcon",
   "auth_public_key": "<base64url Ed25519, 32 bytes>",
   "sharing_public_key": "<base64url X25519, 32 bytes>",
+  "display_name": "Alice",
+  "avatar_url": "media/01HWQA.../avatar/photo.jpg",
+  "last_active": "2026-02-15T10:30:00Z",
   "created_at": "2025-01-15T10:00:00Z"
 }
 ```
+
+`display_name`, `avatar_url`, and `last_active` are absent until set.
 
 ### `users/{user_id}/devices/{device_id}.json`
 
@@ -423,6 +432,8 @@ Output:
 
 - `user_id`
 - `sharing_public_key`
+- `display_name` (if set)
+- `avatar_url` (if set)
 
 ### Send
 
@@ -444,11 +455,54 @@ The storage API (below) is restricted to the caller's own prefixes.
 Sender includes a self-addressed envelope for their own inbox,
 so sent messages are available on all devices via normal sync.
 
+### Update profile
+
+`PUT /v1/profile`
+
+Input (both optional, omitted fields unchanged):
+
+- `display_name`
+- `avatar_url`
+
+Server reads `profile.json`, merges fields, writes `profile.json` then
+`invites/{handle}.json`. See [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md).
+
+### Delete account
+
+`DELETE /v1/profile`
+
+Deletes all user data: `users/{uid}/`, `inbox/{uid}/`, `backups/{uid}/`,
+`media/{uid}/`, and `invites/{handle}.json`. Token is implicitly invalidated.
+See [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md).
+
+### Saved Messages
+
+A user can send messages to themselves by addressing envelopes to their own
+`user_id` via `POST /v1/send`. These appear in the user's inbox like any
+other message. The client routes `from_user == self` conversations to a
+dedicated "Saved Messages" view.
+
+No special server logic — this is a client-side routing convention over
+the existing send/sync infrastructure.
+
+### Realtime events
+
+`GET /v1/events?token=...`
+
+Server-Sent Events stream. The server notifies connected clients when new
+messages arrive in their inbox. Clients respond by running the normal sync
+algorithm. See [ADR-0004](../decisions/adr-0004-sse-realtime-notifications.md).
+
+Auth token is passed as a query parameter (EventSource does not support
+custom headers).
+
 ### Storage API (generic S3 proxy)
 
 The server exposes three generic endpoints for all S3 operations.
 Authorization is prefix-scoped: a user's token grants access only to their own prefixes
-(`inbox/{user_id}/`, `backups/{user_id}/`, `media/{user_id}/`).
+(`inbox/{user_id}/`, `backups/{user_id}/`, `media/{user_id}/`, `users/{user_id}/`).
+Reads under `users/` are open (needed to fetch other users' public keys);
+writes are restricted to own uid (see [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md)).
 
 The server has no knowledge of what the data means — it is an authenticated S3 proxy.
 
@@ -505,9 +559,9 @@ Server behavior:
 4. If a message can't be decrypted (unknown session key from a sibling device),
    sync key backup (`store/list` on `backups/{user_id}/keys/`) for new keys, retry.
 
-Realtime hint (optional):
+Realtime hint:
 
-- if WS connected, server can push `"new_mail": true`; client then syncs.
+- SSE connection (`GET /v1/events`) receives `new_message` events; client then syncs.
 
 ### New device sync
 
@@ -540,6 +594,13 @@ Realtime hint (optional):
 - Offline delivery:
     - recipient closes tab, sender sends message
     - recipient opens later, syncs from inbox, decrypts
+- Saved Messages:
+    - send message to self
+    - message appears in Saved Messages view
+    - persists across refresh
+- Profiles:
+    - set display name
+    - resolve handle shows display name
 - Media:
     - upload encrypted blob via presigned PUT
     - send reference inside encrypted payload
