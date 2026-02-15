@@ -518,6 +518,37 @@ func TestStorePresignOtherUserForbidden(t *testing.T) {
 	}
 }
 
+func TestStorePresignOwnUserPrefix(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	body, _ := json.Marshal(map[string]any{
+		"key":   "users/" + alice.UserID + "/contacts.json",
+		"bytes": 1024,
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/presign", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("presign own users/ status = %d; body = %s", w.Code, w.Body.String())
+	}
+}
+
+func TestStorePresignOtherUserProfileForbidden(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	bob := registerTestUser(t, mux, "Bob")
+
+	body, _ := json.Marshal(map[string]any{
+		"key":   "users/" + bob.UserID + "/profile.json",
+		"bytes": 512,
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/presign", alice.Token, string(body)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("presign other users/ status = %d, want 403", w.Code)
+	}
+}
+
 func TestStoreListRequiresAuth(t *testing.T) {
 	_, mux, _ := testServer(t)
 

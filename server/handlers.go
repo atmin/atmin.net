@@ -323,6 +323,19 @@ func authorizeKey(userID, key string) bool {
 	return false
 }
 
+// authorizeKeyWrite is like authorizeKey but restricts users/ to own uid only.
+func authorizeKeyWrite(userID, key string) bool {
+	for _, p := range allowedPrefixes {
+		if strings.HasPrefix(key, p+userID+"/") {
+			return true
+		}
+	}
+	if strings.HasPrefix(key, "users/"+userID+"/") {
+		return true
+	}
+	return false
+}
+
 // GET /v1/store/list
 func handleStoreList(store Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -398,7 +411,7 @@ func handleStorePresign(store Store) http.HandlerFunc {
 			writeError(w, errBadRequest)
 			return
 		}
-		if !authorizeKey(userID, req.Key) {
+		if !authorizeKeyWrite(userID, req.Key) {
 			writeError(w, errForbidden)
 			return
 		}
