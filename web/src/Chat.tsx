@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import {
-    conversationId,
-    fetchMessages,
-    resolve,
-    sendTextMessage,
-} from './api';
+import { conversationId, fetchMessages, resolve, sendTextMessage } from './api';
 import type { Session } from './auth';
 import { loadMessages as loadFromDB, saveMessages } from './db';
 import { backupSessionKey } from './key-backup';
