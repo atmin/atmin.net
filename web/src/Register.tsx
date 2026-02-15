@@ -3,6 +3,7 @@ import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { register } from '@/api';
+import { type Session, saveSession } from '@/auth';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +15,6 @@ import {
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { base64UrlEncode, deriveKeys, generateBackupSecret } from '@/crypto';
-import { type Session, saveSession } from '@/session';
 
 interface Props {
     onSuccess: (session: Session) => void;

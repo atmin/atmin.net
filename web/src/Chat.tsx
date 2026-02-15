@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fetchMessages, resolve, sendTextMessage } from './api';
+import type { Session } from './auth';
 import { loadMessages as loadFromDB, saveMessages } from './db';
-import type { Session } from './session';
+import { backupSessionKey } from './key-backup';
+import type { SessionManager } from './megolm-session';
 
 interface Message {
     id: string;
@@ -12,9 +14,10 @@ interface Message {
 
 interface Props {
     session: Session;
+    sessionManager: SessionManager | null;
 }
 
-export default function Chat({ session }: Props) {
+export default function Chat({ session, sessionManager }: Props) {
     const { handle } = useParams<{ handle: string }>();
     const isSaved = handle === 'saved';
     const chatTitle = isSaved ? 'Saved Messages' : handle;
@@ -46,6 +49,7 @@ export default function Chat({ session }: Props) {
                     session.token,
                     session.userId,
                     session.sharingPrivateKey,
+                    sessionManager ?? undefined,
                 );
 
                 // Update state with server messages
@@ -61,7 +65,12 @@ export default function Chat({ session }: Props) {
         };
 
         loadAndSync();
-    }, [session.token, session.userId, session.sharingPrivateKey]);
+    }, [
+        session.token,
+        session.userId,
+        session.sharingPrivateKey,
+        sessionManager,
+    ]);
 
     // Real-time sync via Server-Sent Events
     useEffect(() => {
@@ -76,6 +85,7 @@ export default function Chat({ session }: Props) {
                     session.token,
                     session.userId,
                     session.sharingPrivateKey,
+                    sessionManager ?? undefined,
                 );
                 setMessages(synced);
                 await saveMessages(session.userId, synced);
@@ -90,7 +100,12 @@ export default function Chat({ session }: Props) {
         };
 
         return () => events.close();
-    }, [session.token, session.userId, session.sharingPrivateKey]);
+    }, [
+        session.token,
+        session.userId,
+        session.sharingPrivateKey,
+        sessionManager,
+    ]);
 
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -119,20 +134,36 @@ export default function Chat({ session }: Props) {
             }
 
             // Send encrypted message
-            await sendTextMessage(
-                session.token,
-                session.userId,
-                session.deviceId,
-                recipientUserId,
-                recipientPubKeyBytes,
-                text,
-            );
+            if (sessionManager) {
+                const { isNewSession } = await sendTextMessage(
+                    session.token,
+                    session.userId,
+                    session.deviceId,
+                    recipientUserId,
+                    recipientPubKeyBytes,
+                    text,
+                    sessionManager,
+                );
+
+                // Back up new session key
+                if (isNewSession) {
+                    const [outbound] = await sessionManager.getOutbound();
+                    await backupSessionKey(
+                        session.token,
+                        session.userId,
+                        outbound.session_id,
+                        outbound.session_key(),
+                        session.backupKey,
+                    );
+                }
+            }
 
             // Refetch messages to show the sent message
             const synced = await fetchMessages(
                 session.token,
                 session.userId,
                 session.sharingPrivateKey,
+                sessionManager ?? undefined,
             );
 
             // Update state and IndexedDB

@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 use vodozemac::megolm::{
-    GroupSession, InboundGroupSession, SessionConfig,
+    GroupSession, GroupSessionPickle,
+    InboundGroupSession, InboundGroupSessionPickle,
+    SessionConfig,
 };
 
 /// Megolm sending session. Creates encrypted messages.
@@ -41,6 +43,19 @@ impl MegolmOutbound {
     pub fn encrypt(&mut self, plaintext: &str) -> String {
         let msg = self.inner.encrypt(plaintext);
         msg.to_base64()
+    }
+
+    /// Serialize session to JSON for persistence.
+    pub fn pickle(&self) -> Result<String, JsError> {
+        serde_json::to_string(&self.inner.pickle())
+            .map_err(|e| JsError::new(&format!("pickle failed: {e}")))
+    }
+
+    /// Restore session from pickled JSON.
+    pub fn from_pickle(json: &str) -> Result<MegolmOutbound, JsError> {
+        let pickle: GroupSessionPickle = serde_json::from_str(json)
+            .map_err(|e| JsError::new(&format!("unpickle failed: {e}")))?;
+        Ok(Self { inner: GroupSession::from(pickle) })
     }
 }
 
@@ -97,5 +112,18 @@ impl MegolmInbound {
     /// Returns base64-encoded exported session key.
     pub fn export_at_first_known_index(&self) -> String {
         self.inner.export_at_first_known_index().to_base64()
+    }
+
+    /// Serialize session to JSON for persistence.
+    pub fn pickle(&self) -> Result<String, JsError> {
+        serde_json::to_string(&self.inner.pickle())
+            .map_err(|e| JsError::new(&format!("pickle failed: {e}")))
+    }
+
+    /// Restore session from pickled JSON.
+    pub fn from_pickle(json: &str) -> Result<MegolmInbound, JsError> {
+        let pickle: InboundGroupSessionPickle = serde_json::from_str(json)
+            .map_err(|e| JsError::new(&format!("unpickle failed: {e}")))?;
+        Ok(Self { inner: InboundGroupSession::from(pickle) })
     }
 }

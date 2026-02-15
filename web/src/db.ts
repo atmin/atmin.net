@@ -2,12 +2,38 @@
  * IndexedDB storage for atmin.net
  * - 'keys' store: CryptoKey objects
  * - 'messages' store: Encrypted messages
+ * - 'megolm_outbound' store: Active outbound Megolm session
+ * - 'megolm_inbound' store: Inbound Megolm sessions (one per sender session)
+ * - 'megolm_key_shares' store: Track which recipients have the session key
  */
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
+const MEGOLM_OUTBOUND_STORE = 'megolm_outbound';
+const MEGOLM_INBOUND_STORE = 'megolm_inbound';
+const MEGOLM_KEY_SHARES_STORE = 'megolm_key_shares';
+
+export interface StoredOutboundSession {
+    id: 'current';
+    pickleJson: string;
+    sessionId: string;
+    messageIndex: number;
+}
+
+export interface StoredInboundSession {
+    sessionId: string;
+    fromUser: string;
+    fromDevice: string;
+    pickleJson: string;
+}
+
+export interface StoredKeyShare {
+    sessionId: string;
+    recipientUserId: string;
+    sharedAt: number;
+}
 
 export interface StoredMessage {
     id: string; // msg_id, primary key
@@ -71,6 +97,25 @@ async function openDB(): Promise<IDBDatabase> {
                 // Index for search (can add full-text search later)
                 messagesStore.createIndex('fromUser', 'fromUser', {
                     unique: false,
+                });
+            }
+
+            // v3: Megolm session stores
+            if (!database.objectStoreNames.contains(MEGOLM_OUTBOUND_STORE)) {
+                database.createObjectStore(MEGOLM_OUTBOUND_STORE, {
+                    keyPath: 'id',
+                });
+            }
+
+            if (!database.objectStoreNames.contains(MEGOLM_INBOUND_STORE)) {
+                database.createObjectStore(MEGOLM_INBOUND_STORE, {
+                    keyPath: 'sessionId',
+                });
+            }
+
+            if (!database.objectStoreNames.contains(MEGOLM_KEY_SHARES_STORE)) {
+                database.createObjectStore(MEGOLM_KEY_SHARES_STORE, {
+                    keyPath: ['sessionId', 'recipientUserId'],
                 });
             }
         };
@@ -212,6 +257,168 @@ export async function clearMessages(userId?: string): Promise<void> {
         };
     } else {
         // Clear all messages
+        store.clear();
+    }
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ── Megolm outbound session ────────────────────────────────────────
+
+export async function saveOutboundSession(
+    sessionId: string,
+    messageIndex: number,
+    pickleJson: string,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_OUTBOUND_STORE, 'readwrite');
+    const record: StoredOutboundSession = {
+        id: 'current',
+        pickleJson,
+        sessionId,
+        messageIndex,
+    };
+    tx.objectStore(MEGOLM_OUTBOUND_STORE).put(record);
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+export async function loadOutboundSession(): Promise<
+    StoredOutboundSession | undefined
+> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_OUTBOUND_STORE, 'readonly');
+    const request = tx.objectStore(MEGOLM_OUTBOUND_STORE).get('current');
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () =>
+            resolve(request.result as StoredOutboundSession | undefined);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+export async function clearOutboundSession(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_OUTBOUND_STORE, 'readwrite');
+    tx.objectStore(MEGOLM_OUTBOUND_STORE).clear();
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ── Megolm inbound sessions ───────────────────────────────────────
+
+export async function saveInboundSession(
+    sessionId: string,
+    fromUser: string,
+    fromDevice: string,
+    pickleJson: string,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_INBOUND_STORE, 'readwrite');
+    const record: StoredInboundSession = {
+        sessionId,
+        fromUser,
+        fromDevice,
+        pickleJson,
+    };
+    tx.objectStore(MEGOLM_INBOUND_STORE).put(record);
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+export async function loadInboundSession(
+    sessionId: string,
+): Promise<StoredInboundSession | undefined> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_INBOUND_STORE, 'readonly');
+    const request = tx.objectStore(MEGOLM_INBOUND_STORE).get(sessionId);
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () =>
+            resolve(request.result as StoredInboundSession | undefined);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+export async function clearInboundSessions(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_INBOUND_STORE, 'readwrite');
+    tx.objectStore(MEGOLM_INBOUND_STORE).clear();
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ── Megolm key shares ─────────────────────────────────────────────
+
+export async function recordKeyShare(
+    sessionId: string,
+    recipientUserId: string,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_KEY_SHARES_STORE, 'readwrite');
+    const record: StoredKeyShare = {
+        sessionId,
+        recipientUserId,
+        sharedAt: Date.now(),
+    };
+    tx.objectStore(MEGOLM_KEY_SHARES_STORE).put(record);
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+export async function hasKeyShare(
+    sessionId: string,
+    recipientUserId: string,
+): Promise<boolean> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_KEY_SHARES_STORE, 'readonly');
+    const request = tx
+        .objectStore(MEGOLM_KEY_SHARES_STORE)
+        .get([sessionId, recipientUserId]);
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result !== undefined);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+export async function clearKeyShares(sessionId?: string): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEGOLM_KEY_SHARES_STORE, 'readwrite');
+    const store = tx.objectStore(MEGOLM_KEY_SHARES_STORE);
+
+    if (sessionId) {
+        // Delete all shares for a specific session using cursor
+        const request = store.openCursor();
+        request.onsuccess = () => {
+            const cursor = request.result;
+            if (cursor) {
+                const record = cursor.value as StoredKeyShare;
+                if (record.sessionId === sessionId) {
+                    cursor.delete();
+                }
+                cursor.continue();
+            }
+        };
+    } else {
         store.clear();
     }
 

@@ -142,6 +142,61 @@ describe('Megolm', () => {
         });
     });
 
+    describe('pickle (session persistence)', () => {
+        it('outbound: pickle → from_pickle preserves state', () => {
+            const sender = new MegolmOutbound();
+            const sessionId = sender.session_id;
+
+            sender.encrypt('msg 0');
+            sender.encrypt('msg 1');
+            expect(sender.message_index).toBe(2);
+
+            const pickled = sender.pickle();
+            sender.free();
+
+            const restored = MegolmOutbound.from_pickle(pickled);
+            expect(restored.session_id).toBe(sessionId);
+            expect(restored.message_index).toBe(2);
+
+            // Can continue encrypting
+            const receiver = MegolmInbound.from_session_key(
+                restored.session_key(),
+            );
+            const ct = restored.encrypt('msg 2');
+            expect(receiver.decrypt(ct)).toBe('msg 2');
+            expect(restored.message_index).toBe(3);
+
+            restored.free();
+            receiver.free();
+        });
+
+        it('inbound: pickle → from_pickle preserves state', () => {
+            const sender = new MegolmOutbound();
+            const receiver = MegolmInbound.from_session_key(
+                sender.session_key(),
+            );
+
+            // Decrypt one message
+            const ct0 = sender.encrypt('msg 0');
+            expect(receiver.decrypt(ct0)).toBe('msg 0');
+
+            // Pickle and restore
+            const pickled = receiver.pickle();
+            const sessionId = receiver.session_id;
+            receiver.free();
+
+            const restored = MegolmInbound.from_pickle(pickled);
+            expect(restored.session_id).toBe(sessionId);
+
+            // Can decrypt next message
+            const ct1 = sender.encrypt('msg 1');
+            expect(restored.decrypt(ct1)).toBe('msg 1');
+
+            sender.free();
+            restored.free();
+        });
+    });
+
     describe('session key reflects ratchet position', () => {
         it('early share starts at index 0', () => {
             const sender = new MegolmOutbound();

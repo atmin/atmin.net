@@ -2,8 +2,8 @@ import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
 import { register } from './api';
+import { type Session, saveSession } from './auth';
 import { base64UrlEncode, deriveKeys, generateBackupSecret } from './crypto';
-import { type Session, saveSession } from './session';
 
 type Step = 'generate' | 'confirm' | 'registering' | 'done';
 

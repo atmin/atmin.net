@@ -1,10 +1,19 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+    clearInboundSessions,
+    clearKeyShares,
     clearMessages,
+    clearOutboundSession,
     getLatestTimestamp,
+    hasKeyShare,
+    loadInboundSession,
     loadMessages,
+    loadOutboundSession,
+    recordKeyShare,
+    saveInboundSession,
     saveMessages,
+    saveOutboundSession,
 } from './db';
 
 // Setup fake IndexedDB
@@ -16,6 +25,9 @@ beforeEach(() => {
 // Clear database after each test
 afterEach(async () => {
     await clearMessages();
+    await clearOutboundSession();
+    await clearInboundSessions();
+    await clearKeyShares();
 });
 
 describe('db - Message storage', () => {
@@ -176,5 +188,115 @@ describe('db - Message storage', () => {
             expect(loaded1).toEqual([]);
             expect(loaded2).toEqual([]);
         });
+    });
+});
+
+describe('db - Megolm outbound session', () => {
+    it('saves and loads outbound session', async () => {
+        await saveOutboundSession('S1', 5, '{"pickle":"data"}');
+
+        const loaded = await loadOutboundSession();
+        expect(loaded).toBeDefined();
+        expect(loaded?.sessionId).toBe('S1');
+        expect(loaded?.messageIndex).toBe(5);
+        expect(loaded?.pickleJson).toBe('{"pickle":"data"}');
+    });
+
+    it('returns undefined when no session exists', async () => {
+        const loaded = await loadOutboundSession();
+        expect(loaded).toBeUndefined();
+    });
+
+    it('overwrites on save (single active session)', async () => {
+        await saveOutboundSession('S1', 0, '{"v":1}');
+        await saveOutboundSession('S2', 3, '{"v":2}');
+
+        const loaded = await loadOutboundSession();
+        expect(loaded?.sessionId).toBe('S2');
+        expect(loaded?.messageIndex).toBe(3);
+    });
+
+    it('clears outbound session', async () => {
+        await saveOutboundSession('S1', 0, '{}');
+        await clearOutboundSession();
+
+        const loaded = await loadOutboundSession();
+        expect(loaded).toBeUndefined();
+    });
+});
+
+describe('db - Megolm inbound sessions', () => {
+    it('saves and loads by sessionId', async () => {
+        await saveInboundSession('S1', 'bob01', 'bdev01', '{"pickle":"in"}');
+
+        const loaded = await loadInboundSession('S1');
+        expect(loaded).toBeDefined();
+        expect(loaded?.sessionId).toBe('S1');
+        expect(loaded?.fromUser).toBe('bob01');
+        expect(loaded?.fromDevice).toBe('bdev01');
+        expect(loaded?.pickleJson).toBe('{"pickle":"in"}');
+    });
+
+    it('returns undefined for unknown sessionId', async () => {
+        const loaded = await loadInboundSession('unknown');
+        expect(loaded).toBeUndefined();
+    });
+
+    it('stores multiple sessions independently', async () => {
+        await saveInboundSession('S1', 'bob01', 'bdev01', '{"s":1}');
+        await saveInboundSession('S2', 'alice01', 'adev01', '{"s":2}');
+
+        const s1 = await loadInboundSession('S1');
+        const s2 = await loadInboundSession('S2');
+        expect(s1?.fromUser).toBe('bob01');
+        expect(s2?.fromUser).toBe('alice01');
+    });
+
+    it('clears all inbound sessions', async () => {
+        await saveInboundSession('S1', 'bob01', 'bdev01', '{}');
+        await saveInboundSession('S2', 'alice01', 'adev01', '{}');
+        await clearInboundSessions();
+
+        expect(await loadInboundSession('S1')).toBeUndefined();
+        expect(await loadInboundSession('S2')).toBeUndefined();
+    });
+});
+
+describe('db - Megolm key shares', () => {
+    it('records and checks key share', async () => {
+        expect(await hasKeyShare('S1', 'bob01')).toBe(false);
+
+        await recordKeyShare('S1', 'bob01');
+        expect(await hasKeyShare('S1', 'bob01')).toBe(true);
+    });
+
+    it('tracks shares per session and recipient independently', async () => {
+        await recordKeyShare('S1', 'bob01');
+
+        expect(await hasKeyShare('S1', 'bob01')).toBe(true);
+        expect(await hasKeyShare('S1', 'alice01')).toBe(false);
+        expect(await hasKeyShare('S2', 'bob01')).toBe(false);
+    });
+
+    it('clears shares for a specific session', async () => {
+        await recordKeyShare('S1', 'bob01');
+        await recordKeyShare('S1', 'alice01');
+        await recordKeyShare('S2', 'bob01');
+
+        await clearKeyShares('S1');
+
+        expect(await hasKeyShare('S1', 'bob01')).toBe(false);
+        expect(await hasKeyShare('S1', 'alice01')).toBe(false);
+        expect(await hasKeyShare('S2', 'bob01')).toBe(true);
+    });
+
+    it('clears all shares', async () => {
+        await recordKeyShare('S1', 'bob01');
+        await recordKeyShare('S2', 'alice01');
+
+        await clearKeyShares();
+
+        expect(await hasKeyShare('S1', 'bob01')).toBe(false);
+        expect(await hasKeyShare('S2', 'alice01')).toBe(false);
     });
 });

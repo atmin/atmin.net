@@ -1,12 +1,7 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { clearSession, loadSession, type Session, saveSession } from './auth';
 import { deriveKeys, generateBackupSecret } from './crypto';
-import {
-    clearSession,
-    loadSession,
-    type Session,
-    saveSession,
-} from './session';
 
 // Mock localStorage
 const localStorageMock: { [key: string]: string } = {};

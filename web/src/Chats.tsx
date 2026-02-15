@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Session } from './session';
+import type { Session } from './auth';
 
 interface Props {
     session: Session;

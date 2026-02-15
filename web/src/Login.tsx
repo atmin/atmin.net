@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ulid } from 'ulid';
 import { addDevice, resolve } from '@/api';
+import { type Session, saveSession } from '@/auth';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +15,6 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { base64UrlEncode, deriveKeys, signAuthProof } from '@/crypto';
-import { type Session, saveSession } from '@/session';
 
 interface Props {
     onSuccess: (session: Session) => void;
