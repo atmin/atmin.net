@@ -91,7 +91,11 @@ function App() {
                     path="/"
                     element={
                         session ? (
-                            <Chats session={session} onLogout={handleLogout} />
+                            <Chats
+                                session={session}
+                                sessionManager={sessionManager}
+                                onLogout={handleLogout}
+                            />
                         ) : (
                             <Landing />
                         )

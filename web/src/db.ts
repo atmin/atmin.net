@@ -2,15 +2,19 @@
  * IndexedDB storage for atmin.net
  * - 'keys' store: CryptoKey objects
  * - 'messages' store: Encrypted messages
+ * - 'conversations' store: Per-conversation summary (last message, count)
+ * - 'contacts' store: userId → handle cache
  * - 'megolm_outbound' store: Active outbound Megolm session
  * - 'megolm_inbound' store: Inbound Megolm sessions (one per sender session)
  * - 'megolm_key_shares' store: Track which recipients have the session key
  */
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
+const CONVERSATIONS_STORE = 'conversations';
+const CONTACTS_STORE = 'contacts';
 const MEGOLM_OUTBOUND_STORE = 'megolm_outbound';
 const MEGOLM_INBOUND_STORE = 'megolm_inbound';
 const MEGOLM_KEY_SHARES_STORE = 'megolm_key_shares';
@@ -43,6 +47,18 @@ export interface StoredMessage {
     fromDevice: string;
     text: string;
     timestamp: number; // milliseconds since epoch
+}
+
+export interface StoredConversation {
+    conversationId: string;
+    lastMessageText: string;
+    lastMessageTimestamp: number; // ms epoch
+    messageCount: number;
+}
+
+export interface StoredContact {
+    userId: string;
+    handle: string;
 }
 
 let db: IDBDatabase | null = null;
@@ -98,6 +114,25 @@ async function openDB(): Promise<IDBDatabase> {
                 // Index for search (can add full-text search later)
                 messagesStore.createIndex('fromUser', 'fromUser', {
                     unique: false,
+                });
+            }
+
+            // v4: Conversation summaries + contacts cache
+            if (!database.objectStoreNames.contains(CONVERSATIONS_STORE)) {
+                const convStore = database.createObjectStore(
+                    CONVERSATIONS_STORE,
+                    { keyPath: 'conversationId' },
+                );
+                convStore.createIndex(
+                    'lastMessageTimestamp',
+                    'lastMessageTimestamp',
+                    { unique: false },
+                );
+            }
+
+            if (!database.objectStoreNames.contains(CONTACTS_STORE)) {
+                database.createObjectStore(CONTACTS_STORE, {
+                    keyPath: 'userId',
                 });
             }
 
@@ -184,11 +219,24 @@ export async function saveMessages(
         timestamp: Date;
     }>,
 ): Promise<void> {
+    if (messages.length === 0) return;
+
     const database = await openDB();
-    const tx = database.transaction(MESSAGES_STORE, 'readwrite');
-    const store = tx.objectStore(MESSAGES_STORE);
+    const tx = database.transaction(
+        [MESSAGES_STORE, CONVERSATIONS_STORE],
+        'readwrite',
+    );
+    const msgStore = tx.objectStore(MESSAGES_STORE);
+    const convStore = tx.objectStore(CONVERSATIONS_STORE);
+
+    // Group messages by conversationId to build summaries
+    const convUpdates = new Map<
+        string,
+        { text: string; ts: number; count: number }
+    >();
 
     for (const msg of messages) {
+        const ts = msg.timestamp.getTime();
         const stored: StoredMessage = {
             id: msg.id,
             userId,
@@ -196,9 +244,44 @@ export async function saveMessages(
             fromUser: msg.fromUser,
             fromDevice: msg.fromDevice,
             text: msg.text,
-            timestamp: msg.timestamp.getTime(),
+            timestamp: ts,
         };
-        store.put(stored);
+        msgStore.put(stored);
+
+        const prev = convUpdates.get(msg.conversationId);
+        if (!prev || ts > prev.ts) {
+            convUpdates.set(msg.conversationId, {
+                text: msg.text,
+                ts,
+                count: (prev?.count ?? 0) + 1,
+            });
+        } else {
+            prev.count++;
+        }
+    }
+
+    // Upsert conversation summaries (read-modify-write)
+    for (const [convId, update] of convUpdates) {
+        const getReq = convStore.get(convId);
+        getReq.onsuccess = () => {
+            const existing = getReq.result as StoredConversation | undefined;
+            const conv: StoredConversation = {
+                conversationId: convId,
+                lastMessageText:
+                    existing && existing.lastMessageTimestamp > update.ts
+                        ? existing.lastMessageText
+                        : update.text,
+                lastMessageTimestamp: Math.max(
+                    existing?.lastMessageTimestamp ?? 0,
+                    update.ts,
+                ),
+                messageCount: Math.max(
+                    existing?.messageCount ?? 0,
+                    update.count,
+                ),
+            };
+            convStore.put(conv);
+        };
     }
 
     return new Promise((resolve, reject) => {
@@ -278,6 +361,72 @@ export async function clearMessages(userId?: string): Promise<void> {
     return new Promise((resolve, reject) => {
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ── Conversations ────────────────────────────────────────────────
+
+export async function loadConversations(): Promise<StoredConversation[]> {
+    const database = await openDB();
+    const tx = database.transaction(CONVERSATIONS_STORE, 'readonly');
+    const index = tx
+        .objectStore(CONVERSATIONS_STORE)
+        .index('lastMessageTimestamp');
+
+    return new Promise((resolve, reject) => {
+        const request = index.getAll();
+        request.onsuccess = () => {
+            // Index returns ascending; reverse for most-recent-first
+            resolve((request.result as StoredConversation[]).reverse());
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+// ── Contacts ─────────────────────────────────────────────────────
+
+export async function saveContact(
+    userId: string,
+    handle: string,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(CONTACTS_STORE, 'readwrite');
+    tx.objectStore(CONTACTS_STORE).put({ userId, handle } as StoredContact);
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+export async function getContact(userId: string): Promise<string | null> {
+    const database = await openDB();
+    const tx = database.transaction(CONTACTS_STORE, 'readonly');
+    const request = tx.objectStore(CONTACTS_STORE).get(userId);
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+            const result = request.result as StoredContact | undefined;
+            resolve(result?.handle ?? null);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+export async function loadAllContacts(): Promise<Map<string, string>> {
+    const database = await openDB();
+    const tx = database.transaction(CONTACTS_STORE, 'readonly');
+    const request = tx.objectStore(CONTACTS_STORE).getAll();
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+            const map = new Map<string, string>();
+            for (const c of request.result as StoredContact[]) {
+                map.set(c.userId, c.handle);
+            }
+            resolve(map);
+        };
+        request.onerror = () => reject(request.error);
     });
 }
 

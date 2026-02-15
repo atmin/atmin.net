@@ -5,29 +5,31 @@ import {
     clearKeyShares,
     clearMessages,
     clearOutboundSession,
+    deleteDatabase,
+    getContact,
     getLatestTimestamp,
     hasKeyShare,
+    loadAllContacts,
+    loadConversations,
     loadInboundSession,
     loadMessages,
     loadOutboundSession,
     recordKeyShare,
+    saveContact,
     saveInboundSession,
     saveMessages,
     saveOutboundSession,
 } from './db';
 
-// Setup fake IndexedDB
+// Setup fake IndexedDB — fresh instance per test
 beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
     globalThis.IDBKeyRange = FakeIDBKeyRange;
 });
 
-// Clear database after each test
+// Reset module-level db cache so next test opens fresh
 afterEach(async () => {
-    await clearMessages();
-    await clearOutboundSession();
-    await clearInboundSessions();
-    await clearKeyShares();
+    await deleteDatabase();
 });
 
 describe('db - Message storage', () => {
@@ -197,6 +199,131 @@ describe('db - Message storage', () => {
             expect(loaded1).toEqual([]);
             expect(loaded2).toEqual([]);
         });
+    });
+});
+
+describe('db - Conversations', () => {
+    const userId = '01TEST123USER456';
+    const convSelf = `self:${userId}`;
+    const convDm = `dm:${userId}:other-user`;
+
+    it('saveMessages upserts conversation summaries', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convSelf,
+                fromUser: userId,
+                fromDevice: 'dev1',
+                text: 'First saved',
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+            {
+                id: 'msg-2',
+                conversationId: convSelf,
+                fromUser: userId,
+                fromDevice: 'dev1',
+                text: 'Second saved',
+                timestamp: new Date('2024-01-01T11:00:00Z'),
+            },
+            {
+                id: 'msg-3',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: 'Hello from other',
+                timestamp: new Date('2024-01-01T12:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(2);
+
+        // Most recent first
+        expect(convs[0].conversationId).toBe(convDm);
+        expect(convs[0].lastMessageText).toBe('Hello from other');
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-01T12:00:00Z').getTime(),
+        );
+
+        expect(convs[1].conversationId).toBe(convSelf);
+        expect(convs[1].lastMessageText).toBe('Second saved');
+    });
+
+    it('upserts keep latest message across multiple saves', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: 'Old message',
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+        ]);
+
+        await saveMessages(userId, [
+            {
+                id: 'msg-2',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: 'New message',
+                timestamp: new Date('2024-01-02T10:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        expect(convs[0].lastMessageText).toBe('New message');
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-02T10:00:00Z').getTime(),
+        );
+    });
+
+    it('returns empty array when no conversations exist', async () => {
+        const convs = await loadConversations();
+        expect(convs).toEqual([]);
+    });
+
+    it('does not create conversations for empty message array', async () => {
+        await saveMessages(userId, []);
+        const convs = await loadConversations();
+        expect(convs).toEqual([]);
+    });
+});
+
+describe('db - Contacts', () => {
+    it('saves and retrieves a contact', async () => {
+        await saveContact('user-123', 'cool-handle');
+        const handle = await getContact('user-123');
+        expect(handle).toBe('cool-handle');
+    });
+
+    it('returns null for unknown userId', async () => {
+        const handle = await getContact('unknown-user');
+        expect(handle).toBeNull();
+    });
+
+    it('overwrites existing contact', async () => {
+        await saveContact('user-123', 'old-handle');
+        await saveContact('user-123', 'new-handle');
+        const handle = await getContact('user-123');
+        expect(handle).toBe('new-handle');
+    });
+
+    it('loadAllContacts returns all contacts as Map', async () => {
+        await saveContact('user-1', 'handle-a');
+        await saveContact('user-2', 'handle-b');
+
+        const contacts = await loadAllContacts();
+        expect(contacts.size).toBe(2);
+        expect(contacts.get('user-1')).toBe('handle-a');
+        expect(contacts.get('user-2')).toBe('handle-b');
+    });
+
+    it('loadAllContacts returns empty Map when none exist', async () => {
+        const contacts = await loadAllContacts();
+        expect(contacts.size).toBe(0);
     });
 });
 

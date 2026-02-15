@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { conversationId, fetchMessages, resolve, sendTextMessage } from './api';
 import type { Session } from './auth';
-import { loadMessages as loadFromDB, saveMessages } from './db';
+import { loadMessages as loadFromDB, saveContact, saveMessages } from './db';
 import { backupSessionKey } from './key-backup';
 import type { SessionManager } from './megolm-session';
 
@@ -48,6 +48,7 @@ export default function Chat({ session, sessionManager }: Props) {
         if (!handle) return;
 
         resolve(handle).then((res) => {
+            saveContact(res.user_id, handle);
             setConvId(conversationId(session.userId, res.user_id));
         });
     }, [handle, isSaved, session.userId]);
