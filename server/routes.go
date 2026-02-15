@@ -18,6 +18,7 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 		return requireAuth(h, store, cfg)
 	}
 	mux.HandleFunc("PUT /v1/profile", auth(handleProfile(store)))
+	mux.HandleFunc("DELETE /v1/profile", auth(handleDeleteProfile(store)))
 	mux.HandleFunc("POST /v1/devices/revoke", auth(handleRevokeDevice(store, cfg)))
 	mux.HandleFunc("POST /v1/send", auth(handleSend(store, hub)))
 	mux.HandleFunc("GET /v1/events", auth(handleEvents(hub)))

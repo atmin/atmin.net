@@ -307,6 +307,54 @@ func handleProfile(store Store) http.HandlerFunc {
 	}
 }
 
+// DELETE /v1/profile
+func handleDeleteProfile(store Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFrom(r.Context())
+
+		// Read profile to get invite_handle
+		profileData, err := store.GetObject(r.Context(), "users/"+userID+"/profile.json")
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				writeError(w, errNotFound)
+				return
+			}
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read profile"})
+			return
+		}
+
+		var profile map[string]string
+		json.Unmarshal(profileData, &profile)
+
+		// Delete all objects under each prefix
+		for _, prefix := range []string{
+			"users/" + userID + "/",
+			"inbox/" + userID + "/",
+			"backups/" + userID + "/",
+			"media/" + userID + "/",
+		} {
+			keys, _, err := store.ListObjects(r.Context(), prefix, 1000, "")
+			if err != nil {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to list objects"})
+				return
+			}
+			if len(keys) > 0 {
+				if err := store.DeleteObjects(r.Context(), keys); err != nil {
+					writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete objects"})
+					return
+				}
+			}
+		}
+
+		// Delete invite file
+		if handle := profile["invite_handle"]; handle != "" {
+			store.DeleteObject(r.Context(), "invites/"+handle+".json")
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
 // POST /v1/send
 func handleSend(store Store, hub *EventHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

@@ -275,6 +275,68 @@ func TestUpdateProfileInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestDeleteProfile(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Send a message so inbox has data
+	envBody, _ := json.Marshal(map[string]any{
+		"envelopes": []map[string]string{{"recipient_id": alice.UserID, "payload": "dGVzdA=="}},
+	})
+	mux.ServeHTTP(httptest.NewRecorder(), authedRequest(t, "POST", "/v1/send", alice.Token, string(envBody)))
+
+	// Delete profile
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE", "/v1/profile", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete profile status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	// Profile should be gone
+	_, err := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	if err == nil {
+		t.Fatal("profile still exists after delete")
+	}
+
+	// Invite should be gone
+	_, err = store.GetObject(context.Background(), "invites/"+alice.InviteHandle+".json")
+	if err == nil {
+		t.Fatal("invite still exists after delete")
+	}
+
+	// Inbox should be gone
+	keys, _, _ := store.ListObjects(context.Background(), "inbox/"+alice.UserID+"/", 10, "")
+	if len(keys) > 0 {
+		t.Fatalf("inbox still has %d objects after delete", len(keys))
+	}
+
+	// Resolve should 404
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.InviteHandle, nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("resolve after delete: status = %d, want 404", w.Code)
+	}
+}
+
+func TestDeleteProfileAlreadyDeleted(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// First delete
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE", "/v1/profile", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("first delete status = %d", w.Code)
+	}
+
+	// Second delete should 404
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE", "/v1/profile", alice.Token, ""))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("second delete status = %d, want 404", w.Code)
+	}
+}
+
 func TestAddDevice(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice's laptop")
