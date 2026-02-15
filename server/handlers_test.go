@@ -736,3 +736,260 @@ func TestCompactIdempotent(t *testing.T) {
 		t.Fatal("archive was modified by second compaction")
 	}
 }
+
+// --- Register error paths ---
+
+func TestRegisterInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("POST", "/v1/register", strings.NewReader("not json")))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestRegisterMissingFields(t *testing.T) {
+	_, mux, _ := testServer(t)
+
+	tests := []struct {
+		name string
+		body map[string]string
+	}{
+		{"missing device_label", map[string]string{"auth_public_key": "abc", "sharing_public_key": "def"}},
+		{"missing auth_public_key", map[string]string{"device_label": "phone", "sharing_public_key": "def"}},
+		{"missing sharing_public_key", map[string]string{"device_label": "phone", "auth_public_key": "abc"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(tc.body)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, httptest.NewRequest("POST", "/v1/register", strings.NewReader(string(body))))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", w.Code)
+			}
+		})
+	}
+}
+
+// --- AddDevice error paths ---
+
+func TestAddDeviceInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/devices", alice.Token, "not json"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestAddDeviceUserNotFound(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	proof := signAuthProof(alice.AuthPriv, "nonexistent-user", "device1")
+	body, _ := json.Marshal(map[string]any{
+		"user_id":      "nonexistent-user",
+		"auth_proof":   json.RawMessage(proof),
+		"device_label": "phone",
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/devices", alice.Token, string(body)))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+}
+
+// --- RevokeDevice error paths ---
+
+func TestRevokeDeviceInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/devices/revoke", alice.Token, "not json"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestRevokeDeviceWrongKey(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	_, wrongPriv, _ := ed25519.GenerateKey(nil)
+	proof := signAuthProof(wrongPriv, alice.UserID, alice.DeviceID)
+	body, _ := json.Marshal(map[string]any{
+		"device_id":  alice.DeviceID,
+		"auth_proof": json.RawMessage(proof),
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/devices/revoke", alice.Token, string(body)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// --- Send error paths ---
+
+func TestSendInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/send", alice.Token, "not json"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestSendBadEnvelopeJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Envelopes array contains a non-JSON-object string
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/send", alice.Token,
+		`{"envelopes":["not a valid envelope"]}`))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestSendMismatchedDevice(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Correct from_user but wrong from_device
+	envelope := map[string]any{
+		"v": 1, "to_user": alice.UserID,
+		"from_user": alice.UserID, "from_device": "wrong-device",
+		"msg_id": "msg001", "content_type": "megolm.message",
+		"payload": map[string]string{"session_id": "S1", "ciphertext": "dGVzdA"},
+	}
+	body, _ := json.Marshal(map[string]any{"envelopes": []any{envelope}})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/send", alice.Token, string(body)))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// --- StoreList error paths ---
+
+func TestStoreListMissingPrefix(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", "/v1/store/list", alice.Token, ""))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestStoreListDisallowedPrefix(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET",
+		"/v1/store/list?prefix=invites/", alice.Token, ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// --- StoreObject error paths ---
+
+func TestStoreObjectMissingKey(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", "/v1/store/object", alice.Token, ""))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestStoreObjectDisallowedKey(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET",
+		"/v1/store/object?key=invites/something.json", alice.Token, ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+// --- StorePresign error paths ---
+
+func TestStorePresignInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/presign", alice.Token, "not json"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestStorePresignMissingFields(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing key", map[string]any{"bytes": 1000}},
+		{"missing bytes", map[string]any{"key": "media/" + alice.UserID + "/photo.jpg"}},
+		{"zero bytes", map[string]any{"key": "media/" + alice.UserID + "/photo.jpg", "bytes": 0}},
+		{"negative bytes", map[string]any{"key": "media/" + alice.UserID + "/photo.jpg", "bytes": -1}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(tc.body)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/presign", alice.Token, string(body)))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", w.Code)
+			}
+		})
+	}
+}
+
+// --- StoreCompact error paths ---
+
+func TestCompactInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, "not json"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCompactMissingFields(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	tests := []struct {
+		name string
+		body map[string]string
+	}{
+		{"missing prefix", map[string]string{"up_to": "ZZZ"}},
+		{"missing up_to", map[string]string{"prefix": "inbox/" + alice.UserID + "/live/"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(tc.body)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", w.Code)
+			}
+		})
+	}
+}
