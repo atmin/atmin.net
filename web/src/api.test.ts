@@ -341,6 +341,7 @@ describe('api - Megolm send/receive', () => {
     const toUserId = '01TESTUSER789';
 
     let recipientKeys: Awaited<ReturnType<typeof deriveKeys>>;
+    let senderKeys: Awaited<ReturnType<typeof deriveKeys>>;
 
     beforeEach(async () => {
         fetchMock.mockReset();
@@ -349,6 +350,8 @@ describe('api - Megolm send/receive', () => {
 
         const recipientSecret = generateBackupSecret();
         recipientKeys = await deriveKeys(recipientSecret);
+        const senderSecret = generateBackupSecret();
+        senderKeys = await deriveKeys(senderSecret);
     });
 
     afterEach(async () => {
@@ -359,7 +362,7 @@ describe('api - Megolm send/receive', () => {
 
     describe('sendTextMessage', () => {
         it('produces key_share + message envelopes on first send', async () => {
-            const mgr = createSessionManager(wasm);
+            const mgr = await createSessionManager(wasm);
             fetchMock.mockResolvedValueOnce(mockJsonResponse({}) as Response);
 
             await sendTextMessage(
@@ -368,6 +371,7 @@ describe('api - Megolm send/receive', () => {
                 fromDeviceId,
                 toUserId,
                 recipientKeys.sharing.publicKeyBytes,
+                senderKeys.sharing.publicKeyBytes,
                 'Hello Megolm!',
                 mgr,
             );
@@ -375,10 +379,10 @@ describe('api - Megolm send/receive', () => {
             const fetchCall = fetchMock.mock.calls[0];
             const body = JSON.parse(fetchCall[1].body);
 
-            // key_share + message to recipient + self-copy = 3 envelopes
-            expect(body.envelopes).toHaveLength(3);
+            // key_share to recipient + key_share to self + message to recipient + self-copy = 4 envelopes
+            expect(body.envelopes).toHaveLength(4);
 
-            const keyShare = body.envelopes.find(
+            const keyShares = body.envelopes.filter(
                 (e: { content_type: string }) =>
                     e.content_type === 'megolm.key_share',
             );
@@ -387,9 +391,10 @@ describe('api - Megolm send/receive', () => {
                     e.content_type === 'megolm.message',
             );
 
-            expect(keyShare).toBeDefined();
-            expect(keyShare.to_user).toBe(toUserId);
-            expect(keyShare.payload).toHaveProperty('ephemeral_key');
+            expect(keyShares).toHaveLength(2);
+            expect(keyShares[0].to_user).toBe(toUserId);
+            expect(keyShares[1].to_user).toBe(fromUserId);
+            expect(keyShares[0].payload).toHaveProperty('ephemeral_key');
 
             expect(messages).toHaveLength(2);
             expect(messages[0].payload).toHaveProperty('session_id');
@@ -405,7 +410,7 @@ describe('api - Megolm send/receive', () => {
         });
 
         it('skips key_share on subsequent sends to same recipient', async () => {
-            const mgr = createSessionManager(wasm);
+            const mgr = await createSessionManager(wasm);
 
             fetchMock.mockResolvedValueOnce(mockJsonResponse({}) as Response);
             await sendTextMessage(
@@ -414,6 +419,7 @@ describe('api - Megolm send/receive', () => {
                 fromDeviceId,
                 toUserId,
                 recipientKeys.sharing.publicKeyBytes,
+                senderKeys.sharing.publicKeyBytes,
                 'First',
                 mgr,
             );
@@ -425,6 +431,7 @@ describe('api - Megolm send/receive', () => {
                 fromDeviceId,
                 toUserId,
                 recipientKeys.sharing.publicKeyBytes,
+                senderKeys.sharing.publicKeyBytes,
                 'Second',
                 mgr,
             );
@@ -444,7 +451,7 @@ describe('api - Megolm send/receive', () => {
 
     describe('fetchMessages with Megolm', () => {
         it('processes key_share before megolm.message', async () => {
-            const mgr = createSessionManager(wasm);
+            const mgr = await createSessionManager(wasm);
 
             const sender = new MegolmOutbound();
             const sessionKey = sender.session_key();
@@ -526,7 +533,7 @@ describe('api - Megolm send/receive', () => {
         });
 
         it('still handles legacy text/plain messages', async () => {
-            const mgr = createSessionManager(wasm);
+            const mgr = await createSessionManager(wasm);
             const { eciesEncrypt } = await import('./crypto');
 
             const encrypted = await eciesEncrypt(
@@ -576,7 +583,7 @@ describe('api - Megolm send/receive', () => {
         });
 
         it('skips messages with unknown session_id', async () => {
-            const mgr = createSessionManager(wasm);
+            const mgr = await createSessionManager(wasm);
 
             const messageEnvelope = {
                 v: 1,

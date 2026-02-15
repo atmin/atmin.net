@@ -32,7 +32,13 @@ function App() {
             const { createSessionManager } = await import('./megolm-session');
             const wasm = await loadWasm();
             if (cancelled) return;
-            setSessionManager(createSessionManager(wasm));
+            const mgr = await createSessionManager(
+                wasm,
+                session.userId,
+                session.deviceId,
+            );
+            if (cancelled) return;
+            setSessionManager(mgr);
         })();
 
         return () => {

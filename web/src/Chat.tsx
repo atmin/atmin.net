@@ -12,6 +12,17 @@ interface Message {
     timestamp: Date;
 }
 
+// Merge newly synced messages into existing state.
+// Keeps previously-decrypted messages that may fail re-decryption
+// (Megolm ratchet only goes forward), adds new ones.
+function mergeMessages(existing: Message[], synced: Message[]): Message[] {
+    const byId = new Map(existing.map((m) => [m.id, m]));
+    for (const m of synced) byId.set(m.id, m);
+    return [...byId.values()].sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    );
+}
+
 interface Props {
     session: Session;
     sessionManager: SessionManager | null;
@@ -76,8 +87,8 @@ export default function Chat({ session, sessionManager }: Props) {
                     (m) => m.conversationId === convId,
                 );
 
-                // Update state with filtered messages
-                setMessages(convMessages);
+                // Merge with existing (Megolm ratchet may skip already-decrypted)
+                setMessages((prev) => mergeMessages(prev, convMessages));
 
                 // Save ALL messages to IndexedDB (not just this conversation)
                 await saveMessages(session.userId, synced);
@@ -117,7 +128,7 @@ export default function Chat({ session, sessionManager }: Props) {
                 const convMessages = synced.filter(
                     (m) => m.conversationId === convId,
                 );
-                setMessages(convMessages);
+                setMessages((prev) => mergeMessages(prev, convMessages));
                 await saveMessages(session.userId, synced);
             } catch (error) {
                 console.error('Failed to sync on SSE notification:', error);
@@ -172,6 +183,7 @@ export default function Chat({ session, sessionManager }: Props) {
                     session.deviceId,
                     recipientUserId,
                     recipientPubKeyBytes,
+                    session.sharingPublicKeyBytes,
                     text,
                     sessionManager,
                 );
@@ -201,7 +213,7 @@ export default function Chat({ session, sessionManager }: Props) {
             const convMessages = synced.filter(
                 (m) => m.conversationId === convId,
             );
-            setMessages(convMessages);
+            setMessages((prev) => mergeMessages(prev, convMessages));
             await saveMessages(session.userId, synced);
             setInputValue('');
         } catch (error) {

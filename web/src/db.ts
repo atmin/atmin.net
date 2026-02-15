@@ -160,6 +160,10 @@ export async function clearKeys(): Promise<void> {
 }
 
 export function deleteDatabase(): Promise<void> {
+    if (db) {
+        db.close();
+        db = null;
+    }
     return new Promise((resolve, reject) => {
         const request = indexedDB.deleteDatabase(DB_NAME);
         request.onsuccess = () => resolve();

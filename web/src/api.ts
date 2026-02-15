@@ -175,6 +175,7 @@ export async function sendTextMessage(
     fromDeviceId: string,
     toUserId: string,
     toPublicKeyBytes: Uint8Array,
+    selfPublicKeyBytes: Uint8Array,
     messageText: string,
     sessionManager: SessionManager,
 ): Promise<{ isNewSession: boolean }> {
@@ -200,11 +201,12 @@ export async function sendTextMessage(
         !(await sessionManager.hasSharedWith(session.session_id, toUserId));
 
     if (needsShare) {
-        const recipientPubKey = await importX25519PublicKey(toPublicKeyBytes);
         const sessionKeyBytes = new TextEncoder().encode(session.session_key());
-        const encrypted = await eciesEncrypt(recipientPubKey, sessionKeyBytes);
         const keyShareMsgId = ulid();
 
+        // Key share to recipient
+        const recipientPubKey = await importX25519PublicKey(toPublicKeyBytes);
+        const encrypted = await eciesEncrypt(recipientPubKey, sessionKeyBytes);
         envelopes.push({
             v: 1,
             to_user: toUserId,
@@ -220,6 +222,30 @@ export async function sendTextMessage(
                 ciphertext: base64UrlEncode(encrypted.ciphertext),
             },
         });
+
+        // Key share to self (so other devices can decrypt self-copies)
+        if (toUserId !== fromUserId) {
+            const selfPubKey = await importX25519PublicKey(selfPublicKeyBytes);
+            const selfEncrypted = await eciesEncrypt(
+                selfPubKey,
+                sessionKeyBytes,
+            );
+            envelopes.push({
+                v: 1,
+                to_user: fromUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: ulid(),
+                content_type: 'megolm.key_share',
+                timestamp: Date.now(),
+                payload: {
+                    conversation_id: convId,
+                    ephemeral_key: base64UrlEncode(selfEncrypted.ephemeralKey),
+                    iv: base64UrlEncode(selfEncrypted.iv),
+                    ciphertext: base64UrlEncode(selfEncrypted.ciphertext),
+                },
+            });
+        }
     }
 
     // Encrypt message with Megolm
@@ -338,6 +364,7 @@ export async function fetchMessages(
 
     // Pass 2: process messages
     const messages: DecryptedMessage[] = [];
+    const advancedInbounds = new Set<string>();
     for (const { key, envelope } of envelopes) {
         try {
             if (envelope.content_type === 'megolm.key_share') continue;
@@ -352,6 +379,7 @@ export async function fetchMessages(
                     continue;
                 }
                 const text = inbound.decrypt(envelope.payload.ciphertext);
+                advancedInbounds.add(sessionId);
                 messages.push({
                     id: envelope.msg_id,
                     conversationId:
@@ -388,6 +416,14 @@ export async function fetchMessages(
             }
         } catch (error) {
             console.error(`Failed to decrypt message ${key}:`, error);
+        }
+    }
+
+    // Persist inbound sessions whose ratchets advanced during decryption,
+    // so the advanced state survives page reloads and we don't re-decrypt old messages.
+    if (sessionManager) {
+        for (const sessionId of advancedInbounds) {
+            await sessionManager.persistInbound(sessionId);
         }
     }
 

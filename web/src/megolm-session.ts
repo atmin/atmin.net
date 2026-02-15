@@ -37,16 +37,25 @@ export interface SessionManager {
         exportedB64: string,
     ): Promise<MegolmInbound>;
     getInbound(sessionId: string): Promise<MegolmInbound | null>;
+    persistInbound(sessionId: string): Promise<void>;
     hasSharedWith(sessionId: string, recipientUserId: string): Promise<boolean>;
     recordShare(sessionId: string, recipientUserId: string): Promise<void>;
     destroy(): void;
 }
 
-export function createSessionManager(wasm: WasmModule): SessionManager {
+export async function createSessionManager(
+    wasm: WasmModule,
+    selfUserId?: string,
+    selfDeviceId?: string,
+): Promise<SessionManager> {
     let outbound: MegolmOutbound | null = null;
     const inboundCache = new Map<string, MegolmInbound>();
+    const inboundMeta = new Map<
+        string,
+        { fromUser: string; fromDevice: string }
+    >();
 
-    return {
+    const mgr: SessionManager = {
         async getOutbound(): Promise<[MegolmOutbound, boolean]> {
             // Return cached
             if (outbound) return [outbound, false];
@@ -60,7 +69,15 @@ export function createSessionManager(wasm: WasmModule): SessionManager {
 
             // Create new
             outbound = new wasm.MegolmOutbound();
-            await this.persistOutbound(outbound);
+            await mgr.persistOutbound(outbound);
+            // Register self-inbound so we can decrypt our own self-copies
+            if (selfUserId && selfDeviceId) {
+                await mgr.addInbound(
+                    selfUserId,
+                    selfDeviceId,
+                    outbound.session_key(),
+                );
+            }
             return [outbound, true];
         },
 
@@ -84,7 +101,14 @@ export function createSessionManager(wasm: WasmModule): SessionManager {
             }
             outbound = new wasm.MegolmOutbound();
             await clearOutboundSession();
-            await this.persistOutbound(outbound);
+            await mgr.persistOutbound(outbound);
+            if (selfUserId && selfDeviceId) {
+                await mgr.addInbound(
+                    selfUserId,
+                    selfDeviceId,
+                    outbound.session_key(),
+                );
+            }
             return outbound;
         },
 
@@ -97,13 +121,29 @@ export function createSessionManager(wasm: WasmModule): SessionManager {
             const sessionId = session.session_id;
 
             // If already cached, free the new one and return existing
-            const existing = inboundCache.get(sessionId);
-            if (existing) {
+            const cached = inboundCache.get(sessionId);
+            if (cached) {
                 session.free();
-                return existing;
+                return cached;
+            }
+
+            // Check IndexedDB — keep earlier index if it exists
+            const stored = await loadInboundSession(sessionId);
+            if (stored) {
+                session.free();
+                const fromDB = wasm.MegolmInbound.from_pickle(
+                    stored.pickleJson,
+                );
+                inboundCache.set(sessionId, fromDB);
+                inboundMeta.set(sessionId, {
+                    fromUser: stored.fromUser,
+                    fromDevice: stored.fromDevice,
+                });
+                return fromDB;
             }
 
             inboundCache.set(sessionId, session);
+            inboundMeta.set(sessionId, { fromUser, fromDevice });
             await saveInboundSession(
                 sessionId,
                 fromUser,
@@ -124,6 +164,7 @@ export function createSessionManager(wasm: WasmModule): SessionManager {
 
             const session = wasm.MegolmInbound.from_export(exportedB64);
             inboundCache.set(sessionId, session);
+            inboundMeta.set(sessionId, { fromUser, fromDevice });
             await saveInboundSession(
                 sessionId,
                 fromUser,
@@ -144,7 +185,23 @@ export function createSessionManager(wasm: WasmModule): SessionManager {
 
             const session = wasm.MegolmInbound.from_pickle(stored.pickleJson);
             inboundCache.set(sessionId, session);
+            inboundMeta.set(sessionId, {
+                fromUser: stored.fromUser,
+                fromDevice: stored.fromDevice,
+            });
             return session;
+        },
+
+        async persistInbound(sessionId: string): Promise<void> {
+            const session = inboundCache.get(sessionId);
+            const meta = inboundMeta.get(sessionId);
+            if (!session || !meta) return;
+            await saveInboundSession(
+                sessionId,
+                meta.fromUser,
+                meta.fromDevice,
+                session.pickle(),
+            );
         },
 
         async hasSharedWith(
@@ -172,4 +229,20 @@ export function createSessionManager(wasm: WasmModule): SessionManager {
             inboundCache.clear();
         },
     };
+
+    // Eagerly load outbound + register self-inbound at creation time
+    // so fetchMessages can decrypt self-copies before any send
+    if (selfUserId && selfDeviceId) {
+        const stored = await loadOutboundSession();
+        if (stored) {
+            outbound = wasm.MegolmOutbound.from_pickle(stored.pickleJson);
+            await mgr.addInbound(
+                selfUserId,
+                selfDeviceId,
+                outbound.session_key(),
+            );
+        }
+    }
+
+    return mgr;
 }
