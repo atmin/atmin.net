@@ -160,6 +160,8 @@ S3 writes:
 
 ## 5. Bob syncs
 
+Bob's SSE connection (`GET /v1/events`) receives `new_message`:
+
 ```
 GET /v1/store/list?prefix=inbox/bob01/live/&cursor=msg004
 → ["inbox/bob01/live/msg005", "inbox/bob01/live/msg006"]
@@ -175,7 +177,7 @@ lets Bob's UI show it came from a different device (if desired).
 
 ## 6. Laptop syncs (sibling device key discovery)
 
-Laptop syncs inbox:
+Laptop's SSE connection receives `new_message`. Laptop syncs inbox:
 
 ```
 GET /v1/store/list?prefix=inbox/alice01/live/&cursor=msg004
@@ -230,8 +232,8 @@ POST /v1/send
 }
 ```
 
-Both Alice's laptop and phone sync and decrypt `msg007` with S1.
-No key share, no key backup sync — they both already have the key.
+Both Alice's laptop and phone receive `new_message` via SSE, sync, and decrypt
+`msg007` with S1. No key share, no key backup sync — they both already have the key.
 
 ## S3 state after scenario
 

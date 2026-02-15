@@ -24,9 +24,9 @@ POST /v1/register
 ```
 
 S3 writes:
-- `users/alice01/profile.json` — `{ auth_public_key, sharing_public_key }`
+- `users/alice01/profile.json` — `{ user_id, invite_handle, auth_public_key, sharing_public_key, created_at }`
 - `users/alice01/devices/adev01.json` — `{ device_label: "Alice's laptop" }`
-- `invites/alice-xyz.json` — `{ "user_id": "alice01" }`
+- `invites/alice-xyz.json` — `{ user_id, sharing_public_key }`
 
 Client stores in IndexedDB:
 - sharing private key (for decrypting key shares)
@@ -58,8 +58,7 @@ GET /v1/resolve/alice-xyz
 ```
 
 S3 reads:
-- `invites/alice-xyz.json`
-- `users/alice01/profile.json`
+- `invites/alice-xyz.json` — contains both `user_id` and `sharing_public_key` (single read)
 
 Bob's client now knows Alice's user ID and sharing public key.
 
@@ -136,6 +135,10 @@ Note: ULID ordering of `msg001` < `msg002` ensures Alice processes the key share
 Note: Bob does not send himself the key share — he already has his own session key.
 
 ## 6. Alice syncs and reads the message
+
+Alice's client has an open SSE connection (`GET /v1/events`). When Bob's
+message is written, the server sends a `new_message` event. Alice's client
+responds by syncing:
 
 ```
 GET /v1/store/list?prefix=inbox/alice01/live/&cursor=...
@@ -219,8 +222,9 @@ S3 writes:
 
 ## 8. Bob syncs and reads the reply
 
-Same pattern as step 6. Bob processes key share `msg003` first,
-stores Alice's session key `S2`, then decrypts `msg004`.
+Bob's SSE connection receives `new_message`. Same sync pattern as step 6:
+Bob processes key share `msg003` first, stores Alice's session key `S2`,
+then decrypts `msg004`.
 
 ## S3 state after scenario
 
