@@ -1,4 +1,4 @@
-import { clearKeys, getKey, putKey } from './db';
+import { deleteDatabase, getKey, putKey } from './db';
 
 export interface Session {
     token: string;
@@ -72,5 +72,5 @@ export async function clearSession(): Promise<void> {
     localStorage.removeItem(`${LS_PREFIX}deviceId`);
     localStorage.removeItem(`${LS_PREFIX}inviteHandle`);
     localStorage.removeItem(`${LS_PREFIX}sharingPublicKeyBytes`);
-    await clearKeys();
+    await deleteDatabase();
 }

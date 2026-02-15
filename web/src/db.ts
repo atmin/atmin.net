@@ -158,6 +158,14 @@ export async function clearKeys(): Promise<void> {
     });
 }
 
+export function deleteDatabase(): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(DB_NAME);
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+    });
+}
+
 // ── Message storage ─────────────────────────────────────────────────
 
 export async function saveMessages(
