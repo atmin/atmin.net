@@ -44,3 +44,7 @@ bin/
 server/server
 server/dist/
 web/dist/
+
+# Playwright
+test-results/
+playwright-report/

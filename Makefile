@@ -1,4 +1,4 @@
-.PHONY: all build test lint fmt clean dev run
+.PHONY: all build test lint fmt clean dev run e2e
 .PHONY: server server-build server-test server-lint server-fmt
 .PHONY: web-dev web-wasm web-build web-test web-lint web-fmt
 .PHONY: up down
@@ -74,6 +74,10 @@ up:
 
 down:
 	docker compose down
+
+e2e:
+	docker compose up -d
+	cd web && npx playwright test
 
 clean:
 	rm -rf bin/
