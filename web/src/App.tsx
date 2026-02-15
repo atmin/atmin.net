@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { clearSession, loadSession, type Session } from './auth';
 import Chat from './Chat';
@@ -11,7 +11,9 @@ import Register from './Register';
 function App() {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
-    const sessionManagerRef = useRef<SessionManager | null>(null);
+    const [sessionManager, setSessionManager] = useState<SessionManager | null>(
+        null,
+    );
 
     useEffect(() => {
         loadSession()
@@ -30,19 +32,23 @@ function App() {
             const { createSessionManager } = await import('./megolm-session');
             const wasm = await loadWasm();
             if (cancelled) return;
-            sessionManagerRef.current = createSessionManager(wasm);
+            setSessionManager(createSessionManager(wasm));
         })();
 
         return () => {
             cancelled = true;
-            sessionManagerRef.current?.destroy();
-            sessionManagerRef.current = null;
+            setSessionManager((prev) => {
+                prev?.destroy();
+                return null;
+            });
         };
     }, [session]);
 
     const handleLogout = async () => {
-        sessionManagerRef.current?.destroy();
-        sessionManagerRef.current = null;
+        setSessionManager((prev) => {
+            prev?.destroy();
+            return null;
+        });
         await clearSession();
         setSession(null);
     };
@@ -91,7 +97,7 @@ function App() {
                         session ? (
                             <Chat
                                 session={session}
-                                sessionManager={sessionManagerRef.current}
+                                sessionManager={sessionManager}
                             />
                         ) : (
                             <Navigate to="/login" replace />
