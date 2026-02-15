@@ -150,6 +150,24 @@ On adding a contact, the client:
 All devices sync the same contacts file. Last-write-wins is acceptable here —
 contact edits are infrequent and user-initiated.
 
+### DELETE /v1/profile — account deletion endpoint
+
+A new authenticated endpoint for self-service account deletion.
+
+**Server logic:**
+
+1. Read `users/{uid}/profile.json` to get `invite_handle`.
+2. Delete all objects under `users/{uid}/`, `inbox/{uid}/`,
+   `backups/{uid}/`, `media/{uid}/`.
+3. Delete `invites/{handle}.json`.
+4. Return 200.
+
+This reuses the same delete-all-user-data logic as the automated cleanup
+in ADR-0006. The token is invalidated implicitly — subsequent requests
+fail because the profile no longer exists.
+
+No confirmation step server-side. The client should confirm before calling.
+
 ### Avatar upload
 
 Avatars use the existing presigned upload flow:
@@ -164,6 +182,7 @@ No new server-side logic needed.
 ### Requires
 
 - New endpoint: `PUT /v1/profile` (authenticated, read-merge-write both files).
+- New endpoint: `DELETE /v1/profile` (authenticated, deletes all user data).
 - New function: `authorizeKeyWrite` (restricts `users/` writes to own uid).
 - Update `handleRegister` to include `invite_handle` in `profile.json`.
 - Update `handleStorePresign` to use `authorizeKeyWrite` instead of `authorizeKey`.
