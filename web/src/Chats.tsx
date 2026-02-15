@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import type { Session } from './auth';
 
 interface Props {
@@ -10,6 +10,8 @@ interface Props {
 export default function Chats({ session, onLogout }: Props) {
     const [copied, setCopied] = useState(false);
     const [serverOk, setServerOk] = useState<boolean | null>(null);
+    const [handleInput, setHandleInput] = useState('');
+    const navigate = useNavigate();
 
     useEffect(() => {
         fetch('/healthz')
@@ -79,10 +81,30 @@ export default function Chats({ session, onLogout }: Props) {
                         </div>
                     </Link>
 
-                    {/* Placeholder for other chats */}
-                    <div className="rounded border border-dashed border-stone-300 p-8 text-center text-stone-400">
-                        Other chats will appear here
-                    </div>
+                    {/* New chat */}
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            const h = handleInput.trim();
+                            if (h) navigate(`/${encodeURIComponent(h)}`);
+                        }}
+                        className="flex gap-2"
+                    >
+                        <input
+                            type="text"
+                            value={handleInput}
+                            onChange={(e) => setHandleInput(e.target.value)}
+                            placeholder="Enter a handle..."
+                            className="flex-1 rounded border border-stone-300 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+                        />
+                        <button
+                            type="submit"
+                            disabled={!handleInput.trim()}
+                            className="rounded bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:bg-stone-300"
+                        >
+                            Chat
+                        </button>
+                    </form>
                 </div>
 
                 <button

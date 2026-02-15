@@ -32,8 +32,11 @@ afterEach(async () => {
 
 describe('db - Message storage', () => {
     const testUserId = '01TEST123USER456';
+    const convSelf = `self:${testUserId}`;
+    const convOther = `dm:${testUserId}:other-user`;
     const testMessages: Array<{
         id: string;
+        conversationId: string;
         fromUser: string;
         fromDevice: string;
         text: string;
@@ -41,6 +44,7 @@ describe('db - Message storage', () => {
     }> = [
         {
             id: 'msg-001',
+            conversationId: convSelf,
             fromUser: testUserId,
             fromDevice: 'device-001',
             text: 'Hello world',
@@ -48,6 +52,7 @@ describe('db - Message storage', () => {
         },
         {
             id: 'msg-002',
+            conversationId: convSelf,
             fromUser: testUserId,
             fromDevice: 'device-001',
             text: 'Second message',
@@ -55,6 +60,7 @@ describe('db - Message storage', () => {
         },
         {
             id: 'msg-003',
+            conversationId: convOther,
             fromUser: 'other-user',
             fromDevice: 'device-002',
             text: 'Message from another user',
@@ -120,6 +126,7 @@ describe('db - Message storage', () => {
             await saveMessages('other-user-id', [
                 {
                     id: 'msg-other',
+                    conversationId: 'self:other-user-id',
                     fromUser: 'other-user-id',
                     fromDevice: 'device-other',
                     text: 'Other user message',
@@ -153,6 +160,7 @@ describe('db - Message storage', () => {
             await saveMessages('other-user', [
                 {
                     id: 'msg-other',
+                    conversationId: 'self:other-user',
                     fromUser: 'other-user',
                     fromDevice: 'device-other',
                     text: 'Other message',
@@ -174,6 +182,7 @@ describe('db - Message storage', () => {
             await saveMessages('other-user', [
                 {
                     id: 'msg-other',
+                    conversationId: 'self:other-user',
                     fromUser: 'other-user',
                     fromDevice: 'device-other',
                     text: 'Other message',

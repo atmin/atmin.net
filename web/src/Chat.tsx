@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { fetchMessages, resolve, sendTextMessage } from './api';
+import {
+    conversationId,
+    fetchMessages,
+    resolve,
+    sendTextMessage,
+} from './api';
 import type { Session } from './auth';
 import { loadMessages as loadFromDB, saveMessages } from './db';
 import { backupSessionKey } from './key-backup';
@@ -26,16 +31,35 @@ export default function Chat({ session, sessionManager }: Props) {
     const [inputValue, setInputValue] = useState('');
     const [sending, setSending] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [convId, setConvId] = useState<string | null>(null);
+
+    // Resolve conversation ID from handle
+    useEffect(() => {
+        if (isSaved) {
+            setConvId(conversationId(session.userId, session.userId));
+            return;
+        }
+        if (!handle) return;
+
+        resolve(handle).then((res) => {
+            setConvId(conversationId(session.userId, res.user_id));
+        });
+    }, [handle, isSaved, session.userId]);
 
     // Load messages on mount: IndexedDB first (instant), then sync from server
     useEffect(() => {
+        if (!convId) return;
+
         const loadAndSync = async () => {
             try {
                 // Load from IndexedDB first (instant)
                 const cached = await loadFromDB(session.userId);
-                if (cached.length > 0) {
+                const filtered = cached.filter(
+                    (m) => m.conversationId === convId,
+                );
+                if (filtered.length > 0) {
                     setMessages(
-                        cached.map((m) => ({
+                        filtered.map((m) => ({
                             id: m.id,
                             text: m.text,
                             timestamp: new Date(m.timestamp),
@@ -52,10 +76,15 @@ export default function Chat({ session, sessionManager }: Props) {
                     sessionManager ?? undefined,
                 );
 
-                // Update state with server messages
-                setMessages(synced);
+                // Filter to this conversation
+                const convMessages = synced.filter(
+                    (m) => m.conversationId === convId,
+                );
 
-                // Save to IndexedDB
+                // Update state with filtered messages
+                setMessages(convMessages);
+
+                // Save ALL messages to IndexedDB (not just this conversation)
                 await saveMessages(session.userId, synced);
             } catch (error) {
                 console.error('Failed to load messages:', error);
@@ -66,6 +95,7 @@ export default function Chat({ session, sessionManager }: Props) {
 
         loadAndSync();
     }, [
+        convId,
         session.token,
         session.userId,
         session.sharingPrivateKey,
@@ -74,6 +104,8 @@ export default function Chat({ session, sessionManager }: Props) {
 
     // Real-time sync via Server-Sent Events
     useEffect(() => {
+        if (!convId) return;
+
         // EventSource doesn't support custom headers, so pass token as query param
         const url = `/v1/events?token=${encodeURIComponent(session.token)}`;
         const events = new EventSource(url);
@@ -87,7 +119,10 @@ export default function Chat({ session, sessionManager }: Props) {
                     session.sharingPrivateKey,
                     sessionManager ?? undefined,
                 );
-                setMessages(synced);
+                const convMessages = synced.filter(
+                    (m) => m.conversationId === convId,
+                );
+                setMessages(convMessages);
                 await saveMessages(session.userId, synced);
             } catch (error) {
                 console.error('Failed to sync on SSE notification:', error);
@@ -101,6 +136,7 @@ export default function Chat({ session, sessionManager }: Props) {
 
         return () => events.close();
     }, [
+        convId,
         session.token,
         session.userId,
         session.sharingPrivateKey,
@@ -167,7 +203,10 @@ export default function Chat({ session, sessionManager }: Props) {
             );
 
             // Update state and IndexedDB
-            setMessages(synced);
+            const convMessages = synced.filter(
+                (m) => m.conversationId === convId,
+            );
+            setMessages(convMessages);
             await saveMessages(session.userId, synced);
             setInputValue('');
         } catch (error) {

@@ -161,6 +161,13 @@ export function storeCompact(
 
 import type { SessionManager } from './megolm-session';
 
+// Deterministic conversation ID
+export function conversationId(userA: string, userB: string): string {
+    if (userA === userB) return `self:${userA}`;
+    const [a, b] = [userA, userB].sort();
+    return `dm:${a}:${b}`;
+}
+
 // Helper to send an encrypted text message
 export async function sendTextMessage(
     token: string,
@@ -185,6 +192,7 @@ export async function sendTextMessage(
     }
 
     const envelopes: Envelope[] = [];
+    const convId = conversationId(fromUserId, toUserId);
 
     // Send key share if needed for this recipient
     const needsShare =
@@ -206,6 +214,7 @@ export async function sendTextMessage(
             content_type: 'megolm.key_share',
             timestamp: Date.now(),
             payload: {
+                conversation_id: convId,
                 ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
                 iv: base64UrlEncode(encrypted.iv),
                 ciphertext: base64UrlEncode(encrypted.ciphertext),
@@ -227,6 +236,7 @@ export async function sendTextMessage(
         content_type: 'megolm.message',
         timestamp: Date.now(),
         payload: {
+            conversation_id: convId,
             session_id: session.session_id,
             ciphertext,
         },
@@ -243,6 +253,7 @@ export async function sendTextMessage(
             content_type: 'megolm.message',
             timestamp: Date.now(),
             payload: {
+                conversation_id: convId,
                 session_id: session.session_id,
                 ciphertext,
             },
@@ -264,6 +275,7 @@ export async function sendTextMessage(
 // Helper to fetch and decrypt messages from inbox
 export interface DecryptedMessage {
     id: string;
+    conversationId: string;
     fromUser: string;
     fromDevice: string;
     text: string;
@@ -342,6 +354,9 @@ export async function fetchMessages(
                 const text = inbound.decrypt(envelope.payload.ciphertext);
                 messages.push({
                     id: envelope.msg_id,
+                    conversationId:
+                        envelope.payload.conversation_id ??
+                        conversationId(envelope.from_user, userId),
                     fromUser: envelope.from_user,
                     fromDevice: envelope.from_device,
                     text,
@@ -362,6 +377,9 @@ export async function fetchMessages(
                 );
                 messages.push({
                     id: envelope.msg_id,
+                    conversationId:
+                        envelope.payload.conversation_id ??
+                        conversationId(envelope.from_user, userId),
                     fromUser: envelope.from_user,
                     fromDevice: envelope.from_device,
                     text: new TextDecoder().decode(plaintext),

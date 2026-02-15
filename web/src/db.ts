@@ -38,6 +38,7 @@ export interface StoredKeyShare {
 export interface StoredMessage {
     id: string; // msg_id, primary key
     userId: string; // The user's inbox this message is in
+    conversationId: string; // e.g. "self:U1" or "dm:U1:U2"
     fromUser: string;
     fromDevice: string;
     text: string;
@@ -172,6 +173,7 @@ export async function saveMessages(
     userId: string,
     messages: Array<{
         id: string;
+        conversationId: string;
         fromUser: string;
         fromDevice: string;
         text: string;
@@ -186,6 +188,7 @@ export async function saveMessages(
         const stored: StoredMessage = {
             id: msg.id,
             userId,
+            conversationId: msg.conversationId,
             fromUser: msg.fromUser,
             fromDevice: msg.fromDevice,
             text: msg.text,
