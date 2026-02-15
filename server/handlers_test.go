@@ -181,6 +181,100 @@ func TestResolveNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateProfile(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	body, _ := json.Marshal(map[string]any{
+		"display_name": "Alice Wonderland",
+		"avatar_url":   "media/" + alice.UserID + "/avatar/photo.jpg",
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "PUT", "/v1/profile", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("update profile status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	// Verify profile.json
+	profileData, _ := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	var profile map[string]string
+	json.Unmarshal(profileData, &profile)
+	if profile["display_name"] != "Alice Wonderland" {
+		t.Fatalf("profile display_name = %q, want %q", profile["display_name"], "Alice Wonderland")
+	}
+	if profile["avatar_url"] != "media/"+alice.UserID+"/avatar/photo.jpg" {
+		t.Fatalf("profile avatar_url = %q", profile["avatar_url"])
+	}
+
+	// Verify invite file was updated
+	inviteData, _ := store.GetObject(context.Background(), "invites/"+alice.InviteHandle+".json")
+	var invite map[string]string
+	json.Unmarshal(inviteData, &invite)
+	if invite["display_name"] != "Alice Wonderland" {
+		t.Fatalf("invite display_name = %q, want %q", invite["display_name"], "Alice Wonderland")
+	}
+}
+
+func TestUpdateProfilePartial(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Set display_name only
+	body, _ := json.Marshal(map[string]any{"display_name": "Alice"})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "PUT", "/v1/profile", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+
+	// avatar_url should not be set
+	profileData, _ := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
+	var profile map[string]string
+	json.Unmarshal(profileData, &profile)
+	if profile["display_name"] != "Alice" {
+		t.Fatalf("display_name = %q", profile["display_name"])
+	}
+	if _, ok := profile["avatar_url"]; ok {
+		t.Fatalf("avatar_url should not be set, got %q", profile["avatar_url"])
+	}
+}
+
+func TestResolveWithDisplayName(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Update profile with display_name
+	body, _ := json.Marshal(map[string]any{"display_name": "Alice W"})
+	mux.ServeHTTP(httptest.NewRecorder(), authedRequest(t, "PUT", "/v1/profile", alice.Token, string(body)))
+
+	// Resolve should include display_name
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.InviteHandle, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("resolve status = %d", w.Code)
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["display_name"] != "Alice W" {
+		t.Fatalf("resolved display_name = %q, want %q", resp["display_name"], "Alice W")
+	}
+	if resp["sharing_public_key"] == "" {
+		t.Fatal("resolved sharing_public_key is empty")
+	}
+}
+
+func TestUpdateProfileInvalidJSON(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "PUT", "/v1/profile", alice.Token, "not json"))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+}
+
 func TestAddDevice(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice's laptop")

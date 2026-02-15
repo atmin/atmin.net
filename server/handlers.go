@@ -218,27 +218,92 @@ func handleResolve(store Store) http.HandlerFunc {
 			return
 		}
 
-		var invite struct {
-			UserID string `json:"user_id"`
-		}
+		var invite map[string]string
 		json.Unmarshal(inviteData, &invite)
 
-		profileData, err := store.GetObject(r.Context(), "users/"+invite.UserID+"/profile.json")
+		resp := map[string]string{
+			"user_id":            invite["user_id"],
+			"sharing_public_key": invite["sharing_public_key"],
+		}
+		if v := invite["display_name"]; v != "" {
+			resp["display_name"] = v
+		}
+		if v := invite["avatar_url"]; v != "" {
+			resp["avatar_url"] = v
+		}
+
+		// Fallback: if invite lacks sharing_public_key, read from profile
+		if resp["sharing_public_key"] == "" {
+			profileData, err := store.GetObject(r.Context(), "users/"+invite["user_id"]+"/profile.json")
+			if err == nil {
+				var profile map[string]string
+				json.Unmarshal(profileData, &profile)
+				resp["sharing_public_key"] = profile["sharing_public_key"]
+			}
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// PUT /v1/profile
+func handleProfile(store Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFrom(r.Context())
+
+		var req struct {
+			DisplayName *string `json:"display_name"`
+			AvatarURL   *string `json:"avatar_url"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, errBadRequest)
+			return
+		}
+		if req.DisplayName == nil && req.AvatarURL == nil {
+			writeError(w, errBadRequest)
+			return
+		}
+
+		// Read-merge-write profile.json
+		profileData, err := store.GetObject(r.Context(), "users/"+userID+"/profile.json")
 		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				writeError(w, errNotFound)
+				return
+			}
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read profile"})
 			return
 		}
 
-		var profile struct {
-			UserID           string `json:"user_id"`
-			SharingPublicKey string `json:"sharing_public_key"`
-		}
+		var profile map[string]string
 		json.Unmarshal(profileData, &profile)
 
-		writeJSON(w, http.StatusOK, map[string]string{
-			"user_id":            profile.UserID,
-			"sharing_public_key": profile.SharingPublicKey,
-		})
+		if req.DisplayName != nil {
+			profile["display_name"] = *req.DisplayName
+		}
+		if req.AvatarURL != nil {
+			profile["avatar_url"] = *req.AvatarURL
+		}
+
+		updated, _ := json.Marshal(profile)
+		if err := store.PutObject(r.Context(), "users/"+userID+"/profile.json", updated, "application/json"); err != nil {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write profile"})
+			return
+		}
+
+		// Project public fields to invite file
+		handle := profile["invite_handle"]
+		if handle != "" {
+			invite, _ := json.Marshal(map[string]string{
+				"user_id":            userID,
+				"sharing_public_key": profile["sharing_public_key"],
+				"display_name":       profile["display_name"],
+				"avatar_url":         profile["avatar_url"],
+			})
+			store.PutObject(r.Context(), "invites/"+handle+".json", invite, "application/json")
+		}
+
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
