@@ -1,10 +1,4 @@
-import { mnemonicToEntropy } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ulid } from 'ulid';
-import { addDevice, resolve } from '@/api';
-import { type Session, saveSession } from '@/auth';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,94 +8,20 @@ import {
     CardHeader,
     CardTitle,
 } from '@/components/ui/card';
-import { base64UrlEncode, deriveKeys, signAuthProof } from '@/crypto';
 
 interface Props {
-    onSuccess: (session: Session) => void;
+    loading: boolean;
+    error: string;
+    onLogin: (inviteHandle: string, mnemonic: string) => void;
 }
 
-function detectDeviceLabel(): string {
-    const ua = navigator.userAgent;
-    if (/iPhone/.test(ua)) return 'iPhone';
-    if (/iPad/.test(ua)) return 'iPad';
-    if (/Android/.test(ua)) return 'Android';
-    if (/Mac/.test(ua)) return 'Mac';
-    if (/Windows/.test(ua)) return 'Windows';
-    if (/Linux/.test(ua)) return 'Linux';
-    return 'Browser';
-}
-
-export default function Login({ onSuccess }: Props) {
-    const navigate = useNavigate();
+export default function LoginForm({ loading, error, onLogin }: Props) {
     const [inviteHandle, setInviteHandle] = useState('');
     const [mnemonic, setMnemonic] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
-        setError('');
-
-        try {
-            // Resolve invite handle to get user_id
-            const resolveRes = await resolve(inviteHandle.trim());
-            const userId = resolveRes.user_id;
-
-            // Derive keys from mnemonic
-            const entropy = mnemonicToEntropy(mnemonic.trim(), wordlist);
-            const keys = await deriveKeys(new Uint8Array(entropy));
-
-            // Generate new device ID
-            const deviceId = ulid();
-
-            // Create and sign auth proof
-            const payload = {
-                user_id: userId,
-                device_id: deviceId,
-                timestamp: new Date().toISOString(),
-            };
-            const signature = await signAuthProof(
-                keys.auth.privateKey,
-                payload,
-            );
-
-            // Add device
-            const deviceRes = await addDevice({
-                user_id: userId,
-                device_label: detectDeviceLabel(),
-                auth_proof: {
-                    payload,
-                    signature: base64UrlEncode(signature),
-                },
-            });
-
-            // Save session
-            const session: Session = {
-                token: deviceRes.token,
-                userId,
-                deviceId: deviceRes.device_id,
-                inviteHandle: inviteHandle.trim(),
-                sharingPrivateKey: keys.sharing.privateKey,
-                sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
-                backupKey: keys.backupKey,
-            };
-
-            await saveSession(session);
-            onSuccess(session);
-
-            // Redirect to home
-            navigate('/');
-        } catch (e) {
-            if (e instanceof Error) {
-                setError(e.message);
-            } else {
-                setError(
-                    'Login failed. Please check your invite handle and recovery phrase.',
-                );
-            }
-            setLoading(false);
-        }
+        onLogin(inviteHandle, mnemonic);
     };
 
     return (
@@ -121,7 +41,7 @@ export default function Login({ onSuccess }: Props) {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={handleLogin} className="space-y-4">
+                        <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label
                                     htmlFor="invite-handle"

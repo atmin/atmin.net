@@ -5,7 +5,10 @@
  * with IndexedDB persistence via pickle serialization.
  */
 
-import type { MegolmInbound, MegolmOutbound } from '../crypto/pkg/atmin_crypto';
+import type {
+    MegolmInbound,
+    MegolmOutbound,
+} from '../../crypto/pkg/atmin_crypto';
 import {
     clearKeyShares,
     clearOutboundSession,

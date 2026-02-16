@@ -1,21 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { fetchMessages, storeGet } from './api';
-import type { Session } from './auth';
-import {
-    loadAllContacts,
-    loadConversations,
-    type StoredConversation,
-    saveContact,
-    saveMessages,
-} from './db';
-import type { SessionManager } from './megolm-session';
-
-interface Props {
-    session: Session;
-    sessionManager: SessionManager | null;
-    onLogout: () => void;
-}
+import { useState } from 'react';
+import { Link } from 'react-router-dom';
+import type { StoredConversation } from '@/lib/db';
 
 function timeAgo(ts: number): string {
     const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -28,104 +13,30 @@ function timeAgo(ts: number): string {
     return `${days}d ago`;
 }
 
-export default function Chats({ session, sessionManager, onLogout }: Props) {
+interface Props {
+    inviteHandle: string;
+    serverOk: boolean | null;
+    conversations: StoredConversation[];
+    contacts: Map<string, string>;
+    userId: string;
+    onNewChat: (handle: string) => void;
+    onLogout: () => void;
+}
+
+export default function ChatsView({
+    inviteHandle,
+    serverOk,
+    conversations,
+    contacts,
+    userId,
+    onNewChat,
+    onLogout,
+}: Props) {
     const [copied, setCopied] = useState(false);
-    const [serverOk, setServerOk] = useState<boolean | null>(null);
     const [handleInput, setHandleInput] = useState('');
-    const [conversations, setConversations] = useState<StoredConversation[]>(
-        [],
-    );
-    const [contacts, setContacts] = useState<Map<string, string>>(new Map());
-    const navigate = useNavigate();
-
-    useEffect(() => {
-        fetch('/healthz')
-            .then((r) => setServerOk(r.ok))
-            .catch(() => setServerOk(false));
-    }, []);
-
-    // Load conversations + contacts from IndexedDB, then sync from server
-    useEffect(() => {
-        if (!sessionManager) return;
-
-        const refresh = async () => {
-            const [convs, contactMap] = await Promise.all([
-                loadConversations(),
-                loadAllContacts(),
-            ]);
-            setConversations(convs);
-            setContacts(contactMap);
-
-            // Resolve unknown peer handles from server profiles
-            const unknownPeers: string[] = [];
-            for (const conv of convs) {
-                if (conv.conversationId.startsWith('self:')) continue;
-                const parts = conv.conversationId.split(':');
-                const peerUserId =
-                    parts[1] === session.userId ? parts[2] : parts[1];
-                if (!contactMap.has(peerUserId)) {
-                    unknownPeers.push(peerUserId);
-                }
-            }
-            if (unknownPeers.length > 0) {
-                const resolved = new Map(contactMap);
-                await Promise.all(
-                    unknownPeers.map(async (uid) => {
-                        try {
-                            const buf = await storeGet(
-                                session.token,
-                                `users/${uid}/profile.json`,
-                            );
-                            const profile = JSON.parse(
-                                new TextDecoder().decode(buf),
-                            );
-                            if (profile.invite_handle) {
-                                resolved.set(uid, profile.invite_handle);
-                                await saveContact(uid, profile.invite_handle);
-                            }
-                        } catch {
-                            // Profile not found — keep userId fallback
-                        }
-                    }),
-                );
-                setContacts(resolved);
-            }
-        };
-
-        // Show cached data immediately
-        refresh();
-
-        // Background sync: fetch all messages, save to DB, then refresh
-        const sync = async () => {
-            try {
-                const synced = await fetchMessages(
-                    session.token,
-                    session.userId,
-                    session.sharingPrivateKey,
-                    sessionManager,
-                );
-                if (synced.length > 0) {
-                    await saveMessages(session.userId, synced);
-                    await refresh();
-                }
-            } catch (err) {
-                console.error('Sync failed:', err);
-            }
-        };
-        sync();
-
-        // SSE: refresh on new messages
-        const url = `/v1/events?token=${encodeURIComponent(session.token)}`;
-        const events = new EventSource(url);
-        events.addEventListener('new_message', () => {
-            sync();
-        });
-
-        return () => events.close();
-    }, [session, sessionManager]);
 
     const copyHandle = () => {
-        navigator.clipboard.writeText(session.inviteHandle);
+        navigator.clipboard.writeText(inviteHandle);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -141,7 +52,7 @@ export default function Chats({ session, sessionManager, onLogout }: Props) {
     // Extract peer handle from conversationId "dm:U1:U2"
     const peerHandle = (convId: string): string => {
         const parts = convId.split(':');
-        const peerUserId = parts[1] === session.userId ? parts[2] : parts[1];
+        const peerUserId = parts[1] === userId ? parts[2] : parts[1];
         return contacts.get(peerUserId) ?? peerUserId.slice(0, 8);
     };
 
@@ -168,7 +79,7 @@ export default function Chats({ session, sessionManager, onLogout }: Props) {
                         Your invite handle
                     </p>
                     <div className="flex items-center justify-between">
-                        <span className="text-lg">{session.inviteHandle}</span>
+                        <span className="text-lg">{inviteHandle}</span>
                         <button
                             type="button"
                             onClick={copyHandle}
@@ -242,7 +153,7 @@ export default function Chats({ session, sessionManager, onLogout }: Props) {
                         onSubmit={(e) => {
                             e.preventDefault();
                             const h = handleInput.trim();
-                            if (h) navigate(`/${encodeURIComponent(h)}`);
+                            if (h) onNewChat(h);
                         }}
                         className="flex gap-2"
                     >

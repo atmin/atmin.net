@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
     MegolmInbound,
     MegolmOutbound,
-} from '../crypto/pkg-node/atmin_crypto.js';
+} from '../../crypto/pkg-node/atmin_crypto.js';
 import {
     clearInboundSessions,
     clearKeyShares,

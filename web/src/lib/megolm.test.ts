@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     MegolmInbound,
     MegolmOutbound,
-} from '../crypto/pkg-node/atmin_crypto.js';
+} from '../../crypto/pkg-node/atmin_crypto.js';
 
 describe('Megolm', () => {
     describe('basic encrypt/decrypt', () => {

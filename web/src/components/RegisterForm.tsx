@@ -1,9 +1,4 @@
-import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { register } from '@/api';
-import { type Session, saveSession } from '@/auth';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,83 +9,29 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
-import { base64UrlEncode, deriveKeys, generateBackupSecret } from '@/crypto';
+import type { RegisterStep } from '@/hooks/useRegister';
 
 interface Props {
-    onSuccess: (session: Session) => void;
+    step: RegisterStep;
+    mnemonic: string;
+    error: string;
+    onRegister: () => void;
 }
 
-type Step = 'generate' | 'registering' | 'done';
-
-function detectDeviceLabel(): string {
-    const ua = navigator.userAgent;
-    if (/iPhone/.test(ua)) return 'iPhone';
-    if (/iPad/.test(ua)) return 'iPad';
-    if (/Android/.test(ua)) return 'Android';
-    if (/Mac/.test(ua)) return 'Mac';
-    if (/Windows/.test(ua)) return 'Windows';
-    if (/Linux/.test(ua)) return 'Linux';
-    return 'Browser';
-}
-
-export default function Register({ onSuccess }: Props) {
-    const navigate = useNavigate();
-    const [step, setStep] = useState<Step>('generate');
-    const [mnemonic, setMnemonic] = useState('');
+export default function RegisterForm({
+    step,
+    mnemonic,
+    error,
+    onRegister,
+}: Props) {
     const [copied, setCopied] = useState(false);
     const [understood, setUnderstood] = useState(false);
     const [stored, setStored] = useState(false);
-    const [error, setError] = useState('');
-
-    // Generate mnemonic on first render
-    if (!mnemonic) {
-        const secret = generateBackupSecret();
-        const m = entropyToMnemonic(secret, wordlist);
-        setMnemonic(m);
-    }
 
     const handleCopy = () => {
         navigator.clipboard.writeText(mnemonic);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-    };
-
-    const handleRegister = async () => {
-        setStep('registering');
-        setError('');
-
-        try {
-            const entropy = mnemonicToEntropy(mnemonic, wordlist);
-            const keys = await deriveKeys(new Uint8Array(entropy));
-
-            const res = await register({
-                device_label: detectDeviceLabel(),
-                auth_public_key: base64UrlEncode(keys.auth.publicKeyBytes),
-                sharing_public_key: base64UrlEncode(
-                    keys.sharing.publicKeyBytes,
-                ),
-            });
-
-            const session: Session = {
-                token: res.token,
-                userId: res.user_id,
-                deviceId: res.device_id,
-                inviteHandle: res.invite_handle,
-                sharingPrivateKey: keys.sharing.privateKey,
-                sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
-                backupKey: keys.backupKey,
-            };
-
-            await saveSession(session);
-            onSuccess(session);
-            setStep('done');
-
-            // Redirect to home after short delay
-            setTimeout(() => navigate('/'), 1000);
-        } catch (e) {
-            setError(`Registration failed: ${e}`);
-            setStep('generate');
-        }
     };
 
     return (
@@ -187,7 +128,7 @@ export default function Register({ onSuccess }: Props) {
                         )}
 
                         <Button
-                            onClick={handleRegister}
+                            onClick={onRegister}
                             disabled={!understood || !stored}
                             className="w-full"
                         >

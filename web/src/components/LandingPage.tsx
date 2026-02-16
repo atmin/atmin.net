@@ -8,7 +8,7 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 
-export default function Landing() {
+export default function LandingPage() {
     return (
         <div className="flex min-h-screen items-center justify-center bg-stone-50 p-8">
             <div className="w-full max-w-md">
