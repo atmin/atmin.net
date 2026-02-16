@@ -67,7 +67,7 @@ export interface Envelope {
     from_device: string;
     msg_id: string;
     content_type: string;
-    timestamp?: number; // Unix timestamp in milliseconds
+    sent_at?: string; // ISO 8601 timestamp
     payload: Record<string, string>;
 }
 
@@ -214,7 +214,7 @@ export async function sendTextMessage(
             from_device: fromDeviceId,
             msg_id: keyShareMsgId,
             content_type: 'megolm.key_share',
-            timestamp: Date.now(),
+            sent_at: new Date().toISOString(),
             payload: {
                 conversation_id: convId,
                 ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
@@ -237,7 +237,7 @@ export async function sendTextMessage(
                 from_device: fromDeviceId,
                 msg_id: ulid(),
                 content_type: 'megolm.key_share',
-                timestamp: Date.now(),
+                sent_at: new Date().toISOString(),
                 payload: {
                     conversation_id: convId,
                     ephemeral_key: base64UrlEncode(selfEncrypted.ephemeralKey),
@@ -260,7 +260,7 @@ export async function sendTextMessage(
         from_device: fromDeviceId,
         msg_id: msgId,
         content_type: 'megolm.message',
-        timestamp: Date.now(),
+        sent_at: new Date().toISOString(),
         payload: {
             conversation_id: convId,
             session_id: session.session_id,
@@ -277,7 +277,7 @@ export async function sendTextMessage(
             from_device: fromDeviceId,
             msg_id: msgId,
             content_type: 'megolm.message',
-            timestamp: Date.now(),
+            sent_at: new Date().toISOString(),
             payload: {
                 conversation_id: convId,
                 session_id: session.session_id,
@@ -388,7 +388,7 @@ export async function fetchMessages(
                     fromUser: envelope.from_user,
                     fromDevice: envelope.from_device,
                     text,
-                    timestamp: new Date(envelope.timestamp ?? 0),
+                    timestamp: new Date(envelope.sent_at ?? 0),
                 });
             } else if (envelope.content_type === 'text/plain') {
                 // Legacy ECIES-encrypted messages
@@ -411,7 +411,7 @@ export async function fetchMessages(
                     fromUser: envelope.from_user,
                     fromDevice: envelope.from_device,
                     text: new TextDecoder().decode(plaintext),
-                    timestamp: new Date(envelope.timestamp ?? 0),
+                    timestamp: new Date(envelope.sent_at ?? 0),
                 });
             }
         } catch (error) {

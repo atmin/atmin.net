@@ -470,7 +470,7 @@ describe('api - Megolm send/receive', () => {
                 from_device: fromDeviceId,
                 msg_id: 'msg-001',
                 content_type: 'megolm.key_share',
-                timestamp: Date.now() - 1000,
+                sent_at: new Date(Date.now() - 1000).toISOString(),
                 payload: {
                     ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
                     iv: base64UrlEncode(encryptedKey.iv),
@@ -485,7 +485,7 @@ describe('api - Megolm send/receive', () => {
                 from_device: fromDeviceId,
                 msg_id: 'msg-002',
                 content_type: 'megolm.message',
-                timestamp: Date.now(),
+                sent_at: new Date().toISOString(),
                 payload: {
                     session_id: sender.session_id,
                     ciphertext,
@@ -548,7 +548,7 @@ describe('api - Megolm send/receive', () => {
                 from_device: fromDeviceId,
                 msg_id: 'msg-legacy',
                 content_type: 'text/plain',
-                timestamp: Date.now(),
+                sent_at: new Date().toISOString(),
                 payload: {
                     ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
                     iv: base64UrlEncode(encrypted.iv),
@@ -592,7 +592,7 @@ describe('api - Megolm send/receive', () => {
                 from_device: fromDeviceId,
                 msg_id: 'msg-unknown',
                 content_type: 'megolm.message',
-                timestamp: Date.now(),
+                sent_at: new Date().toISOString(),
                 payload: {
                     session_id: 'nonexistent-session',
                     ciphertext: 'some-ciphertext',
