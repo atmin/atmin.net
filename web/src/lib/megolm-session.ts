@@ -52,6 +52,7 @@ export async function createSessionManager(
     selfDeviceId?: string,
 ): Promise<SessionManager> {
     let outbound: MegolmOutbound | null = null;
+    let outboundIsNew = false;
     const inboundCache = new Map<string, MegolmInbound>();
     const inboundMeta = new Map<
         string,
@@ -61,19 +62,27 @@ export async function createSessionManager(
     const mgr: SessionManager = {
         async getOutbound(): Promise<[MegolmOutbound, boolean]> {
             // Return cached
-            if (outbound) return [outbound, false];
+            if (outbound) {
+                const isNew = outboundIsNew;
+                outboundIsNew = false;
+                return [outbound, isNew];
+            }
 
-            // Try loading from IndexedDB
+            // Rotate stored session: keep inbound side, create fresh outbound
             const stored = await loadOutboundSession();
             if (stored) {
-                outbound = wasm.MegolmOutbound.from_pickle(stored.pickleJson);
-                return [outbound, false];
+                const old = wasm.MegolmOutbound.from_pickle(stored.pickleJson);
+                if (selfUserId && selfDeviceId) {
+                    await mgr.addInbound(selfUserId, selfDeviceId, old.session_key());
+                }
+                await clearKeyShares(old.session_id);
+                old.free();
+                await clearOutboundSession();
             }
 
             // Create new
             outbound = new wasm.MegolmOutbound();
             await mgr.persistOutbound(outbound);
-            // Register self-inbound so we can decrypt our own self-copies
             if (selfUserId && selfDeviceId) {
                 await mgr.addInbound(
                     selfUserId,
@@ -233,17 +242,22 @@ export async function createSessionManager(
         },
     };
 
-    // Eagerly load outbound + register self-inbound at creation time
+    // Eagerly rotate outbound on app start + register self-inbound
     // so fetchMessages can decrypt self-copies before any send
     if (selfUserId && selfDeviceId) {
         const stored = await loadOutboundSession();
         if (stored) {
-            outbound = wasm.MegolmOutbound.from_pickle(stored.pickleJson);
-            await mgr.addInbound(
-                selfUserId,
-                selfDeviceId,
-                outbound.session_key(),
-            );
+            // Keep old session's inbound side for decrypting previous messages
+            const old = wasm.MegolmOutbound.from_pickle(stored.pickleJson);
+            await mgr.addInbound(selfUserId, selfDeviceId, old.session_key());
+            await clearKeyShares(old.session_id);
+            old.free();
+            // Create fresh outbound session
+            await clearOutboundSession();
+            outbound = new wasm.MegolmOutbound();
+            await mgr.persistOutbound(outbound);
+            await mgr.addInbound(selfUserId, selfDeviceId, outbound.session_key());
+            outboundIsNew = true;
         }
     }
 

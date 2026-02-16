@@ -54,10 +54,10 @@ describe('SessionManager', () => {
             mgr.destroy();
         });
 
-        it('persists and restores across manager instances', async () => {
+        it('rotates session on new manager instance (app restart)', async () => {
             const mgr1 = await createSessionManager(wasm);
             const [session1] = await mgr1.getOutbound();
-            const sessionId = session1.session_id;
+            const oldSessionId = session1.session_id;
 
             // Encrypt some messages and persist
             session1.encrypt('hello');
@@ -69,9 +69,9 @@ describe('SessionManager', () => {
             const mgr2 = await createSessionManager(wasm);
             const [session2, isNew] = await mgr2.getOutbound();
 
-            expect(isNew).toBe(false);
-            expect(session2.session_id).toBe(sessionId);
-            expect(session2.message_index).toBe(2);
+            expect(isNew).toBe(true);
+            expect(session2.session_id).not.toBe(oldSessionId);
+            expect(session2.message_index).toBe(0);
 
             mgr2.destroy();
         });
