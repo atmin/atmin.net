@@ -178,7 +178,7 @@ export async function sendTextMessage(
     selfPublicKeyBytes: Uint8Array,
     messageText: string,
     sessionManager: SessionManager,
-): Promise<{ isNewSession: boolean }> {
+): Promise<void> {
     const { eciesEncrypt, importX25519PublicKey, base64UrlEncode } =
         await import('./crypto');
     const { ulid } = await import('ulid');
@@ -294,8 +294,6 @@ export async function sendTextMessage(
     }
 
     await send(token, envelopes);
-
-    return { isNewSession: isNew };
 }
 
 // Helper to fetch and decrypt messages from inbox

@@ -1,5 +1,5 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     MegolmInbound,
     MegolmOutbound,
@@ -195,6 +195,66 @@ describe('SessionManager', () => {
 
             sender.free();
             mgr.destroy();
+        });
+    });
+
+    describe('onSessionCreated callback', () => {
+        it('fires on first session creation', async () => {
+            const cb = vi.fn().mockResolvedValue(undefined);
+            const mgr = await createSessionManager(
+                wasm,
+                undefined,
+                undefined,
+                cb,
+            );
+            const [session] = await mgr.getOutbound();
+
+            expect(cb).toHaveBeenCalledOnce();
+            expect(cb).toHaveBeenCalledWith(
+                session.session_id,
+                session.session_key(),
+            );
+
+            mgr.destroy();
+        });
+
+        it('fires on rotation', async () => {
+            const cb = vi.fn().mockResolvedValue(undefined);
+            const mgr = await createSessionManager(
+                wasm,
+                undefined,
+                undefined,
+                cb,
+            );
+            await mgr.getOutbound();
+            cb.mockClear();
+
+            const rotated = await mgr.rotate();
+
+            expect(cb).toHaveBeenCalledOnce();
+            expect(cb).toHaveBeenCalledWith(
+                rotated.session_id,
+                rotated.session_key(),
+            );
+
+            mgr.destroy();
+        });
+
+        it('fires on rotation-on-start (eager load)', async () => {
+            const mgr1 = await createSessionManager(wasm, 'u1', 'd1');
+            const [session1] = await mgr1.getOutbound();
+            await mgr1.persistOutbound(session1);
+            mgr1.destroy();
+
+            // Second manager with callback — eager load should rotate and fire
+            const cb = vi.fn().mockResolvedValue(undefined);
+            const mgr2 = await createSessionManager(wasm, 'u1', 'd1', cb);
+
+            expect(cb).toHaveBeenCalledOnce();
+            const [session2] = await mgr2.getOutbound();
+            expect(cb.mock.calls[0][0]).toBe(session2.session_id);
+
+            mgr2.destroy();
         });
     });
 

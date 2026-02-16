@@ -11,7 +11,6 @@ import {
     saveContact,
     saveMessages,
 } from '@/lib/db';
-import { backupSessionKey } from '@/lib/key-backup';
 import type { SessionManager } from '@/lib/megolm-session';
 
 export interface Message {
@@ -184,7 +183,7 @@ export function useChat(
 
             // Send encrypted message
             if (sessionManager) {
-                const { isNewSession } = await sendTextMessage(
+                await sendTextMessage(
                     session.token,
                     session.userId,
                     session.deviceId,
@@ -194,18 +193,6 @@ export function useChat(
                     text,
                     sessionManager,
                 );
-
-                // Back up new session key
-                if (isNewSession) {
-                    const [outbound] = await sessionManager.getOutbound();
-                    await backupSessionKey(
-                        session.token,
-                        session.userId,
-                        outbound.session_id,
-                        outbound.session_key(),
-                        session.backupKey,
-                    );
-                }
             }
 
             // Refetch messages to show the sent message

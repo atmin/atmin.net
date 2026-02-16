@@ -34,12 +34,21 @@ export function useSession(): SessionState {
             const { createSessionManager } = await import(
                 '@/lib/megolm-session'
             );
+            const { backupSessionKey } = await import('@/lib/key-backup');
             const wasm = await loadWasm();
             if (cancelled) return;
             const mgr = await createSessionManager(
                 wasm,
                 session.userId,
                 session.deviceId,
+                (sessionId, sessionKey) =>
+                    backupSessionKey(
+                        session.token,
+                        session.userId,
+                        sessionId,
+                        sessionKey,
+                        session.backupKey,
+                    ),
             );
             if (cancelled) return;
             setSessionManager(mgr);

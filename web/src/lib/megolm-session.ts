@@ -50,6 +50,7 @@ export async function createSessionManager(
     wasm: WasmModule,
     selfUserId?: string,
     selfDeviceId?: string,
+    onSessionCreated?: (sessionId: string, sessionKey: string) => Promise<void>,
 ): Promise<SessionManager> {
     let outbound: MegolmOutbound | null = null;
     let outboundIsNew = false;
@@ -73,7 +74,11 @@ export async function createSessionManager(
             if (stored) {
                 const old = wasm.MegolmOutbound.from_pickle(stored.pickleJson);
                 if (selfUserId && selfDeviceId) {
-                    await mgr.addInbound(selfUserId, selfDeviceId, old.session_key());
+                    await mgr.addInbound(
+                        selfUserId,
+                        selfDeviceId,
+                        old.session_key(),
+                    );
                 }
                 await clearKeyShares(old.session_id);
                 old.free();
@@ -90,6 +95,10 @@ export async function createSessionManager(
                     outbound.session_key(),
                 );
             }
+            await onSessionCreated?.(
+                outbound.session_id,
+                outbound.session_key(),
+            );
             return [outbound, true];
         },
 
@@ -121,6 +130,10 @@ export async function createSessionManager(
                     outbound.session_key(),
                 );
             }
+            await onSessionCreated?.(
+                outbound.session_id,
+                outbound.session_key(),
+            );
             return outbound;
         },
 
@@ -256,7 +269,15 @@ export async function createSessionManager(
             await clearOutboundSession();
             outbound = new wasm.MegolmOutbound();
             await mgr.persistOutbound(outbound);
-            await mgr.addInbound(selfUserId, selfDeviceId, outbound.session_key());
+            await mgr.addInbound(
+                selfUserId,
+                selfDeviceId,
+                outbound.session_key(),
+            );
+            await onSessionCreated?.(
+                outbound.session_id,
+                outbound.session_key(),
+            );
             outboundIsNew = true;
         }
     }
