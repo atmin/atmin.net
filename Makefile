@@ -1,6 +1,6 @@
 .PHONY: all build test lint fmt clean dev run e2e
 .PHONY: server server-build server-test server-lint server-fmt
-.PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt
+.PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
 .PHONY: up down
 
 # --- Aggregates ---
@@ -53,6 +53,9 @@ web-lint:
 
 web-lint-arch:
 	web/scripts/lint-architecture.sh
+
+web-storybook:
+	cd web && npm run storybook
 
 web-fmt:
 	cd web && npm run lint:fix

@@ -1,18 +1,55 @@
+/// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { defineConfig } from 'vitest/config';
 
+const dirname =
+    typeof __dirname !== 'undefined'
+        ? __dirname
+        : path.dirname(fileURLToPath(import.meta.url));
 const apiUrl = process.env.VITE_API_URL || 'http://localhost:8080';
 
 export default defineConfig({
     plugins: [react(), tailwindcss()],
     test: {
         exclude: ['e2e/**', 'node_modules/**'],
+        projects: [
+            // Unit tests (default)
+            {
+                extends: true,
+                test: {
+                    name: 'unit',
+                    include: ['src/**/*.test.ts'],
+                    exclude: ['e2e/**', 'node_modules/**'],
+                },
+            },
+            // Storybook interaction tests
+            {
+                extends: true,
+                plugins: [
+                    storybookTest({
+                        configDir: path.join(dirname, '.storybook'),
+                    }),
+                ],
+                test: {
+                    name: 'storybook',
+                    browser: {
+                        enabled: true,
+                        headless: true,
+                        provider: 'playwright',
+                        instances: [{ browser: 'chromium' }],
+                    },
+                    setupFiles: ['.storybook/vitest.setup.ts'],
+                },
+            },
+        ],
     },
     resolve: {
         alias: {
-            '@': path.resolve(__dirname, './src'),
+            '@': path.resolve(dirname, './src'),
         },
     },
     server: {
