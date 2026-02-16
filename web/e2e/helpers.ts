@@ -67,3 +67,36 @@ export async function waitForMessage(
 export async function getMessageCount(page: Page): Promise<number> {
     return page.locator(MSG_SELECTOR).count();
 }
+
+/**
+ * Read Megolm session state from IndexedDB.
+ */
+export async function getMegolmState(page: Page) {
+    return page.evaluate(() => {
+        return new Promise<{
+            outboundSessionId: string | null;
+            inboundCount: number;
+        }>((resolve, reject) => {
+            const req = indexedDB.open('atmin');
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => {
+                const db = req.result;
+                const tx = db.transaction(
+                    ['megolm_outbound', 'megolm_inbound'],
+                    'readonly',
+                );
+                const outReq = tx
+                    .objectStore('megolm_outbound')
+                    .get('current');
+                const inReq = tx.objectStore('megolm_inbound').count();
+                tx.oncomplete = () =>
+                    resolve({
+                        outboundSessionId:
+                            outReq.result?.sessionId ?? null,
+                        inboundCount: inReq.result,
+                    });
+                tx.onerror = () => reject(tx.error);
+            };
+        });
+    });
+}
