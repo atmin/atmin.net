@@ -11,11 +11,14 @@ interface Props {
 
 export default function ChatRoute({ session, sessionManager }: Props) {
     const { handle } = useParams<{ handle: string }>();
-    const { messages, loading, sending, chatTitle, sendMessage } = useChat(
-        handle,
-        session,
-        sessionManager,
-    );
+    const {
+        messages,
+        loading,
+        sending,
+        encryptionReady,
+        chatTitle,
+        sendMessage,
+    } = useChat(handle, session, sessionManager);
 
     return (
         <ChatView
@@ -25,6 +28,7 @@ export default function ChatRoute({ session, sessionManager }: Props) {
             messages={messages}
             loading={loading}
             sending={sending}
+            encryptionReady={encryptionReady}
             onSend={sendMessage}
         />
     );

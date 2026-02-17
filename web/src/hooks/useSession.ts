@@ -23,7 +23,12 @@ export function useSession(): SessionState {
             .finally(() => setLoading(false));
     }, []);
 
-    // Init WASM + session manager when session is available
+    // Init WASM + session manager when session is available.
+    // Depend on session.userId (stable string) rather than the session
+    // object itself, which gets a new reference on every loadSession() call.
+    // This prevents React StrictMode's double-invocation from spawning
+    // two concurrent createSessionManager calls that race on IndexedDB.
+    const sessionUserId = session?.userId ?? null;
     useEffect(() => {
         if (!session) return;
 
@@ -31,10 +36,13 @@ export function useSession(): SessionState {
 
         (async () => {
             const { loadWasm } = await import('@/lib/wasm');
+            if (cancelled) return;
             const { createSessionManager } = await import(
                 '@/lib/megolm-session'
             );
+            if (cancelled) return;
             const { backupSessionKey } = await import('@/lib/key-backup');
+            if (cancelled) return;
             const wasm = await loadWasm();
             if (cancelled) return;
             const mgr = await createSessionManager(
@@ -48,6 +56,8 @@ export function useSession(): SessionState {
                         sessionId,
                         sessionKey,
                         session.backupKey,
+                    ).catch((err) =>
+                        console.error('Key backup failed:', err),
                     ),
             );
             if (cancelled) return;
@@ -61,7 +71,8 @@ export function useSession(): SessionState {
                 return null;
             });
         };
-    }, [session]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [sessionUserId]);
 
     const handleLogout = async () => {
         setSessionManager((prev) => {

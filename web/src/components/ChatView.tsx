@@ -9,6 +9,7 @@ interface Props {
     messages: Message[];
     loading: boolean;
     sending: boolean;
+    encryptionReady: boolean;
     onSend: (text: string) => void;
 }
 
@@ -19,6 +20,7 @@ export default function ChatView({
     messages,
     loading,
     sending,
+    encryptionReady,
     onSend,
 }: Props) {
     const [inputValue, setInputValue] = useState('');
@@ -103,7 +105,9 @@ export default function ChatView({
                     />
                     <button
                         type="submit"
-                        disabled={!inputValue.trim() || sending}
+                        disabled={
+                            !inputValue.trim() || sending || !encryptionReady
+                        }
                         className="rounded bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:bg-stone-300"
                     >
                         {sending ? 'Sending...' : 'Send'}

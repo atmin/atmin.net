@@ -7,6 +7,7 @@ const meta = {
     component: ChatView,
     args: {
         onSend: fn(),
+        encryptionReady: true,
     },
 } satisfies Meta<typeof ChatView>;
 

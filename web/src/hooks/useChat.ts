@@ -34,6 +34,7 @@ export interface ChatState {
     messages: Message[];
     loading: boolean;
     sending: boolean;
+    encryptionReady: boolean;
     chatTitle: string;
     sendMessage: (text: string) => Promise<void>;
 }
@@ -161,7 +162,7 @@ export function useChat(
     ]);
 
     const sendMessage = async (text: string) => {
-        if (!text || sending) return;
+        if (!text || sending || !sessionManager) return;
 
         setSending(true);
         try {
@@ -216,5 +217,12 @@ export function useChat(
         }
     };
 
-    return { messages, loading, sending, chatTitle, sendMessage };
+    return {
+        messages,
+        loading,
+        sending,
+        encryptionReady: !!sessionManager,
+        chatTitle,
+        sendMessage,
+    };
 }

@@ -80,8 +80,10 @@ export async function openChat(page: Page, handle: string): Promise<void> {
  * Type a message and send it, then wait for it to appear in the chat.
  */
 export async function sendMessage(page: Page, text: string): Promise<void> {
+    const sendBtn = page.getByRole('button', { name: 'Send' });
     await page.getByPlaceholder('Type a message...').fill(text);
-    await page.getByRole('button', { name: 'Send' }).click();
+    await expect(sendBtn).toBeEnabled({ timeout: 15_000 });
+    await sendBtn.click();
     await waitForMessage(page, text);
 }
 
