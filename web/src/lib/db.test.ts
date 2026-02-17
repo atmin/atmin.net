@@ -5,6 +5,7 @@ import {
     clearKeyShares,
     clearMessages,
     clearOutboundSession,
+    clearSyncCursors,
     deleteDatabase,
     getContact,
     getLatestTimestamp,
@@ -14,11 +15,13 @@ import {
     loadInboundSession,
     loadMessages,
     loadOutboundSession,
+    loadSyncCursor,
     recordKeyShare,
     saveContact,
     saveInboundSession,
     saveMessages,
     saveOutboundSession,
+    saveSyncCursor,
 } from './db';
 
 // Setup fake IndexedDB — fresh instance per test
@@ -434,5 +437,49 @@ describe('db - Megolm key shares', () => {
 
         expect(await hasKeyShare('S1', 'bob01')).toBe(false);
         expect(await hasKeyShare('S2', 'alice01')).toBe(false);
+    });
+});
+
+describe('db - Sync cursors', () => {
+    it('saves and loads a cursor by prefix', async () => {
+        await saveSyncCursor('inbox/user1/live/', 'inbox/user1/live/msg-050');
+
+        const cursor = await loadSyncCursor('inbox/user1/live/');
+        expect(cursor).toBe('inbox/user1/live/msg-050');
+    });
+
+    it('returns undefined for unknown prefix', async () => {
+        const cursor = await loadSyncCursor('inbox/unknown/live/');
+        expect(cursor).toBeUndefined();
+    });
+
+    it('overwrites cursor for same prefix', async () => {
+        await saveSyncCursor('inbox/user1/live/', 'inbox/user1/live/msg-010');
+        await saveSyncCursor('inbox/user1/live/', 'inbox/user1/live/msg-050');
+
+        const cursor = await loadSyncCursor('inbox/user1/live/');
+        expect(cursor).toBe('inbox/user1/live/msg-050');
+    });
+
+    it('stores cursors independently per prefix', async () => {
+        await saveSyncCursor('inbox/user1/live/', 'inbox/user1/live/msg-010');
+        await saveSyncCursor('inbox/user2/live/', 'inbox/user2/live/msg-020');
+
+        expect(await loadSyncCursor('inbox/user1/live/')).toBe(
+            'inbox/user1/live/msg-010',
+        );
+        expect(await loadSyncCursor('inbox/user2/live/')).toBe(
+            'inbox/user2/live/msg-020',
+        );
+    });
+
+    it('clears all cursors', async () => {
+        await saveSyncCursor('inbox/user1/live/', 'inbox/user1/live/msg-010');
+        await saveSyncCursor('inbox/user2/live/', 'inbox/user2/live/msg-020');
+
+        await clearSyncCursors();
+
+        expect(await loadSyncCursor('inbox/user1/live/')).toBeUndefined();
+        expect(await loadSyncCursor('inbox/user2/live/')).toBeUndefined();
     });
 });

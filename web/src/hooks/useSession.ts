@@ -24,13 +24,16 @@ export function useSession(): SessionState {
     }, []);
 
     // Init WASM + session manager when session is available.
-    // Depend on session.userId (stable string) rather than the session
-    // object itself, which gets a new reference on every loadSession() call.
+    // Depend on stable primitives rather than the session object itself,
+    // which gets a new reference on every loadSession() call.
     // This prevents React StrictMode's double-invocation from spawning
     // two concurrent createSessionManager calls that race on IndexedDB.
-    const sessionUserId = session?.userId ?? null;
+    const userId = session?.userId ?? null;
+    const deviceId = session?.deviceId ?? null;
+    const token = session?.token ?? null;
+    const backupKey = session?.backupKey ?? null;
     useEffect(() => {
-        if (!session) return;
+        if (!userId || !deviceId || !token || !backupKey) return;
 
         let cancelled = false;
 
@@ -47,18 +50,16 @@ export function useSession(): SessionState {
             if (cancelled) return;
             const mgr = await createSessionManager(
                 wasm,
-                session.userId,
-                session.deviceId,
+                userId,
+                deviceId,
                 (sessionId, sessionKey) =>
                     backupSessionKey(
-                        session.token,
-                        session.userId,
+                        token,
+                        userId,
                         sessionId,
                         sessionKey,
-                        session.backupKey,
-                    ).catch((err) =>
-                        console.error('Key backup failed:', err),
-                    ),
+                        backupKey,
+                    ).catch((err) => console.error('Key backup failed:', err)),
             );
             if (cancelled) return;
             setSessionManager(mgr);
@@ -71,8 +72,7 @@ export function useSession(): SessionState {
                 return null;
             });
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [sessionUserId]);
+    }, [userId, deviceId, token, backupKey]);
 
     const handleLogout = async () => {
         setSessionManager((prev) => {

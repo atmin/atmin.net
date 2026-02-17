@@ -7,10 +7,11 @@
  * - 'megolm_outbound' store: Active outbound Megolm session
  * - 'megolm_inbound' store: Inbound Megolm sessions (one per sender session)
  * - 'megolm_key_shares' store: Track which recipients have the session key
+ * - 'sync_cursors' store: Persist sync cursors for incremental inbox fetching
  */
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
 const CONVERSATIONS_STORE = 'conversations';
@@ -18,6 +19,7 @@ const CONTACTS_STORE = 'contacts';
 const MEGOLM_OUTBOUND_STORE = 'megolm_outbound';
 const MEGOLM_INBOUND_STORE = 'megolm_inbound';
 const MEGOLM_KEY_SHARES_STORE = 'megolm_key_shares';
+const SYNC_CURSORS_STORE = 'sync_cursors';
 
 export interface StoredOutboundSession {
     id: 'current';
@@ -59,6 +61,11 @@ export interface StoredConversation {
 export interface StoredContact {
     userId: string;
     handle: string;
+}
+
+export interface StoredSyncCursor {
+    prefix: string;
+    cursor: string;
 }
 
 let db: IDBDatabase | null = null;
@@ -152,6 +159,13 @@ async function openDB(): Promise<IDBDatabase> {
             if (!database.objectStoreNames.contains(MEGOLM_KEY_SHARES_STORE)) {
                 database.createObjectStore(MEGOLM_KEY_SHARES_STORE, {
                     keyPath: ['sessionId', 'recipientUserId'],
+                });
+            }
+
+            // v5: Sync cursors for incremental inbox fetching
+            if (!database.objectStoreNames.contains(SYNC_CURSORS_STORE)) {
+                database.createObjectStore(SYNC_CURSORS_STORE, {
+                    keyPath: 'prefix',
                 });
             }
         };
@@ -585,6 +599,52 @@ export async function clearKeyShares(sessionId?: string): Promise<void> {
     } else {
         store.clear();
     }
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+// ── Sync cursors ──────────────────────────────────────────────────
+
+export async function saveSyncCursor(
+    prefix: string,
+    cursor: string,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(SYNC_CURSORS_STORE, 'readwrite');
+    tx.objectStore(SYNC_CURSORS_STORE).put({
+        prefix,
+        cursor,
+    } as StoredSyncCursor);
+
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+export async function loadSyncCursor(
+    prefix: string,
+): Promise<string | undefined> {
+    const database = await openDB();
+    const tx = database.transaction(SYNC_CURSORS_STORE, 'readonly');
+    const request = tx.objectStore(SYNC_CURSORS_STORE).get(prefix);
+
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => {
+            const result = request.result as StoredSyncCursor | undefined;
+            resolve(result?.cursor);
+        };
+        request.onerror = () => reject(request.error);
+    });
+}
+
+export async function clearSyncCursors(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(SYNC_CURSORS_STORE, 'readwrite');
+    tx.objectStore(SYNC_CURSORS_STORE).clear();
 
     return new Promise((resolve, reject) => {
         tx.oncomplete = () => resolve();

@@ -313,10 +313,19 @@ export async function fetchMessages(
     sessionManager?: SessionManager,
 ): Promise<DecryptedMessage[]> {
     const { eciesDecrypt, base64UrlDecode } = await import('./crypto');
+    const { loadSyncCursor, saveSyncCursor } = await import('./db');
 
-    // List all messages in inbox
+    // List messages in inbox, resuming from stored cursor if available
     const prefix = `inbox/${userId}/live/`;
-    const listRes = await storeList(token, prefix);
+    const storedCursor = await loadSyncCursor(prefix);
+
+    let listRes: StoreListResponse;
+    try {
+        listRes = await storeList(token, prefix, storedCursor);
+    } catch {
+        // Cursor may be stale (e.g. after compaction); fall back to full fetch
+        listRes = await storeList(token, prefix);
+    }
 
     // Fetch all envelopes
     const envelopes: Array<{ key: string; envelope: Envelope }> = [];
@@ -423,6 +432,12 @@ export async function fetchMessages(
         for (const sessionId of advancedInbounds) {
             await sessionManager.persistInbound(sessionId);
         }
+    }
+
+    // Persist cursor so next sync only fetches new objects
+    if (listRes.keys.length > 0) {
+        const lastKey = listRes.keys[listRes.keys.length - 1];
+        await saveSyncCursor(prefix, lastKey);
     }
 
     return messages.sort(

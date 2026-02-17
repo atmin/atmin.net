@@ -16,6 +16,9 @@ import {
     clearInboundSessions,
     clearKeyShares,
     clearOutboundSession,
+    clearSyncCursors,
+    loadSyncCursor,
+    saveSyncCursor,
 } from './db';
 import { createSessionManager } from './megolm-session';
 import type { WasmModule } from './wasm';
@@ -358,6 +361,7 @@ describe('api - Megolm send/receive', () => {
         await clearOutboundSession();
         await clearInboundSessions();
         await clearKeyShares();
+        await clearSyncCursors();
     });
 
     describe('sendTextMessage', () => {
@@ -620,6 +624,225 @@ describe('api - Megolm send/receive', () => {
             );
 
             expect(messages).toHaveLength(0);
+
+            mgr.destroy();
+        });
+    });
+
+    describe('cursor persistence', () => {
+        it('persists cursor after fetching messages', async () => {
+            const mgr = await createSessionManager(wasm);
+            const { eciesEncrypt } = await import('./crypto');
+
+            const encrypted = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode('Message one'),
+            );
+
+            const envelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-001',
+                content_type: 'text/plain',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
+                    iv: base64UrlEncode(encrypted.iv),
+                    ciphertext: base64UrlEncode(encrypted.ciphertext),
+                },
+            };
+
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`inbox/${toUserId}/live/msg-001`],
+                    next_cursor: '',
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(envelope)).buffer,
+                ) as Response,
+            );
+
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            const cursor = await loadSyncCursor(`inbox/${toUserId}/live/`);
+            expect(cursor).toBe(`inbox/${toUserId}/live/msg-001`);
+
+            mgr.destroy();
+        });
+
+        it('passes stored cursor to storeList on subsequent syncs', async () => {
+            const mgr = await createSessionManager(wasm);
+
+            // Pre-seed a cursor to simulate a previous sync
+            const prefix = `inbox/${toUserId}/live/`;
+            await saveSyncCursor(prefix, `${prefix}msg-001`);
+
+            // Second sync: server returns only new messages
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`${prefix}msg-002`],
+                    next_cursor: '',
+                }) as Response,
+            );
+
+            const { eciesEncrypt } = await import('./crypto');
+            const encrypted = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode('Message two'),
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(
+                        JSON.stringify({
+                            v: 1,
+                            to_user: toUserId,
+                            from_user: fromUserId,
+                            from_device: fromDeviceId,
+                            msg_id: 'msg-002',
+                            content_type: 'text/plain',
+                            sent_at: new Date().toISOString(),
+                            payload: {
+                                ephemeral_key: base64UrlEncode(
+                                    encrypted.ephemeralKey,
+                                ),
+                                iv: base64UrlEncode(encrypted.iv),
+                                ciphertext: base64UrlEncode(
+                                    encrypted.ciphertext,
+                                ),
+                            },
+                        }),
+                    ).buffer,
+                ) as Response,
+            );
+
+            const messages = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // Verify cursor was passed to storeList
+            const listCall = fetchMock.mock.calls[0];
+            expect(listCall[0]).toContain(
+                `cursor=${encodeURIComponent(`${prefix}msg-001`)}`,
+            );
+
+            // Verify cursor was updated
+            const cursor = await loadSyncCursor(prefix);
+            expect(cursor).toBe(`${prefix}msg-002`);
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].text).toBe('Message two');
+
+            mgr.destroy();
+        });
+
+        it('does not update cursor when no keys returned', async () => {
+            const mgr = await createSessionManager(wasm);
+
+            const prefix = `inbox/${toUserId}/live/`;
+            await saveSyncCursor(prefix, `${prefix}msg-005`);
+
+            // Server returns no new messages
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [],
+                    next_cursor: '',
+                }) as Response,
+            );
+
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // Cursor should remain unchanged
+            const cursor = await loadSyncCursor(prefix);
+            expect(cursor).toBe(`${prefix}msg-005`);
+
+            mgr.destroy();
+        });
+
+        it('falls back to full fetch when cursor causes error', async () => {
+            const mgr = await createSessionManager(wasm);
+
+            const prefix = `inbox/${toUserId}/live/`;
+            await saveSyncCursor(prefix, `${prefix}stale-cursor`);
+
+            // First call with cursor fails
+            fetchMock.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                statusText: 'Internal Server Error',
+                json: async () => ({
+                    error: 'internal',
+                    message: 'List failed',
+                }),
+            } as Response);
+
+            // Retry without cursor succeeds
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`${prefix}msg-001`],
+                    next_cursor: '',
+                }) as Response,
+            );
+
+            const { eciesEncrypt } = await import('./crypto');
+            const encrypted = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode('Recovered message'),
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(
+                        JSON.stringify({
+                            v: 1,
+                            to_user: toUserId,
+                            from_user: fromUserId,
+                            from_device: fromDeviceId,
+                            msg_id: 'msg-001',
+                            content_type: 'text/plain',
+                            sent_at: new Date().toISOString(),
+                            payload: {
+                                ephemeral_key: base64UrlEncode(
+                                    encrypted.ephemeralKey,
+                                ),
+                                iv: base64UrlEncode(encrypted.iv),
+                                ciphertext: base64UrlEncode(
+                                    encrypted.ciphertext,
+                                ),
+                            },
+                        }),
+                    ).buffer,
+                ) as Response,
+            );
+
+            const messages = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // First call had cursor, second did not
+            expect(fetchMock.mock.calls[0][0]).toContain('cursor=');
+            expect(fetchMock.mock.calls[1][0]).not.toContain('cursor=');
+
+            expect(messages).toHaveLength(1);
+            expect(messages[0].text).toBe('Recovered message');
 
             mgr.destroy();
         });
