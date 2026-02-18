@@ -22,11 +22,11 @@ users/alice01/devices/adev02.json
 invites/alice-xyz.json
 
 inbox/alice01/live/msg001..msg009
-inbox/alice01/archive/2026-02-15   ← compacted archive
+inbox/alice01/archive/2026-02-15-{ULID}   ← compacted archive
 
 backups/alice01/keys/live/S1
 backups/alice01/keys/live/S2
-backups/alice01/keys/archive/2026-02-15
+backups/alice01/keys/archive/2026-02-15-{ULID}
 
 media/alice01/avatar/abc123.jpg
 ```

@@ -42,7 +42,8 @@ by other users, and allows new devices to sync existing history without special 
 All data follows the same lifecycle: write immutable object → compact into archive → delete originals.
 
 Compaction is triggered client-side (on Megolm session rotation) and executed by any stateless
-server instance. The operation is idempotent and requires no locking or coordination.
+server instance. Multiple compactions on the same day merge into a single archive, deduplicating
+by `msg_id`. The operation requires no locking or coordination.
 
 ## Consequences
 

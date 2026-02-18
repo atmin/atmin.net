@@ -107,9 +107,13 @@ POST /v1/store/compact
 
 Server:
 1. Lists `inbox/bob01/live/msg002` through `inbox/bob01/live/msg200`.
-2. Reads all objects, encodes as CBOR array.
-3. Writes `inbox/bob01/archive/2025-01-15` (or appends to existing date archive).
-4. Deletes the compacted live objects.
+2. Lists existing same-day archives (none on first compaction of the day).
+3. Reads all live objects, encodes as CBOR array.
+4. Writes `inbox/bob01/archive/2025-01-15-{ULID}`.
+5. Deletes the compacted live objects.
+
+If a same-day archive already existed, the server merges its contents with the
+new objects, deduplicates by `msg_id`, and writes a single replacement archive.
 
 ```
 POST /v1/store/compact
@@ -118,12 +122,12 @@ POST /v1/store/compact
 
 Server:
 1. Reads `backups/bob01/keys/live/S1`.
-2. Writes `backups/bob01/keys/archive/2025-01-15`.
+2. Writes `backups/bob01/keys/archive/2025-01-15-{ULID}`.
 3. Deletes `backups/bob01/keys/live/S1`.
 
 S3 state change:
-- `inbox/bob01/live/msg002..msg200` → `inbox/bob01/archive/2025-01-15`
-- `backups/bob01/keys/live/S1` → `backups/bob01/keys/archive/2025-01-15`
+- `inbox/bob01/live/msg002..msg200` → `inbox/bob01/archive/2025-01-15-{ULID}`
+- `backups/bob01/keys/live/S1` → `backups/bob01/keys/archive/2025-01-15-{ULID}`
 - `inbox/bob01/live/` now empty (until next sync)
 - `backups/bob01/keys/live/S5` remains (current session, not compacted)
 
@@ -190,17 +194,17 @@ users/alice01/devices/adev01.json
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-inbox/alice01/archive/2025-01-15           ← CBOR: msg001..msg200
+inbox/alice01/archive/2025-01-15-{ULID}    ← CBOR: msg001..msg200
 inbox/alice01/live/msg201                  ← key share (S5)
 inbox/alice01/live/msg202                  ← "First on new session"
 
-inbox/bob01/archive/2025-01-15             ← CBOR: msg002..msg200
+inbox/bob01/archive/2025-01-15-{ULID}      ← CBOR: msg002..msg200
 inbox/bob01/live/msg202                    ← "First on new session" (self-copy)
 
-backups/alice01/keys/archive/2025-01-15    ← CBOR: S1
+backups/alice01/keys/archive/2025-01-15-{ULID}  ← CBOR: S1
 backups/alice01/keys/live/S2
 backups/alice01/keys/live/S5               ← new (received from Bob)
-backups/bob01/keys/archive/2025-01-15      ← CBOR: S1
+backups/bob01/keys/archive/2025-01-15-{ULID}    ← CBOR: S1
 backups/bob01/keys/live/S5                 ← current session
 ```
 

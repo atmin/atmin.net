@@ -27,11 +27,11 @@ users/bob01/devices/bdev01.json
 invites/alice-xyz.json
 invites/bob-abc.json
 
-inbox/alice01/archive/2025-01-15           ← CBOR: msg001..msg004
+inbox/alice01/archive/2025-01-15-{ULID}    ← CBOR: msg001..msg004
 inbox/alice01/live/msg006                  ← "Sent from my phone" (self-copy)
 inbox/alice01/live/msg007                  ← "Got it!"
 
-inbox/bob01/archive/2025-01-15             ← CBOR: msg002..msg004
+inbox/bob01/archive/2025-01-15-{ULID}      ← CBOR: msg002..msg004
 inbox/bob01/live/msg005                    ← key share from Alice phone (S3)
 inbox/bob01/live/msg006                    ← "Sent from my phone"
 inbox/bob01/live/msg007                    ← "Got it!" (self-copy)
@@ -108,9 +108,9 @@ If key backups had been compacted into archives:
 
 ```
 GET /v1/store/list?prefix=backups/alice01/keys/archive/
-→ ["backups/alice01/keys/archive/2025-01-15"]
+→ ["backups/alice01/keys/archive/2025-01-15-{ULID}"]
 
-GET /v1/store/object?key=backups/alice01/keys/archive/2025-01-15
+GET /v1/store/object?key=backups/alice01/keys/archive/2025-01-15-{ULID}
 ```
 
 CBOR archive → decrypt each entry → recover any keys not already in live.
@@ -137,9 +137,9 @@ Phone walks backwards through archive prefixes:
 
 ```
 GET /v1/store/list?prefix=inbox/alice01/archive/
-→ ["inbox/alice01/archive/2025-01-15"]
+→ ["inbox/alice01/archive/2025-01-15-{ULID}"]
 
-GET /v1/store/object?key=inbox/alice01/archive/2025-01-15
+GET /v1/store/object?key=inbox/alice01/archive/2025-01-15-{ULID}
 ```
 
 CBOR archive contains msg001..msg004. Phone decodes each:
@@ -241,13 +241,13 @@ users/bob01/devices/bdev01.json
 invites/alice-xyz.json
 invites/bob-abc.json
 
-inbox/alice01/archive/2025-01-15           ← CBOR: msg001..msg004
+inbox/alice01/archive/2025-01-15-{ULID}    ← CBOR: msg001..msg004
 inbox/alice01/live/msg006
 inbox/alice01/live/msg007
 inbox/alice01/live/msg010                  ← "Welcome back!"
 inbox/alice01/live/msg012                  ← "New phone, same me" (self-copy)
 
-inbox/bob01/archive/2025-01-15
+inbox/bob01/archive/2025-01-15-{ULID}
 inbox/bob01/live/msg005..msg007
 inbox/bob01/live/msg010                    ← "Welcome back!" (self-copy)
 inbox/bob01/live/msg011                    ← key share (S4)

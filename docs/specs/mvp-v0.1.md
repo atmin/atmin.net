@@ -61,12 +61,12 @@ Users and devices:
 Inbox (per user, not per device):
 
 - `inbox/{user_id}/live/{msg_id}`
-- `inbox/{user_id}/archive/{YYYY}-{MM}-{DD}`
+- `inbox/{user_id}/archive/{YYYY}-{MM}-{DD}-{ULID}`
 
 Key backup (Megolm session keys, encrypted with backup key):
 
 - `backups/{user_id}/keys/live/{session_id}`
-- `backups/{user_id}/keys/archive/{YYYY}-{MM}-{DD}`
+- `backups/{user_id}/keys/archive/{YYYY}-{MM}-{DD}-{ULID}`
 
 Invites (lookup index):
 
@@ -255,8 +255,29 @@ or after syncing and backing up received keys):
 
 1. Client ensures all Megolm keys for messages up to cursor are in key backup.
 2. Client calls `POST /v1/store/compact` with prefix and cursor.
-3. Server (any stateless instance) reads live JSON objects up to cursor,
-   writes CBOR archive, deletes originals.
+3. Server merges new live objects with any existing same-day archive,
+   writes a single CBOR archive per date, deletes originals and old archives.
+
+### Merge-on-compact algorithm
+
+Multiple compactions may occur on the same calendar day (e.g. two session
+rotations in a busy chat). The server maintains **one archive per day** by
+merging:
+
+1. List live objects under prefix up to cursor.
+2. List existing archives for today (`{prefix}archive/{date}*`).
+3. Read and decode any existing archives (CBOR → arrays of envelopes).
+4. Merge: existing archive envelopes + new live envelopes.
+5. Deduplicate by `msg_id` (first occurrence wins; objects without `msg_id`
+   such as key backups are always kept).
+6. Encode merged set as a single CBOR array.
+7. Write new archive with a unique key: `{prefix}archive/{date}-{ULID}`.
+8. Delete old archive(s) + compacted live objects.
+
+The ULID suffix ensures each write produces a unique key. At steady state
+there is exactly one archive per date. During the brief window between
+writing the new archive and deleting the old one, two archives coexist —
+the next compaction merges them.
 
 ### Archive format
 
@@ -280,9 +301,9 @@ Libraries: Go `github.com/fxamacker/cbor`, JS `cbor-x`.
 
 ### Safety properties
 
-- Compaction is idempotent. Two instances compacting the same messages produce identical output.
-- No object is deleted before the archive is durably written.
-- Crash during compaction may cause duplicates, never data loss.
+- No object is deleted before the new archive is durably written.
+- Crash between write and delete may leave two archives for the same date;
+  the next compaction merges and deduplicates them. Never data loss.
 - Readers tolerate duplicates via `msg_id` de-duplication.
 - No locking required. Stateless instances can compact independently.
 
@@ -544,9 +565,13 @@ Input:
 
 Server behavior:
 
-- list live objects under prefix up to cursor
-- write archive blob
-- delete compacted live objects
+1. List live objects under prefix up to cursor.
+2. If none → return `{archived: 0}`.
+3. List existing same-day archives (`{prefix}archive/{today}*`).
+4. Read and decode any existing archives (CBOR arrays).
+5. Merge existing archive objects with new live objects; deduplicate by `msg_id`.
+6. Write merged CBOR archive to `{prefix}archive/{today}-{ULID}`.
+7. Delete old archive(s) and compacted live objects.
 
 ## Client sync algorithm
 
