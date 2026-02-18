@@ -205,6 +205,18 @@ No new server-side logic needed.
 - The contacts file grows linearly with contact count. For the foreseeable scale
   (hundreds, not millions of contacts), a single JSON blob is fine.
 
+### Current sync model
+
+- Contacts are uploaded (encrypted) to S3 after every local change.
+- Contacts are downloaded and restored **only on session init** (new device login).
+- There is no cross-device push — a contact added on device A is not visible
+  on device B until B reloads the page (restore runs on session init).
+- The local IndexedDB store caches `{userId, handle}` only. The encrypted blob
+  uses the same fields (with `v: 1` for future expansion). The ADR schema fields
+  `display_name`, `sharing_public_key`, and `added_at` are not yet populated.
+- Contact display names are not user-editable. The handle shown comes from the
+  peer's profile at resolve time.
+
 ### Deferred
 
 - Visibility controls (public/private name, phone, email) can be added as fields
