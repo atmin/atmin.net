@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { fetchMessages, storeGet } from '@/lib/api';
 import type { Session } from '@/lib/auth';
+import { uploadContacts } from '@/lib/contact-backup';
 import {
     loadAllContacts,
     loadConversations,
@@ -77,6 +78,13 @@ export function useConversations(
                     }),
                 );
                 setContacts(resolved);
+
+                // Sync contacts to S3 (fire-and-forget)
+                uploadContacts(
+                    session.token,
+                    session.userId,
+                    session.backupKey,
+                ).catch((err) => console.error('Contact backup failed:', err));
             }
         };
 

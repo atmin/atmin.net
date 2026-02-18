@@ -63,6 +63,13 @@ export function useSession(): SessionState {
             );
             if (cancelled) return;
             setSessionManager(mgr);
+
+            // Restore contacts from backup (new device restore)
+            const { restoreContacts } = await import('@/lib/contact-backup');
+            if (cancelled) return;
+            restoreContacts(token, userId, backupKey).catch((err) =>
+                console.error('Contact restore failed:', err),
+            );
         })();
 
         return () => {

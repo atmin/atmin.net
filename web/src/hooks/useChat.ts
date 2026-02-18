@@ -6,6 +6,7 @@ import {
     sendTextMessage,
 } from '@/lib/api';
 import type { Session } from '@/lib/auth';
+import { uploadContacts } from '@/lib/contact-backup';
 import {
     loadMessages as loadFromDB,
     saveContact,
@@ -17,11 +18,24 @@ export interface Message {
     id: string;
     text: string;
     timestamp: Date;
+    sent: boolean;
 }
 
 // Merge newly synced messages into existing state.
 // Keeps previously-decrypted messages that may fail re-decryption
 // (Megolm ratchet only goes forward), adds new ones.
+function toMessages(
+    msgs: { id: string; text: string; timestamp: Date; fromUser: string }[],
+    userId: string,
+): Message[] {
+    return msgs.map((m) => ({
+        id: m.id,
+        text: m.text,
+        timestamp: m.timestamp,
+        sent: m.fromUser === userId,
+    }));
+}
+
 function mergeMessages(existing: Message[], synced: Message[]): Message[] {
     const byId = new Map(existing.map((m) => [m.id, m]));
     for (const m of synced) byId.set(m.id, m);
@@ -60,11 +74,16 @@ export function useChat(
         }
         if (!handle) return;
 
-        resolve(handle).then((res) => {
-            saveContact(res.user_id, handle);
+        resolve(handle).then(async (res) => {
+            await saveContact(res.user_id, handle);
+            uploadContacts(
+                session.token,
+                session.userId,
+                session.backupKey,
+            ).catch((err) => console.error('Contact backup failed:', err));
             setConvId(conversationId(session.userId, res.user_id));
         });
-    }, [handle, isSaved, session.userId]);
+    }, [handle, isSaved, session]);
 
     // Load messages on mount: IndexedDB first (instant), then sync from server
     useEffect(() => {
@@ -79,11 +98,13 @@ export function useChat(
                 );
                 if (filtered.length > 0) {
                     setMessages(
-                        filtered.map((m) => ({
-                            id: m.id,
-                            text: m.text,
-                            timestamp: new Date(m.timestamp),
-                        })),
+                        toMessages(
+                            filtered.map((m) => ({
+                                ...m,
+                                timestamp: new Date(m.timestamp),
+                            })),
+                            session.userId,
+                        ),
                     );
                     setLoading(false);
                 }
@@ -97,8 +118,9 @@ export function useChat(
                 );
 
                 // Filter to this conversation
-                const convMessages = synced.filter(
-                    (m) => m.conversationId === convId,
+                const convMessages = toMessages(
+                    synced.filter((m) => m.conversationId === convId),
+                    session.userId,
                 );
 
                 // Merge with existing (Megolm ratchet may skip already-decrypted)
@@ -137,8 +159,9 @@ export function useChat(
                     session.sharingPrivateKey,
                     sessionManager ?? undefined,
                 );
-                const convMessages = synced.filter(
-                    (m) => m.conversationId === convId,
+                const convMessages = toMessages(
+                    synced.filter((m) => m.conversationId === convId),
+                    session.userId,
                 );
                 setMessages((prev) => mergeMessages(prev, convMessages));
                 await saveMessages(session.userId, synced);
@@ -204,8 +227,9 @@ export function useChat(
                 sessionManager ?? undefined,
             );
 
-            const convMessages = synced.filter(
-                (m) => m.conversationId === convId,
+            const convMessages = toMessages(
+                synced.filter((m) => m.conversationId === convId),
+                session.userId,
             );
             setMessages((prev) => mergeMessages(prev, convMessages));
             await saveMessages(session.userId, synced);
