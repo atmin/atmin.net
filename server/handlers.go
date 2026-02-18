@@ -593,8 +593,8 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 			return
 		}
 
-		// Read all objects, decode JSON into generic maps for CBOR encoding.
-		objects := make([]any, 0, len(toCompact))
+		// Read new live objects, decode JSON into generic maps for CBOR encoding.
+		newObjects := make([]any, 0, len(toCompact))
 		for _, key := range toCompact {
 			data, err := store.GetObject(r.Context(), key)
 			if err != nil {
@@ -609,32 +609,106 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 				writeError(w, APIError{http.StatusInternalServerError, "internal", "Decode failed"})
 				return
 			}
-			objects = append(objects, obj)
+			newObjects = append(newObjects, obj)
 		}
 
-		// Encode as CBOR array
-		archive, err := cbor.Marshal(objects)
+		// Find existing same-day archives to merge with.
+		today := time.Now().UTC().Format("2006-01-02")
+		archivePrefix := req.Prefix + "archive/" + today
+		var existingArchiveKeys []string
+		cursor = ""
+		for {
+			keys, nextCursor, err := store.ListObjects(r.Context(), archivePrefix, 100, cursor)
+			if err != nil {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "List archives failed"})
+				return
+			}
+			existingArchiveKeys = append(existingArchiveKeys, keys...)
+			if nextCursor == "" {
+				break
+			}
+			cursor = nextCursor
+		}
+
+		// Read and decode existing archives.
+		var existingObjects []any
+		for _, key := range existingArchiveKeys {
+			data, err := store.GetObject(r.Context(), key)
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Read archive failed"})
+				return
+			}
+			var objs []any
+			if err := cbor.Unmarshal(data, &objs); err != nil {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "CBOR decode failed"})
+				return
+			}
+			existingObjects = append(existingObjects, objs...)
+		}
+
+		// Merge: existing archive objects first (preserves order), then new objects.
+		// Deduplicate by msg_id; objects without msg_id are always kept.
+		merged := deduplicateByMsgID(append(existingObjects, newObjects...))
+
+		// Encode as CBOR array.
+		archive, err := cbor.Marshal(merged)
 		if err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "CBOR encode failed"})
 			return
 		}
 
-		// Write archive — no object is deleted before the archive is durably written.
-		archiveKey := req.Prefix + "archive/" + time.Now().UTC().Format("2006-01-02")
+		// Write archive with ULID suffix for uniqueness.
+		// No object is deleted before the new archive is durably written.
+		archiveKey := req.Prefix + "archive/" + today + "-" + ulid.Make().String()
 		if err := store.PutObject(r.Context(), archiveKey, archive, "application/cbor"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Write archive failed"})
 			return
 		}
 
-		// Delete originals
-		if err := store.DeleteObjects(r.Context(), toCompact); err != nil {
+		// Delete compacted live objects and old archives.
+		toDelete := append(toCompact, existingArchiveKeys...)
+		if err := store.DeleteObjects(r.Context(), toDelete); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Delete failed"})
 			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"archived":    len(objects),
+			"archived":    len(newObjects),
 			"archive_key": archiveKey,
 		})
 	}
+}
+
+// deduplicateByMsgID removes duplicate envelopes by msg_id.
+// Objects without a msg_id field (e.g. key backups) are always kept.
+// Handles both map[string]any (from JSON) and map[any]any (from CBOR).
+func deduplicateByMsgID(objects []any) []any {
+	seen := make(map[string]bool)
+	result := make([]any, 0, len(objects))
+	for _, obj := range objects {
+		msgID, ok := extractMsgID(obj)
+		if ok && seen[msgID] {
+			continue
+		}
+		if ok {
+			seen[msgID] = true
+		}
+		result = append(result, obj)
+	}
+	return result
+}
+
+func extractMsgID(obj any) (string, bool) {
+	switch m := obj.(type) {
+	case map[string]any:
+		id, ok := m["msg_id"].(string)
+		return id, ok
+	case map[any]any:
+		id, ok := m["msg_id"].(string)
+		return id, ok
+	}
+	return "", false
 }

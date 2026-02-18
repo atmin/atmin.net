@@ -947,6 +947,209 @@ func TestCompactIdempotent(t *testing.T) {
 	}
 }
 
+func TestCompactSameDayMerge(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	prefix := "inbox/" + alice.UserID + "/live/"
+
+	// First batch: send 3 messages and compact.
+	ids1 := sendTestMessages(t, mux, alice, 3)
+	body, _ := json.Marshal(map[string]any{"prefix": prefix, "up_to": ids1[2]})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("first compact: status = %d; body = %s", w.Code, w.Body.String())
+	}
+	var resp1 struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp1)
+	if resp1.Archived != 3 {
+		t.Fatalf("first compact: archived = %d, want 3", resp1.Archived)
+	}
+
+	// Second batch: send 3 more messages and compact.
+	ids2 := sendTestMessages(t, mux, alice, 3)
+	body, _ = json.Marshal(map[string]any{"prefix": prefix, "up_to": ids2[2]})
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second compact: status = %d; body = %s", w.Code, w.Body.String())
+	}
+	var resp2 struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp2)
+	if resp2.Archived != 3 {
+		t.Fatalf("second compact: archived = %d, want 3", resp2.Archived)
+	}
+
+	// Old archive should be deleted.
+	if _, err := store.GetObject(nil, resp1.ArchiveKey); err == nil {
+		t.Fatal("old archive should have been deleted after merge")
+	}
+
+	// New archive should contain all 6 messages (merged).
+	archiveData, err := store.GetObject(nil, resp2.ArchiveKey)
+	if err != nil {
+		t.Fatalf("merged archive not found: %v", err)
+	}
+	var decoded []map[string]any
+	if err := cbor.Unmarshal(archiveData, &decoded); err != nil {
+		t.Fatalf("CBOR decode failed: %v", err)
+	}
+	if len(decoded) != 6 {
+		t.Fatalf("merged archive has %d objects, want 6", len(decoded))
+	}
+
+	// Verify order: first batch then second batch.
+	allIDs := append(ids1, ids2...)
+	for i, obj := range decoded {
+		if obj["msg_id"] != allIDs[i] {
+			t.Fatalf("decoded[%d].msg_id = %v, want %s", i, obj["msg_id"], allIDs[i])
+		}
+	}
+}
+
+func TestCompactSameDayDedup(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	prefix := "inbox/" + alice.UserID + "/live/"
+
+	// Send 3 messages and compact.
+	ids := sendTestMessages(t, mux, alice, 3)
+	body, _ := json.Marshal(map[string]any{"prefix": prefix, "up_to": ids[2]})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact status = %d", w.Code)
+	}
+
+	// Simulate crash-before-delete: re-insert msg2 and msg3 as live objects.
+	for _, id := range ids[1:] {
+		envelope := map[string]any{
+			"v": 1, "to_user": alice.UserID,
+			"from_user": alice.UserID, "from_device": alice.DeviceID,
+			"msg_id": id, "content_type": "megolm.message",
+			"payload": map[string]string{"session_id": "S1", "ciphertext": "dGVzdA"},
+		}
+		data, _ := json.Marshal(envelope)
+		if err := store.PutObject(context.Background(), prefix+id, data, "application/json"); err != nil {
+			t.Fatalf("re-insert %s: %v", id, err)
+		}
+	}
+
+	// Compact again — should merge and deduplicate.
+	body, _ = json.Marshal(map[string]any{"prefix": prefix, "up_to": ids[2]})
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second compact status = %d", w.Code)
+	}
+	var resp struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	// archived count reflects new live objects (the 2 re-inserted), not total.
+	if resp.Archived != 2 {
+		t.Fatalf("archived = %d, want 2", resp.Archived)
+	}
+
+	// Archive should have exactly 3 unique messages (no duplicates).
+	archiveData, err := store.GetObject(nil, resp.ArchiveKey)
+	if err != nil {
+		t.Fatalf("archive not found: %v", err)
+	}
+	var decoded []map[string]any
+	if err := cbor.Unmarshal(archiveData, &decoded); err != nil {
+		t.Fatalf("CBOR decode failed: %v", err)
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("deduped archive has %d objects, want 3", len(decoded))
+	}
+
+	// Verify msg_ids match original order.
+	for i, obj := range decoded {
+		if obj["msg_id"] != ids[i] {
+			t.Fatalf("decoded[%d].msg_id = %v, want %s", i, obj["msg_id"], ids[i])
+		}
+	}
+}
+
+func TestCompactMultipleStaleArchives(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	prefix := "inbox/" + alice.UserID + "/live/"
+
+	// Simulate two stale archives from double-crash (manually write CBOR).
+	today := time.Now().UTC().Format("2006-01-02")
+	staleKey1 := prefix + "archive/" + today + "-" + ulid.Make().String()
+	staleKey2 := prefix + "archive/" + today + "-" + ulid.Make().String()
+
+	archive1Objs := []map[string]any{
+		{"msg_id": "stale01", "v": 1, "content_type": "megolm.message"},
+		{"msg_id": "stale02", "v": 1, "content_type": "megolm.message"},
+	}
+	archive2Objs := []map[string]any{
+		{"msg_id": "stale02", "v": 1, "content_type": "megolm.message"}, // duplicate
+		{"msg_id": "stale03", "v": 1, "content_type": "megolm.message"},
+	}
+	data1, _ := cbor.Marshal(archive1Objs)
+	data2, _ := cbor.Marshal(archive2Objs)
+	store.PutObject(context.Background(), staleKey1, data1, "application/cbor")
+	store.PutObject(context.Background(), staleKey2, data2, "application/cbor")
+
+	// Send a new message and compact.
+	ids := sendTestMessages(t, mux, alice, 1)
+	body, _ := json.Marshal(map[string]any{"prefix": prefix, "up_to": ids[0]})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact status = %d; body = %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Archived != 1 {
+		t.Fatalf("archived = %d, want 1", resp.Archived)
+	}
+
+	// Both stale archives should be deleted.
+	if _, err := store.GetObject(nil, staleKey1); err == nil {
+		t.Fatal("stale archive 1 should have been deleted")
+	}
+	if _, err := store.GetObject(nil, staleKey2); err == nil {
+		t.Fatal("stale archive 2 should have been deleted")
+	}
+
+	// New archive should have 4 unique objects: stale01, stale02, stale03, + new msg.
+	archiveData, err := store.GetObject(nil, resp.ArchiveKey)
+	if err != nil {
+		t.Fatalf("merged archive not found: %v", err)
+	}
+	var decoded []map[string]any
+	if err := cbor.Unmarshal(archiveData, &decoded); err != nil {
+		t.Fatalf("CBOR decode failed: %v", err)
+	}
+	if len(decoded) != 4 {
+		t.Fatalf("merged archive has %d objects, want 4", len(decoded))
+	}
+
+	// Verify order: stale objects first (deduped), then new message last.
+	wantIDs := []string{"stale01", "stale02", "stale03", ids[0]}
+	for i, obj := range decoded {
+		if obj["msg_id"] != wantIDs[i] {
+			t.Fatalf("decoded[%d].msg_id = %v, want %s", i, obj["msg_id"], wantIDs[i])
+		}
+	}
+}
+
 // --- Register error paths ---
 
 func TestRegisterInvalidJSON(t *testing.T) {
