@@ -10,7 +10,7 @@ import {
 
 export default function LandingPage() {
     return (
-        <div className="flex min-h-screen items-center justify-center bg-stone-50 p-8">
+        <div className="flex min-h-screen items-center justify-center bg-background p-8">
             <div className="w-full max-w-md">
                 <h1 className="mb-8 text-3xl font-bold">atmin</h1>
 
@@ -22,7 +22,7 @@ export default function LandingPage() {
                             messages
                         </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-2 text-sm text-stone-600">
+                    <CardContent className="space-y-2 text-sm text-muted-foreground">
                         <p>
                             • Messages encrypted with Megolm (Matrix protocol)
                         </p>
@@ -40,7 +40,7 @@ export default function LandingPage() {
                     </Button>
                 </div>
 
-                <p className="mt-6 text-center text-xs text-stone-400">
+                <p className="mt-6 text-center text-xs text-muted-foreground">
                     v0.1 • Open source •{' '}
                     <a
                         href="https://github.com/yourusername/atmin"

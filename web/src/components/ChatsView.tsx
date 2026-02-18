@@ -57,7 +57,7 @@ export default function ChatsView({
     };
 
     return (
-        <div className="min-h-screen bg-stone-50 p-8 font-mono text-sm">
+        <div className="min-h-screen bg-background p-8 font-mono text-sm">
             <div className="mx-auto max-w-md">
                 <div className="mb-8 flex items-center justify-between">
                     <h1 className="text-2xl font-bold">atmin</h1>
@@ -74,8 +74,8 @@ export default function ChatsView({
                     </div>
                 </div>
 
-                <div className="mb-6 rounded bg-stone-100 p-4">
-                    <p className="mb-1 text-xs text-stone-500">
+                <div className="mb-6 rounded bg-muted p-4">
+                    <p className="mb-1 text-xs text-muted-foreground">
                         Your invite handle
                     </p>
                     <div className="flex items-center justify-between">
@@ -83,7 +83,7 @@ export default function ChatsView({
                         <button
                             type="button"
                             onClick={copyHandle}
-                            className="text-xs text-stone-500 hover:text-stone-800"
+                            className="text-xs text-muted-foreground hover:text-foreground"
                         >
                             {copied ? 'Copied' : 'Copy'}
                         </button>
@@ -95,24 +95,24 @@ export default function ChatsView({
                     {/* Saved Messages */}
                     <Link
                         to="/saved"
-                        className="block rounded border border-stone-200 bg-white p-4 hover:bg-stone-50"
+                        className="block rounded border border-border bg-card p-4 hover:bg-accent"
                     >
                         <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
                                 📝
                             </div>
                             <div className="min-w-0 flex-1">
                                 <div className="font-medium">
                                     Saved Messages
                                 </div>
-                                <div className="truncate text-xs text-stone-500">
+                                <div className="truncate text-xs text-muted-foreground">
                                     {savedConv
                                         ? savedConv.lastMessageText
                                         : 'Your private notes'}
                                 </div>
                             </div>
                             {savedConv && (
-                                <span className="shrink-0 text-xs text-stone-400">
+                                <span className="shrink-0 text-xs text-muted-foreground">
                                     {timeAgo(savedConv.lastMessageTimestamp)}
                                 </span>
                             )}
@@ -126,21 +126,21 @@ export default function ChatsView({
                             <Link
                                 key={conv.conversationId}
                                 to={`/${encodeURIComponent(handle)}`}
-                                className="block rounded border border-stone-200 bg-white p-4 hover:bg-stone-50"
+                                className="block rounded border border-border bg-card p-4 hover:bg-accent"
                             >
                                 <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-stone-100 text-stone-600">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
                                         💬
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="font-medium">
                                             {handle}
                                         </div>
-                                        <div className="truncate text-xs text-stone-500">
+                                        <div className="truncate text-xs text-muted-foreground">
                                             {conv.lastMessageText}
                                         </div>
                                     </div>
-                                    <span className="shrink-0 text-xs text-stone-400">
+                                    <span className="shrink-0 text-xs text-muted-foreground">
                                         {timeAgo(conv.lastMessageTimestamp)}
                                     </span>
                                 </div>
@@ -162,12 +162,12 @@ export default function ChatsView({
                             value={handleInput}
                             onChange={(e) => setHandleInput(e.target.value)}
                             placeholder="Enter a handle..."
-                            className="flex-1 rounded border border-stone-300 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+                            className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
                         />
                         <button
                             type="submit"
                             disabled={!handleInput.trim()}
-                            className="rounded bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:bg-stone-300"
+                            className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                         >
                             Chat
                         </button>
@@ -177,7 +177,7 @@ export default function ChatsView({
                 <button
                     type="button"
                     onClick={onLogout}
-                    className="mt-8 text-xs text-stone-400 hover:text-red-600"
+                    className="mt-8 text-xs text-muted-foreground hover:text-destructive"
                 >
                     Sign out
                 </button>

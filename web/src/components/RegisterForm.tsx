@@ -35,10 +35,10 @@ export default function RegisterForm({
     };
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-stone-50 p-8">
+        <div className="flex min-h-screen items-center justify-center bg-background p-8">
             <div className="w-full max-w-md">
                 <h1 className="mb-8 text-2xl font-bold">
-                    <a href="/" className="hover:text-stone-600">
+                    <a href="/" className="hover:text-foreground">
                         atmin
                     </a>
                 </h1>
@@ -54,7 +54,7 @@ export default function RegisterForm({
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <div className="mb-4 rounded border border-stone-200 bg-stone-50 p-4 font-mono text-sm">
+                                <div className="mb-4 rounded border border-border bg-muted p-4 font-mono text-sm">
                                     {mnemonic}
                                 </div>
                                 <Button
@@ -124,7 +124,9 @@ export default function RegisterForm({
                         </div>
 
                         {error && (
-                            <p className="mb-4 text-sm text-red-600">{error}</p>
+                            <p className="mb-4 text-sm text-destructive">
+                                {error}
+                            </p>
                         )}
 
                         <Button
@@ -140,7 +142,7 @@ export default function RegisterForm({
                 {step === 'registering' && (
                     <Card>
                         <CardContent className="pt-6">
-                            <p className="text-center text-stone-500">
+                            <p className="text-center text-muted-foreground">
                                 Creating your account...
                             </p>
                         </CardContent>
@@ -153,7 +155,7 @@ export default function RegisterForm({
                             <p className="mb-2 text-center text-green-600">
                                 ✓ Account created successfully
                             </p>
-                            <p className="text-center text-sm text-stone-500">
+                            <p className="text-center text-sm text-muted-foreground">
                                 Redirecting...
                             </p>
                         </CardContent>

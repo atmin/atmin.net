@@ -25,10 +25,10 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
     };
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-stone-50 p-8">
+        <div className="flex min-h-screen items-center justify-center bg-background p-8">
             <div className="w-full max-w-md">
                 <h1 className="mb-8 text-2xl font-bold">
-                    <a href="/" className="hover:text-stone-600">
+                    <a href="/" className="hover:text-foreground">
                         atmin
                     </a>
                 </h1>
@@ -58,7 +58,7 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                                     }
                                     placeholder="copper-falcon"
                                     required
-                                    className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
+                                    className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
                                 />
                             </div>
 
@@ -78,9 +78,9 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                                     placeholder="word1 word2 word3 ... word12"
                                     required
                                     rows={3}
-                                    className="w-full rounded border border-stone-300 px-3 py-2 font-mono text-sm"
+                                    className="w-full rounded border border-input bg-background px-3 py-2 font-mono text-sm"
                                 />
-                                <p className="mt-1 text-xs text-stone-500">
+                                <p className="mt-1 text-xs text-muted-foreground">
                                     Enter your 12-word recovery phrase
                                 </p>
                             </div>
@@ -103,7 +103,7 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                     </CardContent>
                 </Card>
 
-                <p className="mt-4 text-center text-sm text-stone-500">
+                <p className="mt-4 text-center text-sm text-muted-foreground">
                     Don't have an account?{' '}
                     <a href="/register" className="underline">
                         Create one

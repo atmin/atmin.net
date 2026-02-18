@@ -34,13 +34,13 @@ export default function ChatView({
     };
 
     return (
-        <div className="flex min-h-screen flex-col bg-stone-50">
+        <div className="flex min-h-screen flex-col bg-background">
             {/* Header */}
-            <div className="border-b border-stone-200 bg-white px-4 py-3">
+            <div className="border-b border-border bg-background px-4 py-3">
                 <div className="mx-auto flex max-w-2xl items-center gap-3">
                     <Link
                         to="/"
-                        className="text-stone-400 hover:text-stone-600"
+                        className="text-muted-foreground hover:text-foreground"
                     >
                         ← Back
                     </Link>
@@ -54,13 +54,13 @@ export default function ChatView({
             <div className="flex-1 overflow-y-auto">
                 <div className="mx-auto max-w-2xl p-4">
                     {loading ? (
-                        <div className="flex h-96 items-center justify-center text-stone-400">
+                        <div className="flex h-96 items-center justify-center text-muted-foreground">
                             <div className="text-center">
                                 <p>Loading messages...</p>
                             </div>
                         </div>
                     ) : messages.length === 0 ? (
-                        <div className="flex h-96 items-center justify-center rounded border border-dashed border-stone-300 text-center text-stone-400">
+                        <div className="flex h-96 items-center justify-center rounded border border-dashed border-border text-center text-muted-foreground">
                             <div>
                                 <p className="mb-2">No messages yet</p>
                                 <p className="text-xs">
@@ -75,10 +75,14 @@ export default function ChatView({
                             {messages.map((msg) => (
                                 <div
                                     key={msg.id}
-                                    className="rounded bg-white p-3 shadow-sm"
+                                    className={`rounded-2xl border border-border p-3 ${
+                                        msg.sent
+                                            ? 'ml-8 rounded-tr-none'
+                                            : 'mr-8 rounded-tl-none'
+                                    }`}
                                 >
                                     <p className="text-sm">{msg.text}</p>
-                                    <p className="mt-1 text-xs text-stone-400">
+                                    <p className="mt-1 text-xs text-muted-foreground">
                                         {msg.timestamp.getTime() === 0
                                             ? 'No timestamp'
                                             : msg.timestamp.toLocaleTimeString()}
@@ -91,7 +95,7 @@ export default function ChatView({
             </div>
 
             {/* Message input */}
-            <div className="border-t border-stone-200 bg-white px-4 py-3">
+            <div className="border-t border-border bg-background px-4 py-3">
                 <form
                     onSubmit={handleSubmit}
                     className="mx-auto flex max-w-2xl gap-2"
@@ -101,14 +105,14 @@ export default function ChatView({
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
                         placeholder="Type a message..."
-                        className="flex-1 rounded border border-stone-300 px-3 py-2 text-sm focus:border-stone-400 focus:outline-none"
+                        className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
                     />
                     <button
                         type="submit"
                         disabled={
                             !inputValue.trim() || sending || !encryptionReady
                         }
-                        className="rounded bg-stone-800 px-4 py-2 text-sm text-white hover:bg-stone-700 disabled:bg-stone-300"
+                        className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                     >
                         {sending ? 'Sending...' : 'Send'}
                     </button>
