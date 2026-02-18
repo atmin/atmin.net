@@ -564,7 +564,6 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 		}
 
 		// Collect all keys under prefix up to boundary (inclusive).
-		// Archive keys sort after ULIDs ('a' > '0') so they are naturally excluded.
 		boundary := req.Prefix + req.UpTo
 		var toCompact []string
 		cursor := ""
@@ -613,8 +612,10 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 		}
 
 		// Find existing same-day archives to merge with.
+		// Archive prefix is sibling of live/: inbox/{uid}/live/ → inbox/{uid}/archive/
 		today := time.Now().UTC().Format("2006-01-02")
-		archivePrefix := req.Prefix + "archive/" + today
+		archivePrefixBase := strings.TrimSuffix(req.Prefix, "live/") + "archive/"
+		archivePrefix := archivePrefixBase + today
 		var existingArchiveKeys []string
 		cursor = ""
 		for {
@@ -662,7 +663,7 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 
 		// Write archive with ULID suffix for uniqueness.
 		// No object is deleted before the new archive is durably written.
-		archiveKey := req.Prefix + "archive/" + today + "-" + ulid.Make().String()
+		archiveKey := archivePrefixBase + today + "-" + ulid.Make().String()
 		if err := store.PutObject(r.Context(), archiveKey, archive, "application/cbor"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Write archive failed"})
 			return

@@ -1086,9 +1086,11 @@ func TestCompactMultipleStaleArchives(t *testing.T) {
 	prefix := "inbox/" + alice.UserID + "/live/"
 
 	// Simulate two stale archives from double-crash (manually write CBOR).
+	// Archives live at sibling prefix: inbox/{uid}/archive/ (not under live/).
 	today := time.Now().UTC().Format("2006-01-02")
-	staleKey1 := prefix + "archive/" + today + "-" + ulid.Make().String()
-	staleKey2 := prefix + "archive/" + today + "-" + ulid.Make().String()
+	archivePrefix := strings.TrimSuffix(prefix, "live/") + "archive/"
+	staleKey1 := archivePrefix + today + "-" + ulid.Make().String()
+	staleKey2 := archivePrefix + today + "-" + ulid.Make().String()
 
 	archive1Objs := []map[string]any{
 		{"msg_id": "stale01", "v": 1, "content_type": "megolm.message"},
