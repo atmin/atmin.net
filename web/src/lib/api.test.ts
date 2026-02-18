@@ -5,6 +5,7 @@ import {
     MegolmOutbound,
 } from '../../crypto/pkg-node/atmin_crypto.js';
 import {
+    compactAfterRotation,
     fetchMessages,
     type RegisterRequest,
     register,
@@ -845,6 +846,294 @@ describe('api - Megolm send/receive', () => {
             expect(messages[0].text).toBe('Recovered message');
 
             mgr.destroy();
+        });
+    });
+
+    describe('fetchMessages with archives', () => {
+        it('decodes CBOR archive envelopes alongside live messages', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+
+            const sender = new MegolmOutbound();
+            const sessionKey = sender.session_key();
+
+            const { eciesEncrypt } = await import('./crypto');
+            const encryptedKey = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode(sessionKey),
+            );
+
+            // Live: key share + one message
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-001',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 3000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            const liveMsg = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-live-001',
+                content_type: 'megolm.message',
+                sent_at: new Date(Date.now() - 1000).toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Live message'),
+                },
+            };
+
+            // Archive: key share (same) + older message
+            const archivedMsg = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-archived-001',
+                content_type: 'megolm.message',
+                sent_at: new Date(Date.now() - 5000).toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Archived message'),
+                },
+            };
+
+            const archiveCborBytes = cborEncode([
+                keyShareEnvelope,
+                archivedMsg,
+            ]);
+            // cbor-x reuses an internal buffer; copy to an independent ArrayBuffer
+            const archiveCbor = new Uint8Array(archiveCborBytes).buffer;
+
+            // Mock: live storeList
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [
+                        `inbox/${toUserId}/live/msg-ks-001`,
+                        `inbox/${toUserId}/live/msg-live-001`,
+                    ],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Mock: live storeGet (key share)
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(keyShareEnvelope))
+                        .buffer,
+                ) as Response,
+            );
+            // Mock: live storeGet (message)
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(liveMsg)).buffer,
+                ) as Response,
+            );
+            // Mock: archive storeList
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`inbox/${toUserId}/archive/2025-01-15-01ARCHIVEID`],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Mock: archive storeGet (CBOR blob)
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(archiveCbor) as Response,
+            );
+
+            const messages = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // Both live and archived messages should be returned
+            expect(messages).toHaveLength(2);
+            const texts = messages.map((m) => m.text);
+            expect(texts).toContain('Live message');
+            expect(texts).toContain('Archived message');
+            // Sorted by timestamp (archived is older)
+            expect(messages[0].text).toBe('Archived message');
+            expect(messages[1].text).toBe('Live message');
+
+            sender.free();
+            mgr.destroy();
+        });
+
+        it('deduplicates archive messages against live messages by msg_id', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+
+            const sender = new MegolmOutbound();
+            const sessionKey = sender.session_key();
+
+            const { eciesEncrypt } = await import('./crypto');
+            const encryptedKey = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode(sessionKey),
+            );
+
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-dup',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 3000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            const sharedMsgId = 'msg-same-id';
+            const msgEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: sharedMsgId,
+                content_type: 'megolm.message',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Duplicated message'),
+                },
+            };
+
+            // Archive contains the same msg_id
+            const archiveCborBytes = cborEncode([
+                keyShareEnvelope,
+                msgEnvelope,
+            ]);
+            const archiveCbor = new Uint8Array(archiveCborBytes).buffer;
+
+            // Mock: live storeList
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [
+                        `inbox/${toUserId}/live/msg-ks-dup`,
+                        `inbox/${toUserId}/live/${sharedMsgId}`,
+                    ],
+                    next_cursor: '',
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(keyShareEnvelope))
+                        .buffer,
+                ) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(msgEnvelope))
+                        .buffer,
+                ) as Response,
+            );
+            // Mock: archive storeList
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`inbox/${toUserId}/archive/2025-01-15-01ARCHIVEID`],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Mock: archive storeGet
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(archiveCbor) as Response,
+            );
+
+            const messages = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // Should NOT have duplicates — only one message with that msg_id
+            expect(messages).toHaveLength(1);
+            expect(messages[0].id).toBe(sharedMsgId);
+
+            sender.free();
+            mgr.destroy();
+        });
+
+        it('returns empty when archive list fails', async () => {
+            const mgr = await createSessionManager(wasm);
+
+            // Mock: live storeList (empty)
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Mock: archive storeList fails
+            fetchMock.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                statusText: 'Internal Server Error',
+                headers: {
+                    get: () => 'application/json',
+                },
+                json: async () => ({
+                    error: 'internal',
+                    message: 'Archive list failed',
+                }),
+            } as unknown as Response);
+
+            const messages = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            expect(messages).toHaveLength(0);
+            mgr.destroy();
+        });
+    });
+
+    describe('compactAfterRotation', () => {
+        it('calls storeCompact with inbox cursor', async () => {
+            // Pre-seed a cursor
+            const prefix = `inbox/${fromUserId}/live/`;
+            await saveSyncCursor(prefix, `${prefix}01LASTMSGID`);
+
+            // Mock storeCompact response
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    archived: 5,
+                    archive_key: `inbox/${fromUserId}/archive/2025-01-15-01ARCHIVEID`,
+                }) as Response,
+            );
+
+            await compactAfterRotation(token, fromUserId);
+
+            // Verify storeCompact was called with correct args
+            const call = fetchMock.mock.calls[0];
+            expect(call[0]).toBe('/v1/store/compact');
+            const body = JSON.parse(call[1].body);
+            expect(body.prefix).toBe(prefix);
+            expect(body.up_to).toBe('01LASTMSGID');
+        });
+
+        it('skips compaction when no cursor exists', async () => {
+            await compactAfterRotation(token, fromUserId);
+
+            // No fetch calls should have been made
+            expect(fetchMock).not.toHaveBeenCalled();
         });
     });
 });

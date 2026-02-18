@@ -3,6 +3,10 @@
  *
  * Session keys are encrypted with the user's backup key (AES-256-GCM)
  * and stored at `backups/{userId}/keys/live/{sessionId}`.
+ *
+ * Note: key backups are NOT compacted because the sessionId lives in the
+ * key path and would be lost in a CBOR archive blob. They are small and
+ * few (one per Megolm session) so compaction is unnecessary.
  */
 
 import { storeGet, storeList, storePresign } from './api';

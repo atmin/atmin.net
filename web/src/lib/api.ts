@@ -159,6 +159,7 @@ export function storeCompact(
     });
 }
 
+import { decode as cborDecode } from 'cbor-x';
 import type { SessionManager } from './megolm-session';
 
 // Deterministic conversation ID
@@ -190,6 +191,8 @@ export async function sendTextMessage(
     if (sessionManager.needsRotation(session)) {
         session = await sessionManager.rotate();
         isNew = true;
+        // Compact inbox in background (per spec: triggered on session rotation)
+        compactAfterRotation(token, fromUserId).catch(console.error);
     }
 
     const envelopes: Envelope[] = [];
@@ -296,6 +299,23 @@ export async function sendTextMessage(
     await send(token, envelopes);
 }
 
+// Compact inbox after session rotation (fire-and-forget).
+// Key backups are NOT compacted: sessionId lives in the key path
+// and would be lost in a CBOR archive blob.
+export async function compactAfterRotation(
+    token: string,
+    userId: string,
+): Promise<void> {
+    const { loadSyncCursor } = await import('./db');
+
+    const inboxPrefix = `inbox/${userId}/live/`;
+    const inboxCursor = await loadSyncCursor(inboxPrefix);
+    if (inboxCursor) {
+        const upTo = inboxCursor.slice(inboxPrefix.length);
+        await storeCompact(token, inboxPrefix, upTo);
+    }
+}
+
 // Helper to fetch and decrypt messages from inbox
 export interface DecryptedMessage {
     id: string;
@@ -306,45 +326,22 @@ export interface DecryptedMessage {
     timestamp: Date;
 }
 
-export async function fetchMessages(
-    token: string,
+// Process envelopes through two-pass decryption (key shares first, then messages).
+// Returns decrypted messages and the set of inbound session IDs whose ratchets advanced.
+async function processEnvelopes(
+    envelopes: Array<{ key: string; envelope: Envelope }>,
     userId: string,
     sharingPrivateKey: CryptoKey,
-    sessionManager?: SessionManager,
-): Promise<DecryptedMessage[]> {
+    sessionManager: SessionManager | undefined,
+    seenMsgIds: Set<string>,
+): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
     const { eciesDecrypt, base64UrlDecode } = await import('./crypto');
-    const { loadSyncCursor, saveSyncCursor } = await import('./db');
-
-    // List messages in inbox, resuming from stored cursor if available
-    const prefix = `inbox/${userId}/live/`;
-    const storedCursor = await loadSyncCursor(prefix);
-
-    let listRes: StoreListResponse;
-    try {
-        listRes = await storeList(token, prefix, storedCursor);
-    } catch {
-        // Cursor may be stale (e.g. after compaction); fall back to full fetch
-        listRes = await storeList(token, prefix);
-    }
-
-    // Fetch all envelopes
-    const envelopes: Array<{ key: string; envelope: Envelope }> = [];
-    for (const key of listRes.keys) {
-        try {
-            const blob = await storeGet(token, key);
-            const envelope = JSON.parse(
-                new TextDecoder().decode(blob),
-            ) as Envelope;
-            envelopes.push({ key, envelope });
-        } catch (error) {
-            console.error(`Failed to fetch envelope ${key}:`, error);
-        }
-    }
 
     // Pass 1: process key shares first (so session keys are available for messages)
     if (sessionManager) {
         for (const { key, envelope } of envelopes) {
             if (envelope.content_type !== 'megolm.key_share') continue;
+            if (seenMsgIds.has(envelope.msg_id)) continue;
             try {
                 const encryptedPayload = {
                     ephemeralKey: base64UrlDecode(
@@ -375,6 +372,7 @@ export async function fetchMessages(
     for (const { key, envelope } of envelopes) {
         try {
             if (envelope.content_type === 'megolm.key_share') continue;
+            if (seenMsgIds.has(envelope.msg_id)) continue;
 
             if (envelope.content_type === 'megolm.message' && sessionManager) {
                 const sessionId = envelope.payload.session_id;
@@ -397,6 +395,7 @@ export async function fetchMessages(
                     text,
                     timestamp: new Date(envelope.sent_at ?? 0),
                 });
+                seenMsgIds.add(envelope.msg_id);
             } else if (envelope.content_type === 'text/plain') {
                 // Legacy ECIES-encrypted messages
                 const encryptedPayload = {
@@ -420,16 +419,123 @@ export async function fetchMessages(
                     text: new TextDecoder().decode(plaintext),
                     timestamp: new Date(envelope.sent_at ?? 0),
                 });
+                seenMsgIds.add(envelope.msg_id);
             }
         } catch (error) {
             console.error(`Failed to decrypt message ${key}:`, error);
         }
     }
 
-    // Persist inbound sessions whose ratchets advanced during decryption,
-    // so the advanced state survives page reloads and we don't re-decrypt old messages.
+    return { messages, advancedInbounds };
+}
+
+// Fetch and decrypt messages from CBOR archive blobs
+export async function fetchArchiveMessages(
+    token: string,
+    userId: string,
+    sharingPrivateKey: CryptoKey,
+    sessionManager: SessionManager | undefined,
+    seenMsgIds: Set<string>,
+): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
+    const archivePrefix = `inbox/${userId}/archive/`;
+    let listRes: StoreListResponse;
+    try {
+        listRes = await storeList(token, archivePrefix);
+    } catch {
+        return { messages: [], advancedInbounds: new Set() };
+    }
+
+    if (listRes.keys.length === 0) {
+        return { messages: [], advancedInbounds: new Set() };
+    }
+
+    // Fetch and decode all CBOR archive blobs
+    const allEnvelopes: Array<{ key: string; envelope: Envelope }> = [];
+    for (const key of listRes.keys) {
+        try {
+            const blob = await storeGet(token, key);
+            const decoded = cborDecode(new Uint8Array(blob)) as Envelope[];
+            for (const envelope of decoded) {
+                allEnvelopes.push({ key, envelope });
+            }
+        } catch (error) {
+            console.error(`Failed to fetch/decode archive ${key}:`, error);
+        }
+    }
+
+    return processEnvelopes(
+        allEnvelopes,
+        userId,
+        sharingPrivateKey,
+        sessionManager,
+        seenMsgIds,
+    );
+}
+
+export async function fetchMessages(
+    token: string,
+    userId: string,
+    sharingPrivateKey: CryptoKey,
+    sessionManager?: SessionManager,
+): Promise<DecryptedMessage[]> {
+    const { loadSyncCursor, saveSyncCursor } = await import('./db');
+
+    // List messages in inbox, resuming from stored cursor if available
+    const prefix = `inbox/${userId}/live/`;
+    const storedCursor = await loadSyncCursor(prefix);
+
+    let listRes: StoreListResponse;
+    try {
+        listRes = await storeList(token, prefix, storedCursor);
+    } catch {
+        // Cursor may be stale (e.g. after compaction); fall back to full fetch
+        listRes = await storeList(token, prefix);
+    }
+
+    // Fetch all live envelopes
+    const envelopes: Array<{ key: string; envelope: Envelope }> = [];
+    for (const key of listRes.keys) {
+        try {
+            const blob = await storeGet(token, key);
+            const envelope = JSON.parse(
+                new TextDecoder().decode(blob),
+            ) as Envelope;
+            envelopes.push({ key, envelope });
+        } catch (error) {
+            console.error(`Failed to fetch envelope ${key}:`, error);
+        }
+    }
+
+    // Process live envelopes
+    const seenMsgIds = new Set<string>();
+    for (const { envelope } of envelopes) {
+        seenMsgIds.add(envelope.msg_id);
+    }
+
+    const live = await processEnvelopes(
+        envelopes,
+        userId,
+        sharingPrivateKey,
+        sessionManager,
+        new Set(), // no dedup needed for live pass
+    );
+
+    // Process archive envelopes (dedup against live msg_ids)
+    const archive = await fetchArchiveMessages(
+        token,
+        userId,
+        sharingPrivateKey,
+        sessionManager,
+        seenMsgIds,
+    );
+
+    // Persist inbound sessions whose ratchets advanced during decryption
+    const allAdvanced = new Set([
+        ...live.advancedInbounds,
+        ...archive.advancedInbounds,
+    ]);
     if (sessionManager) {
-        for (const sessionId of advancedInbounds) {
+        for (const sessionId of allAdvanced) {
             await sessionManager.persistInbound(sessionId);
         }
     }
@@ -440,6 +546,7 @@ export async function fetchMessages(
         await saveSyncCursor(prefix, lastKey);
     }
 
+    const messages = [...live.messages, ...archive.messages];
     return messages.sort(
         (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
     );
