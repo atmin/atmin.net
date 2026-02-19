@@ -43,6 +43,10 @@
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-ring: var(--sidebar-ring);
+    --color-bubble-sent: var(--bubble-sent);
+    --color-bubble-sent-foreground: var(--bubble-sent-foreground);
+    --color-bubble-received: var(--bubble-received);
+    --color-bubble-received-foreground: var(--bubble-received-foreground);
 }
 
 :root {
@@ -78,6 +82,10 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    --bubble-sent: oklch(0.80 0 0);
+    --bubble-sent-foreground: oklch(0.145 0 0);
+    --bubble-received: oklch(0.90 0 0);
+    --bubble-received-foreground: oklch(0.145 0 0);
 }
 
 .dark {
@@ -112,6 +120,10 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --bubble-sent: oklch(0.35 0 0);
+    --bubble-sent-foreground: oklch(0.985 0 0);
+    --bubble-received: oklch(0.25 0 0);
+    --bubble-received-foreground: oklch(0.92 0 0);
 }
 
 @layer base {
@@ -120,5 +132,53 @@
     }
     body {
         @apply bg-background text-foreground;
+    }
+}
+
+@layer components {
+    .bubble-tail-sent {
+        &::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: -10px;
+            width: 10px;
+            height: 20px;
+            background: var(--bubble-sent);
+        }
+
+        &::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: -10px;
+            width: 10px;
+            height: 20px;
+            background: var(--background);
+            border-top-left-radius: 10px;
+        }
+    }
+
+    .bubble-tail-received {
+        &::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -10px;
+            width: 10px;
+            height: 20px;
+            background: var(--bubble-received);
+        }
+
+        &::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -10px;
+            width: 10px;
+            height: 20px;
+            background: var(--background);
+            border-top-right-radius: 10px;
+        }
     }
 }
