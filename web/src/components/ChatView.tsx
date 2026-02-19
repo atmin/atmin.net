@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Message } from '@/hooks/useChat';
+import ChatMessage from './ChatMessage';
 
 interface Props {
     chatTitle: string;
@@ -73,22 +74,12 @@ export default function ChatView({
                     ) : (
                         <div className="space-y-3">
                             {messages.map((msg) => (
-                                <div
+                                <ChatMessage
                                     key={msg.id}
-                                    data-testid="message"
-                                    className={`rounded-2xl border border-border p-3 ${
-                                        msg.sent
-                                            ? 'ml-8 rounded-tr-none'
-                                            : 'mr-8 rounded-tl-none'
-                                    }`}
-                                >
-                                    <p className="text-sm">{msg.text}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">
-                                        {msg.timestamp.getTime() === 0
-                                            ? 'No timestamp'
-                                            : msg.timestamp.toLocaleTimeString()}
-                                    </p>
-                                </div>
+                                    text={msg.text}
+                                    timestamp={msg.timestamp}
+                                    sent={msg.sent}
+                                />
                             ))}
                         </div>
                     )}
