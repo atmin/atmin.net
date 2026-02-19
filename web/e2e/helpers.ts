@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 
-const MSG_SELECTOR = '.rounded.bg-white.p-3.shadow-sm';
+const MSG_SELECTOR = '[data-testid="message"]';
 
 /**
  * Register a new user via the UI and return their invite handle.

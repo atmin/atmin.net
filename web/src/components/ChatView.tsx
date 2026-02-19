@@ -75,6 +75,7 @@ export default function ChatView({
                             {messages.map((msg) => (
                                 <div
                                     key={msg.id}
+                                    data-testid="message"
                                     className={`rounded-2xl border border-border p-3 ${
                                         msg.sent
                                             ? 'ml-8 rounded-tr-none'
