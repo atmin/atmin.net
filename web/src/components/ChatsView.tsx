@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { StoredConversation } from '@/lib/db';
+import Logo from './Logo';
 
 function timeAgo(ts: number): string {
     const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -60,7 +61,10 @@ export default function ChatsView({
         <div className="min-h-screen bg-background p-8 font-mono text-sm">
             <div className="mx-auto max-w-md">
                 <div className="mb-8 flex items-center justify-between">
-                    <h1 className="text-2xl font-bold">atmin</h1>
+                    <div className="flex items-center gap-2">
+                        <Logo className="h-8 w-8" />
+                        <h1 className="text-2xl font-bold">atmin</h1>
+                    </div>
                     <div className="flex items-center gap-2">
                         <span
                             className={`inline-block h-2 w-2 rounded-full ${
