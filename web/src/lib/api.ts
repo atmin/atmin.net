@@ -8,6 +8,12 @@ export class APIError extends Error {
     }
 }
 
+let onDeviceRevoked: (() => void) | null = null;
+
+export function setOnDeviceRevoked(cb: (() => void) | null): void {
+    onDeviceRevoked = cb;
+}
+
 async function request<T>(
     method: string,
     path: string,
@@ -28,6 +34,8 @@ async function request<T>(
             error: 'unknown',
             message: res.statusText,
         }));
+        if (res.status === 403 && err.error === 'device_revoked')
+            onDeviceRevoked?.();
         throw new APIError(res.status, err.error, err.message);
     }
 
@@ -141,14 +149,24 @@ export function storeList(
     return request('GET', `/v1/store/list?${params}`, { token });
 }
 
-export function storeGet(token: string, key: string): Promise<ArrayBuffer> {
-    return fetch(`/v1/store/object?${new URLSearchParams({ key })}`, {
-        headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => {
-        if (!res.ok)
-            throw new APIError(res.status, 'fetch_error', res.statusText);
-        return res.arrayBuffer();
-    });
+export async function storeGet(
+    token: string,
+    key: string,
+): Promise<ArrayBuffer> {
+    const res = await fetch(
+        `/v1/store/object?${new URLSearchParams({ key })}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({
+            error: 'fetch_error',
+            message: res.statusText,
+        }));
+        if (res.status === 403 && err.error === 'device_revoked')
+            onDeviceRevoked?.();
+        throw new APIError(res.status, err.error, err.message);
+    }
+    return res.arrayBuffer();
 }
 
 export function storePresign(

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { setOnDeviceRevoked } from '@/lib/api';
 import { clearSession, loadSession, type Session } from '@/lib/auth';
 import type { SessionManager } from '@/lib/megolm-session';
 
@@ -81,14 +82,19 @@ export function useSession(): SessionState {
         };
     }, [userId, deviceId, token, backupKey]);
 
-    const handleLogout = async () => {
+    const handleLogout = useCallback(async () => {
         setSessionManager((prev) => {
             prev?.destroy();
             return null;
         });
         await clearSession();
         setSession(null);
-    };
+    }, []);
+
+    useEffect(() => {
+        setOnDeviceRevoked(handleLogout);
+        return () => setOnDeviceRevoked(null);
+    }, [handleLogout]);
 
     const handleLogin = (s: Session) => setSession(s);
 

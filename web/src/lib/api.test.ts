@@ -10,6 +10,7 @@ import {
     register,
     resolve,
     sendTextMessage,
+    setOnDeviceRevoked,
     updateProfile,
 } from './api';
 import { base64UrlEncode, deriveKeys, generateBackupSecret } from './crypto';
@@ -1313,6 +1314,79 @@ describe('api - Megolm send/receive', () => {
             expect(compactCall).toBeUndefined();
 
             mgr.destroy();
+        });
+    });
+});
+
+describe('api - device revocation', () => {
+    beforeEach(() => {
+        resetFetchMock();
+    });
+
+    afterEach(() => {
+        setOnDeviceRevoked(null);
+    });
+
+    it('calls onDeviceRevoked callback on 403 device_revoked', async () => {
+        const onRevoked = vi.fn();
+        setOnDeviceRevoked(onRevoked);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'device_revoked',
+                message: 'Device has been revoked',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 403,
+            code: 'device_revoked',
+        });
+
+        expect(onRevoked).toHaveBeenCalledOnce();
+    });
+
+    it('does not call onDeviceRevoked on other 403 errors', async () => {
+        const onRevoked = vi.fn();
+        setOnDeviceRevoked(onRevoked);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'insufficient_permissions',
+                message: 'Not allowed',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 403,
+            code: 'insufficient_permissions',
+        });
+
+        expect(onRevoked).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when no callback is registered', async () => {
+        setOnDeviceRevoked(null);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'device_revoked',
+                message: 'Device has been revoked',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 403,
+            code: 'device_revoked',
         });
     });
 });
