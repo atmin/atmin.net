@@ -36,7 +36,7 @@ It is the canonical record, written by the server on registration and profile up
 }
 ```
 
-**`invites/{handle}.json`** is denormalized data — a projection of the public-facing
+**`handles/{handle}.json`** is denormalized data — a projection of the public-facing
 fields needed to resolve a handle and start a conversation.
 
 ```json
@@ -49,7 +49,7 @@ fields needed to resolve a handle and start a conversation.
 ```
 
 On profile update, the server writes `profile.json` first (source of truth),
-then `invites/{handle}.json`. Each `PutObject` is individually atomic —
+then `handles/{handle}.json`. Each `PutObject` is individually atomic —
 readers always see a complete file, never a partial write.
 
 If the server crashes between the two writes, the invite file may be stale.
@@ -61,12 +61,12 @@ a re-sync.
 ### Why two files
 
 Internal operations (add-device, revoke-device) look up the profile by user_id
-to verify the auth public key. Moving the profile to `invites/{handle}.json` would
+to verify the auth public key. Moving the profile to `handles/{handle}.json` would
 require a reverse lookup from user_id to handle, which does not exist.
 
 The invite file serves a different audience: unauthenticated resolve requests and
 future discovery services. Denormalizing the public fields avoids an extra S3 read
-on every resolve and lets a discovery cache warm from a single `ListObjects("invites/")`
+on every resolve and lets a discovery cache warm from a single `ListObjects("handles/")`
 plus one `GetObject` per handle.
 
 ### PUT /v1/profile — profile update endpoint
@@ -90,10 +90,10 @@ Both fields are optional — omitted fields are left unchanged.
 2. Merge the submitted fields into the existing profile.
 3. Write `users/{uid}/profile.json` with merged data.
 4. Read `invite_handle` from the profile, project public fields,
-   write `invites/{handle}.json`.
+   write `handles/{handle}.json`.
 5. Return the updated profile.
 
-The server owns both writes. The client never writes to `invites/` or
+The server owns both writes. The client never writes to `handles/` or
 `users/{uid}/profile.json` directly — these prefixes are not in the
 presign allow-list.
 
@@ -158,8 +158,8 @@ A new authenticated endpoint for self-service account deletion.
 
 1. Read `users/{uid}/profile.json` to get `invite_handle`.
 2. Delete all objects under `users/{uid}/`, `inbox/{uid}/`,
-   `backups/{uid}/`, `media/{uid}/`.
-3. Delete `invites/{handle}.json`.
+   `keys/{uid}/`, `media/{uid}/`.
+3. Delete `handles/{handle}.json`.
 4. Return 200.
 
 This reuses the same delete-all-user-data logic as the automated cleanup
@@ -192,7 +192,7 @@ No new server-side logic needed.
 - Profile updates use atomic S3 writes — no corrupt state possible.
 - Contacts are E2E encrypted — the server never sees who talks to whom.
 - No new storage infrastructure — everything uses existing S3 prefixes and endpoints.
-- Discovery cache warmup is a simple ListObjects + parallel GetObjects on `invites/`.
+- Discovery cache warmup is a simple ListObjects + parallel GetObjects on `handles/`.
 - Avatar upload reuses the existing presigned URL flow.
 
 ### Negative
@@ -235,7 +235,7 @@ No new server-side logic needed.
 
 ## Alternatives considered
 
-### Single profile at invites/{handle}.json
+### Single profile at handles/{handle}.json
 
 Rejected. Internal auth flows reference profiles by user_id. Storing the canonical
 profile under the invite handle would require a user_id→handle reverse mapping

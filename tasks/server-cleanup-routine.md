@@ -4,7 +4,7 @@
 `docs/decisions/adr-0006-data-retention.md` defines:
 - Config: `CLEANUP_ENABLED` (bool), `CLEANUP_INACTIVE_DAYS` (default 180), `CLEANUP_BATCH_SIZE` (default 100).
 - Two policies: abandoned registration (no `display_name` + no messages, >7 days after `created_at`), inactive user (`last_active` >180 days).
-- Cleanup lists all `invites/*.json`, reads each profile, evaluates policies, deletes all prefixes (`users/{uid}/`, `inbox/{uid}/`, `backups/{uid}/`, `media/{uid}/`, `invites/{handle}.json`).
+- Cleanup lists all `handles/*.json`, reads each profile, evaluates policies, deletes all prefixes (`users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`, `media/{uid}/`, `handles/{handle}.json`).
 - Idempotent. Can run as in-process goroutine on ticker or CLI subcommand. Dry-run by default.
 
 ## Current

@@ -28,9 +28,9 @@ inbox/bob01/live/msg002..msg100            ← 99 messages (S1, self-copies)
 inbox/bob01/live/msg101                    ← key share from Alice (S2)
 inbox/bob01/live/msg102..msg150            ← messages from Alice (S2)
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/bob01/keys/live/S1
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/bob01/live/S1
 ```
 
 Bob's session S1 has message index 99 (0-indexed). The next message triggers rotation.
@@ -65,7 +65,7 @@ Bob's client creates a new Megolm session `S5`.
 
 ```
 POST /v1/store/presign
-{ "key": "backups/bob01/keys/live/S5", "bytes": 256 }
+{ "key": "keys/bob01/live/S5", "bytes": 256 }
 
 PUT <presigned_url>
 ← {"iv": "<base64>", "ciphertext": "<base64 AES-256-GCM of S5 session key>"}
@@ -92,7 +92,7 @@ POST /v1/send
 ```
 
 S3 writes:
-- `backups/bob01/keys/live/S5` — key backup
+- `keys/bob01/live/S5` — key backup
 - `inbox/alice01/live/msg201` — key share for S5
 
 ## 3. Bob triggers compaction
@@ -117,19 +117,19 @@ new objects, deduplicates by `msg_id`, and writes a single replacement archive.
 
 ```
 POST /v1/store/compact
-{ "prefix": "backups/bob01/keys/live/", "up_to": "S1" }
+{ "prefix": "keys/bob01/live/", "up_to": "S1" }
 ```
 
 Server:
-1. Reads `backups/bob01/keys/live/S1`.
-2. Writes `backups/bob01/keys/archive/2025-01-15-{ULID}`.
-3. Deletes `backups/bob01/keys/live/S1`.
+1. Reads `keys/bob01/live/S1`.
+2. Writes `keys/bob01/archive/2025-01-15-{ULID}`.
+3. Deletes `keys/bob01/live/S1`.
 
 S3 state change:
 - `inbox/bob01/live/msg002..msg200` → `inbox/bob01/archive/2025-01-15-{ULID}`
-- `backups/bob01/keys/live/S1` → `backups/bob01/keys/archive/2025-01-15-{ULID}`
+- `keys/bob01/live/S1` → `keys/bob01/archive/2025-01-15-{ULID}`
 - `inbox/bob01/live/` now empty (until next sync)
-- `backups/bob01/keys/live/S5` remains (current session, not compacted)
+- `keys/bob01/live/S5` remains (current session, not compacted)
 
 ## 4. Bob sends first message on new session
 
@@ -166,7 +166,7 @@ GET /v1/store/object?key=inbox/alice01/live/msg202
 Processing:
 1. `msg200` — `megolm.message` with S1: decrypts → "Message 100". (Alice still has S1.)
 2. `msg201` — `megolm.key_share`: Alice decrypts with sharing private key → gets S5.
-   Writes to key backup: `backups/alice01/keys/live/S5`.
+   Writes to key backup: `keys/alice01/live/S5`.
 3. `msg202` — `megolm.message` with S5: decrypts → "First on new session".
 
 Seamless transition. Alice's client does not need to know about rotation —
@@ -181,7 +181,7 @@ POST /v1/store/compact
 { "prefix": "inbox/alice01/live/", "up_to": "msg200" }
 
 POST /v1/store/compact
-{ "prefix": "backups/alice01/keys/live/", "up_to": "S1" }
+{ "prefix": "keys/alice01/live/", "up_to": "S1" }
 ```
 
 Both sides have now archived pre-rotation data.
@@ -201,11 +201,11 @@ inbox/alice01/live/msg202                  ← "First on new session"
 inbox/bob01/archive/2025-01-15-{ULID}      ← CBOR: msg002..msg200
 inbox/bob01/live/msg202                    ← "First on new session" (self-copy)
 
-backups/alice01/keys/archive/2025-01-15-{ULID}  ← CBOR: S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/live/S5               ← new (received from Bob)
-backups/bob01/keys/archive/2025-01-15-{ULID}    ← CBOR: S1
-backups/bob01/keys/live/S5                 ← current session
+keys/alice01/archive/2025-01-15-{ULID}  ← CBOR: S1
+keys/alice01/live/S2
+keys/alice01/live/S5               ← new (received from Bob)
+keys/bob01/archive/2025-01-15-{ULID}    ← CBOR: S1
+keys/bob01/live/S5                 ← current session
 ```
 
 ## Security properties

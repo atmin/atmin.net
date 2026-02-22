@@ -18,8 +18,8 @@ users/alice01/devices/adev01.json
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json
-invites/bob-abc.json
+handles/alice-xyz.json
+handles/bob-abc.json
 
 inbox/alice01/live/msg001   ← key share from Bob (S1)
 inbox/alice01/live/msg002   ← "Hey Alice" (S1)
@@ -29,9 +29,9 @@ inbox/bob01/live/msg002     ← "Hey Alice" (S1, self-copy)
 inbox/bob01/live/msg003     ← key share from Alice (S2)
 inbox/bob01/live/msg004     ← "Hey Bob" (S2)
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/bob01/keys/live/S1
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/bob01/live/S1
 ```
 
 ## 1. Alice adds her phone
@@ -65,11 +65,11 @@ Backup secret is discarded from memory.
 ## 2. Phone syncs key backups
 
 ```
-GET /v1/store/list?prefix=backups/alice01/keys/live/
-→ ["backups/alice01/keys/live/S1", "backups/alice01/keys/live/S2"]
+GET /v1/store/list?prefix=keys/alice01/live/
+→ ["keys/alice01/live/S1", "keys/alice01/live/S2"]
 
-GET /v1/store/object?key=backups/alice01/keys/live/S1
-GET /v1/store/object?key=backups/alice01/keys/live/S2
+GET /v1/store/object?key=keys/alice01/live/S1
+GET /v1/store/object?key=keys/alice01/live/S2
 ```
 
 Phone decrypts each with the backup encryption key → recovers Megolm session keys S1 and S2.
@@ -101,7 +101,7 @@ Phone creates its own Megolm session `S3` (each device has its own session).
 
 ```
 POST /v1/store/presign
-{ "key": "backups/alice01/keys/live/S3", "bytes": 256 }
+{ "key": "keys/alice01/live/S3", "bytes": 256 }
 ```
 
 Phone needs Bob's sharing public key to send a key share.
@@ -156,7 +156,7 @@ S3 writes:
 - `inbox/bob01/live/msg005` — key share for S3
 - `inbox/bob01/live/msg006` — message
 - `inbox/alice01/live/msg006` — self-copy
-- `backups/alice01/keys/live/S3` — key backup
+- `keys/alice01/live/S3` — key backup
 
 ## 5. Bob syncs
 
@@ -169,7 +169,7 @@ GET /v1/store/list?prefix=inbox/bob01/live/&cursor=msg004
 
 Processing:
 1. `msg005` — `megolm.key_share`: Bob decrypts with his sharing private key → gets S3.
-   Writes to key backup: `backups/bob01/keys/live/S3`.
+   Writes to key backup: `keys/bob01/live/S3`.
 2. `msg006` — `megolm.message` with S3: decrypts → "Sent from my phone".
 
 Bob sees the message from Alice's phone. The `from_device: "adev02"` field
@@ -190,10 +190,10 @@ GET /v1/store/object?key=inbox/alice01/live/msg006
 Laptop syncs key backup to find keys from sibling devices:
 
 ```
-GET /v1/store/list?prefix=backups/alice01/keys/live/
-→ ["backups/alice01/keys/live/S1", "backups/alice01/keys/live/S2", "backups/alice01/keys/live/S3"]
+GET /v1/store/list?prefix=keys/alice01/live/
+→ ["keys/alice01/live/S1", "keys/alice01/live/S2", "keys/alice01/live/S3"]
 
-GET /v1/store/object?key=backups/alice01/keys/live/S3
+GET /v1/store/object?key=keys/alice01/live/S3
 ```
 
 Decrypts with backup encryption key → recovers S3. Retries `msg006` → "Sent from my phone".
@@ -244,8 +244,8 @@ users/alice01/devices/adev02.json       ← new
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json
-invites/bob-abc.json
+handles/alice-xyz.json
+handles/bob-abc.json
 
 inbox/alice01/live/msg001   ← key share from Bob (S1)
 inbox/alice01/live/msg002   ← "Hey Alice"
@@ -260,11 +260,11 @@ inbox/bob01/live/msg005     ← key share from Alice phone (S3)
 inbox/bob01/live/msg006     ← "Sent from my phone"
 inbox/bob01/live/msg007     ← "Got it!" (self-copy)
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/live/S3            ← new (phone's session)
-backups/bob01/keys/live/S1
-backups/bob01/keys/live/S3              ← new (received from phone)
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/alice01/live/S3            ← new (phone's session)
+keys/bob01/live/S1
+keys/bob01/live/S3              ← new (received from phone)
 ```
 
 ## What to test

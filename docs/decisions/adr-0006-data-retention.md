@@ -61,13 +61,13 @@ with limit 1).
 
 A single function that:
 
-1. Lists all `invites/*.json` files.
-2. For each invite, reads the profile by user_id.
+1. Lists all `handles/*.json` files.
+2. For each handle, reads the profile by user_id.
 3. Evaluates retention policies against `created_at`, `last_active`,
    `display_name`, and inbox emptiness.
 4. For users that match a deletion policy, deletes all objects under
-   `users/{uid}/`, `inbox/{uid}/`, `backups/{uid}/`, `media/{uid}/`,
-   and the `invites/{handle}.json` file.
+   `users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`, `media/{uid}/`,
+   and the `handles/{handle}.json` file.
 
 The routine is idempotent — running it twice has no additional effect.
 

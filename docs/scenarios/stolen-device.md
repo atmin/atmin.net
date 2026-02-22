@@ -26,9 +26,9 @@ users/bob01/devices/bdev01.json
 inbox/alice01/live/msg001..msg007
 inbox/bob01/live/msg002..msg007
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/live/S3
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/alice01/live/S3
 ```
 
 ## 1. Eve reads what's already on the phone
@@ -178,9 +178,9 @@ inbox/alice01/live/msg009               ← new (post-revocation)
 inbox/bob01/live/msg002..msg008
 inbox/bob01/live/msg009                 ← new
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/live/S3
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/alice01/live/S3
 ```
 
 ## Security properties

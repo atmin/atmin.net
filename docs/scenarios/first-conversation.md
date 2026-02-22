@@ -26,7 +26,7 @@ POST /v1/register
 S3 writes:
 - `users/alice01/profile.json` — `{ user_id, invite_handle, auth_public_key, sharing_public_key, created_at }`
 - `users/alice01/devices/adev01.json` — `{ device_label: "Alice's laptop" }`
-- `invites/alice-xyz.json` — `{ user_id, sharing_public_key }`
+- `handles/alice-xyz.json` — `{ user_id, sharing_public_key }`
 
 Client stores in IndexedDB:
 - sharing private key (for decrypting key shares)
@@ -42,7 +42,7 @@ Same flow. Bob gets `user_id: "bob01"`, `invite_handle: "bob-abc"`.
 S3 writes:
 - `users/bob01/profile.json`
 - `users/bob01/devices/bdev01.json`
-- `invites/bob-abc.json`
+- `handles/bob-abc.json`
 
 ## 3. Alice shares her invite (out of band)
 
@@ -58,7 +58,7 @@ GET /v1/resolve/alice-xyz
 ```
 
 S3 reads:
-- `invites/alice-xyz.json` — contains both `user_id` and `sharing_public_key` (single read)
+- `handles/alice-xyz.json` — contains both `user_id` and `sharing_public_key` (single read)
 
 Bob's client now knows Alice's user ID and sharing public key.
 
@@ -70,7 +70,7 @@ Bob's client creates a new Megolm session (session `S1`) for sending.
 
 ```
 POST /v1/store/presign
-{ "key": "backups/bob01/keys/live/S1", "bytes": 256 }
+{ "key": "keys/bob01/live/S1", "bytes": 256 }
 → { "presigned_url": "..." }
 
 PUT <presigned_url>
@@ -128,7 +128,7 @@ S3 writes:
 - `inbox/alice01/live/msg001` — key share
 - `inbox/alice01/live/msg002` — message
 - `inbox/bob01/live/msg002` — self-copy
-- `backups/bob01/keys/live/S1` — key backup
+- `keys/bob01/live/S1` — key backup
 
 Note: ULID ordering of `msg001` < `msg002` ensures Alice processes the key share before the message.
 
@@ -153,7 +153,7 @@ Processing:
 2. Alice writes the received key to her own backup:
    ```
    POST /v1/store/presign
-   { "key": "backups/alice01/keys/live/S1", "bytes": 256 }
+   { "key": "keys/alice01/live/S1", "bytes": 256 }
    ```
 3. `msg002` has `content_type: megolm.message` — Alice decrypts with session `S1`, reads "Hey Alice".
 4. Alice persists cursor and msg_id de-dup set.
@@ -166,7 +166,7 @@ Alice's client creates her own Megolm session (`S2`) for sending.
 
 ```
 POST /v1/store/presign
-{ "key": "backups/alice01/keys/live/S2", "bytes": 256 }
+{ "key": "keys/alice01/live/S2", "bytes": 256 }
 ```
 
 Alice resolves Bob's sharing public key (she may have cached it from the envelope metadata,
@@ -218,7 +218,7 @@ S3 writes:
 - `inbox/bob01/live/msg003` — key share
 - `inbox/bob01/live/msg004` — message
 - `inbox/alice01/live/msg004` — self-copy
-- `backups/alice01/keys/live/S2` — key backup
+- `keys/alice01/live/S2` — key backup
 
 ## 8. Bob syncs and reads the reply
 
@@ -234,8 +234,8 @@ users/alice01/devices/adev01.json
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json
-invites/bob-abc.json
+handles/alice-xyz.json
+handles/bob-abc.json
 
 inbox/alice01/live/msg001   ← key share from Bob
 inbox/alice01/live/msg002   ← "Hey Alice"
@@ -245,9 +245,9 @@ inbox/bob01/live/msg002     ← "Hey Alice" (self-copy)
 inbox/bob01/live/msg003     ← key share from Alice
 inbox/bob01/live/msg004     ← "Hey Bob"
 
-backups/alice01/keys/live/S1           ← Bob's session key (received)
-backups/alice01/keys/live/S2           ← Alice's own session key
-backups/bob01/keys/live/S1             ← Bob's own session key
+keys/alice01/live/S1           ← Bob's session key (received)
+keys/alice01/live/S2           ← Alice's own session key
+keys/bob01/live/S1             ← Bob's own session key
 ```
 
 ## What to test

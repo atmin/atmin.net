@@ -23,7 +23,7 @@ Realtime must not become a correctness dependency.
 
 - v0.1 uses invite-based discovery only.
 - No phone numbers, email addresses, or address book access are required.
-- Invite handles are resolved via S3 lookup objects (`invites/{handle}.json`).
+- Handles are resolved via S3 lookup objects (`handles/{handle}.json`).
 
 Future directions (opt-in, undecided):
 - Public identifier discovery (e.g. verified phone numbers).
@@ -32,10 +32,10 @@ Future directions (opt-in, undecided):
 
 When discovery needs grow beyond S3 GET lookups, a cache layer (e.g. Redis) can be
 introduced. S3 remains the source of truth; the cache is reconstructable by scanning
-S3 prefixes (`invites/`, `users/`, `discovery/`). Cache loss causes discovery downtime,
+S3 prefixes (`handles/`, `users/`, `discovery/`). Cache loss causes discovery downtime,
 not data loss. Index objects follow a convention:
 
-- `invites/{invite_handle}.json` — invite lookup (v0.1)
+- `handles/{handle}.json` — handle lookup (v0.1)
 - `discovery/phone/{hash}.json` — phone lookup (v0.2+, opt-in)
 - `discovery/username/{name}.json` — username lookup (v0.2+, opt-in)
 
@@ -87,7 +87,7 @@ schema (`v: 1`). The server sees no difference.
 
 - v0.1 invite handles are two BIP39 words (e.g. `copper-falcon`), server-generated.
 - If users could choose their handle (with uniqueness enforcement), handles become usernames.
-- The resolve infrastructure (`invites/{handle}.json` → user_id) already supports this.
+- The resolve infrastructure (`handles/{handle}.json` → user_id) already supports this.
 - A user could claim multiple handles (aliases).
 - Only addition needed: a "claim handle" API with uniqueness check.
 

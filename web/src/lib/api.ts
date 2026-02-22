@@ -518,6 +518,8 @@ export async function fetchMessages(
         // Compact processed live objects into daily archive (fire-and-forget)
         const upTo = lastKey.slice(prefix.length);
         storeCompact(token, prefix, upTo).catch(console.error);
+        // Compact key backups too (fire-and-forget, ~ sorts after all session IDs)
+        storeCompact(token, `keys/${userId}/live/`, '~').catch(console.error);
     }
 
     const messages = [...live.messages, ...archive.messages];

@@ -19,14 +19,14 @@ users/alice01/contacts.json
 users/alice01/devices/adev01.json
 users/alice01/devices/adev02.json
 
-invites/alice-xyz.json
+handles/alice-xyz.json
 
 inbox/alice01/live/msg001..msg009
 inbox/alice01/archive/2026-02-15-{ULID}   ← compacted archive
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/archive/2026-02-15-{ULID}
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/alice01/archive/2026-02-15-{ULID}
 
 media/alice01/avatar/abc123.jpg
 ```
@@ -51,9 +51,9 @@ Server logic:
 1. Reads `users/alice01/profile.json` to get `invite_handle: "alice-xyz"`.
 2. Lists and deletes all objects under `users/alice01/`.
 3. Lists and deletes all objects under `inbox/alice01/`.
-4. Lists and deletes all objects under `backups/alice01/`.
+4. Lists and deletes all objects under `keys/alice01/`.
 5. Lists and deletes all objects under `media/alice01/`.
-6. Deletes `invites/alice-xyz.json`.
+6. Deletes `handles/alice-xyz.json`.
 
 S3 state after: **all of the above are gone.**
 
@@ -123,8 +123,8 @@ users/bob01/profile.json
 users/bob01/contacts.json          ← still has Alice in encrypted contacts
 users/bob01/devices/bdev01.json
 
-invites/bob-abc.json
-                                   ← invites/alice-xyz.json deleted
+handles/bob-abc.json
+                                   ← handles/alice-xyz.json deleted
 
 inbox/alice01/live/msg010          ← dead letter from step 5
 inbox/bob01/live/msg002..msg009

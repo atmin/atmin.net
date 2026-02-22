@@ -42,7 +42,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 		var inviteHandle string
 		for i := 0; i < 10; i++ {
 			candidate := generateInviteHandle()
-			inviteKey := "invites/" + candidate + ".json"
+			inviteKey := "handles/" + candidate + ".json"
 			if err := store.HeadObject(r.Context(), inviteKey); errors.Is(err, ErrNotFound) {
 				inviteHandle = candidate
 				break
@@ -79,7 +79,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 
 		// Write invite
 		invite, _ := json.Marshal(map[string]string{"user_id": userID, "sharing_public_key": req.SharingPublicKey})
-		if err := store.PutObject(r.Context(), "invites/"+inviteHandle+".json", invite, "application/json"); err != nil {
+		if err := store.PutObject(r.Context(), "handles/"+inviteHandle+".json", invite, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write invite"})
 			return
 		}
@@ -208,7 +208,7 @@ func handleResolve(store Store) http.HandlerFunc {
 			return
 		}
 
-		inviteData, err := store.GetObject(r.Context(), "invites/"+handle+".json")
+		inviteData, err := store.GetObject(r.Context(), "handles/"+handle+".json")
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
@@ -300,7 +300,7 @@ func handleProfile(store Store) http.HandlerFunc {
 				"display_name":       profile["display_name"],
 				"avatar_url":         profile["avatar_url"],
 			})
-			store.PutObject(r.Context(), "invites/"+handle+".json", invite, "application/json")
+			store.PutObject(r.Context(), "handles/"+handle+".json", invite, "application/json")
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -330,7 +330,7 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 		for _, prefix := range []string{
 			"users/" + userID + "/",
 			"inbox/" + userID + "/",
-			"backups/" + userID + "/",
+			"keys/" + userID + "/",
 			"media/" + userID + "/",
 		} {
 			keys, _, err := store.ListObjects(r.Context(), prefix, 1000, "")
@@ -348,7 +348,7 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 
 		// Delete invite file
 		if handle := profile["invite_handle"]; handle != "" {
-			store.DeleteObject(r.Context(), "invites/"+handle+".json")
+			store.DeleteObject(r.Context(), "handles/"+handle+".json")
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -409,7 +409,7 @@ func handleSend(store Store, hub *EventHub) http.HandlerFunc {
 }
 
 // Prefix authorization: users can only access their own prefixes.
-var allowedPrefixes = []string{"inbox/", "backups/", "media/"}
+var allowedPrefixes = []string{"inbox/", "keys/", "media/"}
 
 func authorizePrefix(userID, prefix string) bool {
 	for _, p := range allowedPrefixes {

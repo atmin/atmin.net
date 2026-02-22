@@ -2,16 +2,25 @@
  * Key backup — encrypt/upload and download/decrypt Megolm session keys.
  *
  * Session keys are encrypted with the user's backup key (AES-256-GCM)
- * and stored at `backups/{userId}/keys/live/{sessionId}`.
+ * and stored at `keys/{userId}/live/{sessionId}`.
  *
- * Note: key backups are NOT compacted because the sessionId lives in the
- * key path and would be lost in a CBOR archive blob. They are small and
- * few (one per Megolm session) so compaction is unnecessary.
+ * Keys follow the same compaction lifecycle as inbox messages:
+ * live objects are compacted into daily CBOR archives at
+ * `keys/{userId}/archive/{date}-{ULID}`. The `msg_id` field (set to
+ * sessionId) enables server-side dedup during compaction.
  */
 
+import { decode as cborDecode } from 'cbor-x';
 import { storeGet, storeList, storePresign } from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import type { SessionManager } from './megolm-session';
+
+interface KeyBackupEntry {
+    msg_id: string;
+    session_id: string;
+    iv: string;
+    ciphertext: string;
+}
 
 export async function backupSessionKey(
     token: string,
@@ -23,12 +32,14 @@ export async function backupSessionKey(
     const plaintext = new TextEncoder().encode(sessionKeyB64);
     const encrypted = await backupEncrypt(backupKey, plaintext);
     const blob = JSON.stringify({
+        msg_id: sessionId,
+        session_id: sessionId,
         iv: btoa(String.fromCharCode(...encrypted.iv)),
         ciphertext: btoa(String.fromCharCode(...encrypted.ciphertext)),
     });
     const blobBytes = new TextEncoder().encode(blob);
 
-    const key = `backups/${userId}/keys/live/${sessionId}`;
+    const key = `keys/${userId}/live/${sessionId}`;
     const { presigned_url } = await storePresign(token, key, blobBytes.length);
 
     await fetch(presigned_url, {
@@ -43,46 +54,84 @@ export async function restoreSessionKeys(
     backupKey: CryptoKey,
     sessionManager: SessionManager,
 ): Promise<number> {
-    const prefix = `backups/${userId}/keys/live/`;
-    const listRes = await storeList(token, prefix);
-
     let restored = 0;
 
-    for (const key of listRes.keys) {
-        const sessionId = key.slice(prefix.length);
-
-        // Skip if already known
-        const existing = await sessionManager.getInbound(sessionId);
-        if (existing) continue;
-
-        try {
-            const blob = await storeGet(token, key);
-            const { iv, ciphertext } = JSON.parse(
-                new TextDecoder().decode(blob),
-            );
-
-            const ivBytes = Uint8Array.from(atob(iv), (c) => c.charCodeAt(0));
-            const ctBytes = Uint8Array.from(atob(ciphertext), (c) =>
-                c.charCodeAt(0),
-            );
-
-            const sessionKeyBytes = await backupDecrypt(backupKey, {
-                iv: ivBytes,
-                ciphertext: ctBytes,
-            });
-            const sessionKeyB64 = new TextDecoder().decode(sessionKeyBytes);
-
-            await sessionManager.importInbound(
-                sessionId,
-                'unknown',
-                'unknown',
-                sessionKeyB64,
-            );
-            restored++;
-        } catch (error) {
-            console.error(`Failed to restore key ${key}:`, error);
+    // Restore from live keys
+    const livePrefix = `keys/${userId}/live/`;
+    try {
+        const liveRes = await storeList(token, livePrefix);
+        for (const key of liveRes.keys) {
+            try {
+                const blob = await storeGet(token, key);
+                const entry = JSON.parse(
+                    new TextDecoder().decode(blob),
+                ) as KeyBackupEntry;
+                restored += await restoreEntry(
+                    entry,
+                    backupKey,
+                    sessionManager,
+                );
+            } catch (error) {
+                console.error(`Failed to restore key ${key}:`, error);
+            }
         }
+    } catch (error) {
+        console.error('Failed to list live keys:', error);
+    }
+
+    // Restore from archived keys
+    const archivePrefix = `keys/${userId}/archive/`;
+    try {
+        const archiveRes = await storeList(token, archivePrefix);
+        for (const key of archiveRes.keys) {
+            try {
+                const blob = await storeGet(token, key);
+                const entries = cborDecode(
+                    new Uint8Array(blob),
+                ) as KeyBackupEntry[];
+                for (const entry of entries) {
+                    restored += await restoreEntry(
+                        entry,
+                        backupKey,
+                        sessionManager,
+                    );
+                }
+            } catch (error) {
+                console.error(`Failed to restore archive ${key}:`, error);
+            }
+        }
+    } catch (error) {
+        console.error('Failed to list archive keys:', error);
     }
 
     return restored;
+}
+
+async function restoreEntry(
+    entry: KeyBackupEntry,
+    backupKey: CryptoKey,
+    sessionManager: SessionManager,
+): Promise<number> {
+    const { session_id: sessionId, iv, ciphertext } = entry;
+
+    // Skip if already known
+    const existing = await sessionManager.getInbound(sessionId);
+    if (existing) return 0;
+
+    const ivBytes = Uint8Array.from(atob(iv), (c) => c.charCodeAt(0));
+    const ctBytes = Uint8Array.from(atob(ciphertext), (c) => c.charCodeAt(0));
+
+    const sessionKeyBytes = await backupDecrypt(backupKey, {
+        iv: ivBytes,
+        ciphertext: ctBytes,
+    });
+    const sessionKeyB64 = new TextDecoder().decode(sessionKeyBytes);
+
+    await sessionManager.importInbound(
+        sessionId,
+        'unknown',
+        'unknown',
+        sessionKeyB64,
+    );
+    return 1;
 }

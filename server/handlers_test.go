@@ -138,7 +138,7 @@ func TestRegisterAndResolve(t *testing.T) {
 	}
 
 	// Verify invite file contains sharing_public_key
-	inviteData, err := store.GetObject(context.Background(), "invites/"+alice.InviteHandle+".json")
+	inviteData, err := store.GetObject(context.Background(), "handles/"+alice.InviteHandle+".json")
 	if err != nil {
 		t.Fatalf("reading invite: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestUpdateProfile(t *testing.T) {
 	}
 
 	// Verify invite file was updated
-	inviteData, _ := store.GetObject(context.Background(), "invites/"+alice.InviteHandle+".json")
+	inviteData, _ := store.GetObject(context.Background(), "handles/"+alice.InviteHandle+".json")
 	var invite map[string]string
 	json.Unmarshal(inviteData, &invite)
 	if invite["display_name"] != "Alice Wonderland" {
@@ -299,7 +299,7 @@ func TestDeleteProfile(t *testing.T) {
 	}
 
 	// Invite should be gone
-	_, err = store.GetObject(context.Background(), "invites/"+alice.InviteHandle+".json")
+	_, err = store.GetObject(context.Background(), "handles/"+alice.InviteHandle+".json")
 	if err == nil {
 		t.Fatal("invite still exists after delete")
 	}
@@ -590,8 +590,8 @@ func TestStoreGetObject(t *testing.T) {
 	store, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice")
 
-	// Plant an object in Alice's backup
-	key := "backups/" + alice.UserID + "/keys/live/S1"
+	// Plant an object in Alice's key backup
+	key := "keys/" + alice.UserID + "/live/S1"
 	store.PutObject(nil, key, []byte(`{"iv":"aaa","ciphertext":"bbb"}`), "application/json")
 
 	// Alice fetches it
@@ -612,7 +612,7 @@ func TestStoreGetObjectNotFound(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, authedRequest(t, "GET",
-		"/v1/store/object?key=backups/"+alice.UserID+"/keys/live/NOPE", alice.Token, ""))
+		"/v1/store/object?key=keys/"+alice.UserID+"/live/NOPE", alice.Token, ""))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", w.Code)
 	}
@@ -623,10 +623,10 @@ func TestStoreGetObjectOtherUserForbidden(t *testing.T) {
 	alice := registerTestUser(t, mux, "Alice")
 	bob := registerTestUser(t, mux, "Bob")
 
-	key := "backups/" + bob.UserID + "/keys/live/S1"
+	key := "keys/" + bob.UserID + "/live/S1"
 	store.PutObject(nil, key, []byte("secret"), "application/json")
 
-	// Alice tries to read Bob's backup
+	// Alice tries to read Bob's key
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, authedRequest(t, "GET",
 		"/v1/store/object?key="+key, alice.Token, ""))
@@ -1306,7 +1306,7 @@ func TestStoreListDisallowedPrefix(t *testing.T) {
 	alice := registerTestUser(t, mux, "Alice")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, authedRequest(t, "GET",
-		"/v1/store/list?prefix=invites/", alice.Token, ""))
+		"/v1/store/list?prefix=handles/", alice.Token, ""))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
@@ -1329,7 +1329,7 @@ func TestStoreObjectDisallowedKey(t *testing.T) {
 	alice := registerTestUser(t, mux, "Alice")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, authedRequest(t, "GET",
-		"/v1/store/object?key=invites/something.json", alice.Token, ""))
+		"/v1/store/object?key=handles/something.json", alice.Token, ""))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}

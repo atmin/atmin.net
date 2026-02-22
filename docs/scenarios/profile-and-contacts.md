@@ -24,8 +24,8 @@ users/alice01/devices/adev02.json
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json            ← { user_id, sharing_public_key }
-invites/bob-abc.json
+handles/alice-xyz.json            ← { user_id, sharing_public_key }
+handles/bob-abc.json
 ```
 
 ## 1. Alice sets her display name and avatar
@@ -55,11 +55,11 @@ PUT /v1/profile
 Server performs read-merge-write:
 1. Reads `users/alice01/profile.json`, merges `display_name` and `avatar_url`.
 2. Writes updated `users/alice01/profile.json`.
-3. Projects public fields to `invites/alice-xyz.json`.
+3. Projects public fields to `handles/alice-xyz.json`.
 
 S3 state change:
 - `users/alice01/profile.json` — now includes `display_name`, `avatar_url`
-- `invites/alice-xyz.json` — now includes `display_name`, `avatar_url`, `sharing_public_key`
+- `handles/alice-xyz.json` — now includes `display_name`, `avatar_url`, `sharing_public_key`
 - `media/alice01/avatar/abc123.jpg` — avatar blob
 
 ## 2. Bob resolves Alice's enriched profile
@@ -74,7 +74,7 @@ GET /v1/resolve/alice-xyz
   }
 ```
 
-Server reads only `invites/alice-xyz.json` — no second S3 read needed.
+Server reads only `handles/alice-xyz.json` — no second S3 read needed.
 
 Bob's client displays "Alice Wonderland" with her avatar.
 
@@ -88,7 +88,7 @@ PUT /v1/profile
 
 Server merges: `display_name` changes, `avatar_url` is preserved (not in request).
 
-Both `profile.json` and `invites/alice-xyz.json` now show `"Alice W."` with
+Both `profile.json` and `handles/alice-xyz.json` now show `"Alice W."` with
 the same `avatar_url`.
 
 ## 4. Bob adds Alice as a contact
@@ -159,8 +159,8 @@ users/bob01/profile.json
 users/bob01/contacts.json         ← encrypted
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json            ← now has display_name, avatar_url
-invites/bob-abc.json
+handles/alice-xyz.json            ← now has display_name, avatar_url
+handles/bob-abc.json
 
 media/alice01/avatar/abc123.jpg   ← avatar blob
 ```

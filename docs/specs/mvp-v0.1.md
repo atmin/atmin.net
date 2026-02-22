@@ -65,12 +65,12 @@ Inbox (per user, not per device):
 
 Key backup (Megolm session keys, encrypted with backup key):
 
-- `backups/{user_id}/keys/live/{session_id}`
-- `backups/{user_id}/keys/archive/{YYYY}-{MM}-{DD}-{ULID}`
+- `keys/{user_id}/live/{session_id}`
+- `keys/{user_id}/archive/{YYYY}-{MM}-{DD}-{ULID}`
 
-Invites (lookup index):
+Handles (lookup index):
 
-- `invites/{invite_handle}.json` — denormalized public profile (user_id, sharing key, display name, avatar)
+- `handles/{handle}.json` — denormalized public profile (user_id, sharing key, display name, avatar)
 - `users/{user_id}/contacts.json` — encrypted contacts blob (client-side AES-256-GCM)
 
 Media (encrypted by client):
@@ -166,7 +166,7 @@ decrypted, the client syncs the key backup for new keys from sibling devices.
 ### Key backup
 
 Each Megolm session key is also written as an individual encrypted object
-under `backups/{user_id}/keys/live/`. Compacted into daily archive objects like everything else.
+under `keys/{user_id}/live/`. Compacted into daily archive objects like everything else.
 
 On restore, the new device decrypts key backups with the backup encryption key,
 then syncs the inbox normally — decrypting messages with the restored Megolm keys.
@@ -486,14 +486,14 @@ Input (both optional, omitted fields unchanged):
 - `avatar_url`
 
 Server reads `profile.json`, merges fields, writes `profile.json` then
-`invites/{handle}.json`. See [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md).
+`handles/{handle}.json`. See [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md).
 
 ### Delete account
 
 `DELETE /v1/profile`
 
-Deletes all user data: `users/{uid}/`, `inbox/{uid}/`, `backups/{uid}/`,
-`media/{uid}/`, and `invites/{handle}.json`. Token is implicitly invalidated.
+Deletes all user data: `users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`,
+`media/{uid}/`, and `handles/{handle}.json`. Token is implicitly invalidated.
 See [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md).
 
 ### Saved Messages
@@ -521,7 +521,7 @@ custom headers).
 
 The server exposes three generic endpoints for all S3 operations.
 Authorization is prefix-scoped: a user's token grants access only to their own prefixes
-(`inbox/{user_id}/`, `backups/{user_id}/`, `media/{user_id}/`, `users/{user_id}/`).
+(`inbox/{user_id}/`, `keys/{user_id}/`, `media/{user_id}/`, `users/{user_id}/`).
 Reads under `users/` are open (needed to fetch other users' public keys);
 writes are restricted to own uid (see [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md)).
 
@@ -582,7 +582,7 @@ Server behavior:
    Write newly received Megolm keys to key backup via `store/presign`.
 3. Decrypt message envelopes, store locally. Persist cursor and `msg_id` de-dup set.
 4. If a message can't be decrypted (unknown session key from a sibling device),
-   sync key backup (`store/list` on `backups/{user_id}/keys/`) for new keys, retry.
+   sync key backup (`store/list` on `keys/{user_id}/`) for new keys, retry.
 
 Realtime hint:
 
@@ -590,7 +590,7 @@ Realtime hint:
 
 ### New device sync
 
-1. Restore Megolm session keys from `backups/{user_id}/keys/` (archive + live).
+1. Restore Megolm session keys from `keys/{user_id}/` (archive + live).
 2. Sync `inbox/{user_id}/live/` — most recent messages appear first.
 3. Sync `inbox/{user_id}/archive/` in reverse date order — client walks backwards
    by constructing month prefixes (`archive/2025-06`, `archive/2025-05`, …).

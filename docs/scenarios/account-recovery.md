@@ -24,8 +24,8 @@ users/alice01/devices/adev01.json          ← laptop (lost, not revoked)
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json
-invites/bob-abc.json
+handles/alice-xyz.json
+handles/bob-abc.json
 
 inbox/alice01/archive/2025-01-15-{ULID}    ← CBOR: msg001..msg004
 inbox/alice01/live/msg006                  ← "Sent from my phone" (self-copy)
@@ -36,11 +36,11 @@ inbox/bob01/live/msg005                    ← key share from Alice phone (S3)
 inbox/bob01/live/msg006                    ← "Sent from my phone"
 inbox/bob01/live/msg007                    ← "Got it!" (self-copy)
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/live/S3
-backups/bob01/keys/live/S1
-backups/bob01/keys/live/S3
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/alice01/live/S3
+keys/bob01/live/S1
+keys/bob01/live/S3
 ```
 
 ## 1. Alice adds a new device
@@ -93,12 +93,12 @@ S3 deletes:
 New device sync starts with key backups (needed before any messages can be decrypted):
 
 ```
-GET /v1/store/list?prefix=backups/alice01/keys/live/
-→ ["backups/alice01/keys/live/S1", "backups/alice01/keys/live/S2", "backups/alice01/keys/live/S3"]
+GET /v1/store/list?prefix=keys/alice01/live/
+→ ["keys/alice01/live/S1", "keys/alice01/live/S2", "keys/alice01/live/S3"]
 
-GET /v1/store/object?key=backups/alice01/keys/live/S1
-GET /v1/store/object?key=backups/alice01/keys/live/S2
-GET /v1/store/object?key=backups/alice01/keys/live/S3
+GET /v1/store/object?key=keys/alice01/live/S1
+GET /v1/store/object?key=keys/alice01/live/S2
+GET /v1/store/object?key=keys/alice01/live/S3
 ```
 
 Phone decrypts each with the backup encryption key → recovers Megolm session keys
@@ -107,10 +107,10 @@ S1, S2, and S3. Stores in IndexedDB.
 If key backups had been compacted into archives:
 
 ```
-GET /v1/store/list?prefix=backups/alice01/keys/archive/
-→ ["backups/alice01/keys/archive/2025-01-15-{ULID}"]
+GET /v1/store/list?prefix=keys/alice01/archive/
+→ ["keys/alice01/archive/2025-01-15-{ULID}"]
 
-GET /v1/store/object?key=backups/alice01/keys/archive/2025-01-15-{ULID}
+GET /v1/store/object?key=keys/alice01/archive/2025-01-15-{ULID}
 ```
 
 CBOR archive → decrypt each entry → recover any keys not already in live.
@@ -189,7 +189,7 @@ Alice's new phone creates a fresh Megolm session `S4`:
 
 ```
 POST /v1/store/presign
-{ "key": "backups/alice01/keys/live/S4", "bytes": 256 }
+{ "key": "keys/alice01/live/S4", "bytes": 256 }
 ```
 
 **Send:**
@@ -238,8 +238,8 @@ users/alice01/devices/adev03.json          ← new (only device)
 users/bob01/profile.json
 users/bob01/devices/bdev01.json
 
-invites/alice-xyz.json
-invites/bob-abc.json
+handles/alice-xyz.json
+handles/bob-abc.json
 
 inbox/alice01/archive/2025-01-15-{ULID}    ← CBOR: msg001..msg004
 inbox/alice01/live/msg006
@@ -253,13 +253,13 @@ inbox/bob01/live/msg010                    ← "Welcome back!" (self-copy)
 inbox/bob01/live/msg011                    ← key share (S4)
 inbox/bob01/live/msg012                    ← "New phone, same me"
 
-backups/alice01/keys/live/S1
-backups/alice01/keys/live/S2
-backups/alice01/keys/live/S3
-backups/alice01/keys/live/S4               ← new
-backups/bob01/keys/live/S1
-backups/bob01/keys/live/S3
-backups/bob01/keys/live/S4                 ← new
+keys/alice01/live/S1
+keys/alice01/live/S2
+keys/alice01/live/S3
+keys/alice01/live/S4               ← new
+keys/bob01/live/S1
+keys/bob01/live/S3
+keys/bob01/live/S4                 ← new
 ```
 
 ## What to test
