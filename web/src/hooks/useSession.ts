@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { setOnDeviceRevoked } from '@/lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { deleteDevice, setOnDeviceRevoked } from '@/lib/api';
 import { clearSession, loadSession, type Session } from '@/lib/auth';
 import type { SessionManager } from '@/lib/megolm-session';
 
@@ -82,11 +82,17 @@ export function useSession(): SessionState {
         };
     }, [userId, deviceId, token, backupKey]);
 
+    const tokenRef = useRef(session?.token ?? null);
+    tokenRef.current = session?.token ?? null;
+
     const handleLogout = useCallback(async () => {
         setSessionManager((prev) => {
             prev?.destroy();
             return null;
         });
+        // Best-effort: remove device server-side before clearing local session
+        const token = tokenRef.current;
+        if (token) deleteDevice(token).catch(() => {});
         await clearSession();
         setSession(null);
     }, []);

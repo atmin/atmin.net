@@ -13,13 +13,15 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 	mux.HandleFunc("GET /v1/resolve/{handle}", handleResolve(store))
 	mux.HandleFunc("POST /v1/devices", handleAddDevice(store, cfg))
 
-	// Authenticated endpoints
+	// Authenticated endpoints (shared device cache for instant revocation)
+	cache := newDeviceCache()
 	auth := func(h http.HandlerFunc) http.HandlerFunc {
-		return requireAuth(h, store, cfg)
+		return requireAuth(h, store, cfg, cache)
 	}
 	mux.HandleFunc("PUT /v1/profile", auth(handleProfile(store)))
 	mux.HandleFunc("DELETE /v1/profile", auth(handleDeleteProfile(store)))
-	mux.HandleFunc("POST /v1/devices/revoke", auth(handleRevokeDevice(store, cfg)))
+	mux.HandleFunc("DELETE /v1/devices", auth(handleDeleteDevice(store, cache)))
+	mux.HandleFunc("POST /v1/devices/revoke", auth(handleRevokeDevice(store, cfg, cache)))
 	mux.HandleFunc("POST /v1/send", auth(handleSend(store, hub)))
 	mux.HandleFunc("GET /v1/events", auth(handleEvents(store, hub)))
 	mux.HandleFunc("GET /v1/store/list", auth(handleStoreList(store)))

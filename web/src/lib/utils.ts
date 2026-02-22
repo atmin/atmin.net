@@ -7,11 +7,20 @@ export function cn(...inputs: ClassValue[]) {
 
 export function detectDeviceLabel(): string {
     const ua = navigator.userAgent;
-    if (/iPhone/.test(ua)) return 'iPhone';
-    if (/iPad/.test(ua)) return 'iPad';
-    if (/Android/.test(ua)) return 'Android';
-    if (/Mac/.test(ua)) return 'Mac';
-    if (/Windows/.test(ua)) return 'Windows';
-    if (/Linux/.test(ua)) return 'Linux';
-    return 'Browser';
+
+    let os = 'Browser';
+    if (/iPhone/.test(ua)) os = 'iPhone';
+    else if (/iPad/.test(ua)) os = 'iPad';
+    else if (/Android/.test(ua)) os = 'Android';
+    else if (/Mac/.test(ua)) os = 'Mac';
+    else if (/Windows/.test(ua)) os = 'Windows';
+    else if (/Linux/.test(ua)) os = 'Linux';
+
+    let browser = '';
+    if (/Firefox\//.test(ua)) browser = 'Firefox';
+    else if (/Edg\//.test(ua)) browser = 'Edge';
+    else if (/Chrome\//.test(ua)) browser = 'Chrome';
+    else if (/Safari\//.test(ua)) browser = 'Safari';
+
+    return browser ? `${os} · ${browser}` : os;
 }

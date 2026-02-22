@@ -25,11 +25,14 @@ func deviceIDFrom(ctx context.Context) string {
 	return ctx.Value(ctxDeviceID).(string)
 }
 
+// newDeviceCache creates a shared device cache for use across all auth handlers.
+func newDeviceCache() *deviceCache {
+	return &deviceCache{entries: make(map[string]time.Time)}
+}
+
 // requireAuth wraps a handler with token verification and device revocation check.
 // Supports token from Authorization header (Bearer token) or query parameter (for SSE).
-func requireAuth(next http.HandlerFunc, store Store, cfg Config) http.HandlerFunc {
-	cache := &deviceCache{entries: make(map[string]time.Time)}
-
+func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var token string
 
@@ -93,6 +96,12 @@ func (c *deviceCache) set(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[key] = time.Now()
+}
+
+func (c *deviceCache) invalidate(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
 }
 
 // logRequests logs method, path, status, and duration for each request.

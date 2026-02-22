@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { updateProfile } from '@/lib/api';
 
@@ -6,12 +6,14 @@ interface Props {
     handle: string;
     token: string;
     initialDisplayName?: string;
+    children?: ReactNode;
 }
 
 export default function ProfileSettings({
     handle,
     token,
     initialDisplayName = '',
+    children,
 }: Props) {
     const [displayName, setDisplayName] = useState(initialDisplayName);
     const [saving, setSaving] = useState(false);
@@ -103,6 +105,8 @@ export default function ProfileSettings({
                         <p className="text-xs text-destructive">{error}</p>
                     )}
                 </div>
+
+                {children}
             </div>
         </div>
     );

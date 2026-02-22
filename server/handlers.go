@@ -153,8 +153,24 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 	}
 }
 
+// DELETE /v1/devices — self-delete the calling device (token-auth only, no mnemonic).
+func handleDeleteDevice(store Store, cache *deviceCache) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFrom(r.Context())
+		deviceID := deviceIDFrom(r.Context())
+
+		deviceKey := "users/" + userID + "/devices/" + deviceID + ".json"
+		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete device"})
+			return
+		}
+		cache.invalidate(deviceKey)
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
 // POST /v1/devices/revoke
-func handleRevokeDevice(store Store, cfg Config) http.HandlerFunc {
+func handleRevokeDevice(store Store, cfg Config, cache *deviceCache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			DeviceID  string    `json:"device_id"`
@@ -190,10 +206,14 @@ func handleRevokeDevice(store Store, cfg Config) http.HandlerFunc {
 			return
 		}
 
-		if err := store.DeleteObject(r.Context(), "users/"+userID+"/devices/"+req.DeviceID+".json"); err != nil {
+		deviceKey := "users/" + userID + "/devices/" + req.DeviceID + ".json"
+		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete device"})
 			return
 		}
+
+		// Invalidate the device cache so the revoked device gets 403 immediately
+		cache.invalidate(deviceKey)
 
 		w.WriteHeader(http.StatusOK)
 	}

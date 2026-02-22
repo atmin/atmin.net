@@ -114,6 +114,24 @@ export interface AddDeviceResponse {
     token: string;
 }
 
+export interface RevokeDeviceRequest {
+    device_id: string;
+    auth_proof: {
+        payload: {
+            user_id: string;
+            device_id: string;
+            timestamp: string;
+        };
+        signature: string;
+    };
+}
+
+export interface DeviceInfo {
+    device_id: string;
+    device_label: string;
+    created_at: string;
+}
+
 // --- API functions ---
 
 export function register(req: RegisterRequest): Promise<RegisterResponse> {
@@ -122,6 +140,32 @@ export function register(req: RegisterRequest): Promise<RegisterResponse> {
 
 export function addDevice(req: AddDeviceRequest): Promise<AddDeviceResponse> {
     return request('POST', '/v1/devices', { body: req });
+}
+
+export async function listDevices(
+    token: string,
+    userId: string,
+): Promise<DeviceInfo[]> {
+    const prefix = `users/${userId}/devices/`;
+    const listRes = await storeList(token, prefix);
+    const devices: DeviceInfo[] = [];
+    for (const key of listRes.keys) {
+        const blob = await storeGet(token, key);
+        const device = JSON.parse(new TextDecoder().decode(blob)) as DeviceInfo;
+        devices.push(device);
+    }
+    return devices;
+}
+
+export function deleteDevice(token: string): Promise<void> {
+    return request('DELETE', '/v1/devices', { token });
+}
+
+export function revokeDevice(
+    token: string,
+    req: RevokeDeviceRequest,
+): Promise<void> {
+    return request('POST', '/v1/devices/revoke', { token, body: req });
 }
 
 export function updateProfile(
