@@ -596,56 +596,6 @@ describe('api - Megolm send/receive', () => {
             mgr.destroy();
         });
 
-        it('still handles legacy text/plain messages', async () => {
-            const mgr = await createSessionManager(wasm);
-            const { eciesEncrypt } = await import('./crypto');
-
-            const encrypted = await eciesEncrypt(
-                recipientKeys.sharing.publicKey,
-                new TextEncoder().encode('Legacy message'),
-            );
-
-            const legacyEnvelope = {
-                v: 1,
-                to_user: toUserId,
-                from_user: fromUserId,
-                from_device: fromDeviceId,
-                msg_id: 'msg-legacy',
-                content_type: 'text/plain',
-                sent_at: new Date().toISOString(),
-                payload: {
-                    ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
-                    iv: base64UrlEncode(encrypted.iv),
-                    ciphertext: base64UrlEncode(encrypted.ciphertext),
-                },
-            };
-
-            fetchMock.mockResolvedValueOnce(
-                mockJsonResponse({
-                    keys: [`inbox/${toUserId}/live/msg-legacy`],
-                    next_cursor: '',
-                }) as Response,
-            );
-            fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(
-                    new TextEncoder().encode(JSON.stringify(legacyEnvelope))
-                        .buffer,
-                ) as Response,
-            );
-
-            const messages = await fetchMessages(
-                token,
-                toUserId,
-                recipientKeys.sharing.privateKey,
-                mgr,
-            );
-
-            expect(messages).toHaveLength(1);
-            expect(messages[0].text).toBe('Legacy message');
-
-            mgr.destroy();
-        });
-
         it('skips messages with unknown session_id', async () => {
             const mgr = await createSessionManager(wasm);
 
@@ -692,39 +642,67 @@ describe('api - Megolm send/receive', () => {
     describe('cursor persistence', () => {
         it('persists cursor after fetching messages', async () => {
             const mgr = await createSessionManager(wasm);
-            const { eciesEncrypt } = await import('./crypto');
 
-            const encrypted = await eciesEncrypt(
+            const sender = new MegolmOutbound();
+            const { eciesEncrypt } = await import('./crypto');
+            const encryptedKey = await eciesEncrypt(
                 recipientKeys.sharing.publicKey,
-                new TextEncoder().encode('Message one'),
+                new TextEncoder().encode(sender.session_key()),
             );
 
-            const envelope = {
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-001',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 1000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            const messageEnvelope = {
                 v: 1,
                 to_user: toUserId,
                 from_user: fromUserId,
                 from_device: fromDeviceId,
                 msg_id: 'msg-001',
-                content_type: 'text/plain',
+                content_type: 'megolm.message',
                 sent_at: new Date().toISOString(),
                 payload: {
-                    ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
-                    iv: base64UrlEncode(encrypted.iv),
-                    ciphertext: base64UrlEncode(encrypted.ciphertext),
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Message one'),
                 },
             };
 
             fetchMock.mockResolvedValueOnce(
                 mockJsonResponse({
-                    keys: [`inbox/${toUserId}/live/msg-001`],
+                    keys: [
+                        `inbox/${toUserId}/live/msg-ks-001`,
+                        `inbox/${toUserId}/live/msg-001`,
+                    ],
                     next_cursor: '',
                 }) as Response,
             );
-            fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(
-                    new TextEncoder().encode(JSON.stringify(envelope)).buffer,
-                ) as Response,
-            );
+            fetchMock
+                .mockResolvedValueOnce(
+                    mockArrayBufferResponse(
+                        new TextEncoder().encode(
+                            JSON.stringify(keyShareEnvelope),
+                        ).buffer,
+                    ) as Response,
+                )
+                .mockResolvedValueOnce(
+                    mockArrayBufferResponse(
+                        new TextEncoder().encode(
+                            JSON.stringify(messageEnvelope),
+                        ).buffer,
+                    ) as Response,
+                );
 
             await fetchMessages(
                 token,
@@ -736,6 +714,7 @@ describe('api - Megolm send/receive', () => {
             const cursor = await loadSyncCursor(`inbox/${toUserId}/live/`);
             expect(cursor).toBe(`inbox/${toUserId}/live/msg-001`);
 
+            sender.free();
             mgr.destroy();
         });
 
@@ -746,43 +725,65 @@ describe('api - Megolm send/receive', () => {
             const prefix = `inbox/${toUserId}/live/`;
             await saveSyncCursor(prefix, `${prefix}msg-001`);
 
+            // Create Megolm sender and key share
+            const sender = new MegolmOutbound();
+            const { eciesEncrypt } = await import('./crypto');
+            const encryptedKey = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode(sender.session_key()),
+            );
+
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-002',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 1000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            const messageEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-002',
+                content_type: 'megolm.message',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Message two'),
+                },
+            };
+
             // Second sync: server returns only new messages
             fetchMock.mockResolvedValueOnce(
                 mockJsonResponse({
-                    keys: [`${prefix}msg-002`],
+                    keys: [`${prefix}msg-ks-002`, `${prefix}msg-002`],
                     next_cursor: '',
                 }) as Response,
             );
-
-            const { eciesEncrypt } = await import('./crypto');
-            const encrypted = await eciesEncrypt(
-                recipientKeys.sharing.publicKey,
-                new TextEncoder().encode('Message two'),
-            );
-            fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(
-                    new TextEncoder().encode(
-                        JSON.stringify({
-                            v: 1,
-                            to_user: toUserId,
-                            from_user: fromUserId,
-                            from_device: fromDeviceId,
-                            msg_id: 'msg-002',
-                            content_type: 'text/plain',
-                            sent_at: new Date().toISOString(),
-                            payload: {
-                                ephemeral_key: base64UrlEncode(
-                                    encrypted.ephemeralKey,
-                                ),
-                                iv: base64UrlEncode(encrypted.iv),
-                                ciphertext: base64UrlEncode(
-                                    encrypted.ciphertext,
-                                ),
-                            },
-                        }),
-                    ).buffer,
-                ) as Response,
-            );
+            fetchMock
+                .mockResolvedValueOnce(
+                    mockArrayBufferResponse(
+                        new TextEncoder().encode(
+                            JSON.stringify(keyShareEnvelope),
+                        ).buffer,
+                    ) as Response,
+                )
+                .mockResolvedValueOnce(
+                    mockArrayBufferResponse(
+                        new TextEncoder().encode(
+                            JSON.stringify(messageEnvelope),
+                        ).buffer,
+                    ) as Response,
+                );
 
             const messages = await fetchMessages(
                 token,
@@ -804,6 +805,7 @@ describe('api - Megolm send/receive', () => {
             expect(messages).toHaveLength(1);
             expect(messages[0].text).toBe('Message two');
 
+            sender.free();
             mgr.destroy();
         });
 
@@ -841,6 +843,43 @@ describe('api - Megolm send/receive', () => {
             const prefix = `inbox/${toUserId}/live/`;
             await saveSyncCursor(prefix, `${prefix}stale-cursor`);
 
+            // Create Megolm sender and key share
+            const sender = new MegolmOutbound();
+            const { eciesEncrypt } = await import('./crypto');
+            const encryptedKey = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode(sender.session_key()),
+            );
+
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-001',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 1000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            const messageEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-001',
+                content_type: 'megolm.message',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Recovered message'),
+                },
+            };
+
             // First call with cursor fails
             fetchMock.mockResolvedValueOnce({
                 ok: false,
@@ -855,40 +894,25 @@ describe('api - Megolm send/receive', () => {
             // Retry without cursor succeeds
             fetchMock.mockResolvedValueOnce(
                 mockJsonResponse({
-                    keys: [`${prefix}msg-001`],
+                    keys: [`${prefix}msg-ks-001`, `${prefix}msg-001`],
                     next_cursor: '',
                 }) as Response,
             );
-
-            const { eciesEncrypt } = await import('./crypto');
-            const encrypted = await eciesEncrypt(
-                recipientKeys.sharing.publicKey,
-                new TextEncoder().encode('Recovered message'),
-            );
-            fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(
-                    new TextEncoder().encode(
-                        JSON.stringify({
-                            v: 1,
-                            to_user: toUserId,
-                            from_user: fromUserId,
-                            from_device: fromDeviceId,
-                            msg_id: 'msg-001',
-                            content_type: 'text/plain',
-                            sent_at: new Date().toISOString(),
-                            payload: {
-                                ephemeral_key: base64UrlEncode(
-                                    encrypted.ephemeralKey,
-                                ),
-                                iv: base64UrlEncode(encrypted.iv),
-                                ciphertext: base64UrlEncode(
-                                    encrypted.ciphertext,
-                                ),
-                            },
-                        }),
-                    ).buffer,
-                ) as Response,
-            );
+            fetchMock
+                .mockResolvedValueOnce(
+                    mockArrayBufferResponse(
+                        new TextEncoder().encode(
+                            JSON.stringify(keyShareEnvelope),
+                        ).buffer,
+                    ) as Response,
+                )
+                .mockResolvedValueOnce(
+                    mockArrayBufferResponse(
+                        new TextEncoder().encode(
+                            JSON.stringify(messageEnvelope),
+                        ).buffer,
+                    ) as Response,
+                );
 
             const messages = await fetchMessages(
                 token,
@@ -904,6 +928,7 @@ describe('api - Megolm send/receive', () => {
             expect(messages).toHaveLength(1);
             expect(messages[0].text).toBe('Recovered message');
 
+            sender.free();
             mgr.destroy();
         });
     });
@@ -1168,38 +1193,64 @@ describe('api - Megolm send/receive', () => {
         it('triggers compaction after syncing live messages', async () => {
             const mgr = await createSessionManager(wasm);
 
+            const sender = new MegolmOutbound();
             const { eciesEncrypt } = await import('./crypto');
-            const encrypted = await eciesEncrypt(
+            const encryptedKey = await eciesEncrypt(
                 recipientKeys.sharing.publicKey,
-                new TextEncoder().encode('Hello'),
+                new TextEncoder().encode(sender.session_key()),
             );
 
-            const envelope = {
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-compact',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 1000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            const messageEnvelope = {
                 v: 1,
                 to_user: toUserId,
                 from_user: fromUserId,
                 from_device: fromDeviceId,
                 msg_id: 'msg-compact-001',
-                content_type: 'text/plain',
+                content_type: 'megolm.message',
                 sent_at: new Date().toISOString(),
                 payload: {
-                    ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
-                    iv: base64UrlEncode(encrypted.iv),
-                    ciphertext: base64UrlEncode(encrypted.ciphertext),
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Hello'),
                 },
             };
 
             // Mock: live storeList
             fetchMock.mockResolvedValueOnce(
                 mockJsonResponse({
-                    keys: [`inbox/${toUserId}/live/msg-compact-001`],
+                    keys: [
+                        `inbox/${toUserId}/live/msg-ks-compact`,
+                        `inbox/${toUserId}/live/msg-compact-001`,
+                    ],
                     next_cursor: '',
                 }) as Response,
             );
-            // Mock: live storeGet
+            // Mock: live storeGet (key share)
             fetchMock.mockResolvedValueOnce(
                 mockArrayBufferResponse(
-                    new TextEncoder().encode(JSON.stringify(envelope)).buffer,
+                    new TextEncoder().encode(JSON.stringify(keyShareEnvelope))
+                        .buffer,
+                ) as Response,
+            );
+            // Mock: live storeGet (message)
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(messageEnvelope))
+                        .buffer,
                 ) as Response,
             );
             // Mock: archive storeList (empty)
@@ -1233,6 +1284,7 @@ describe('api - Megolm send/receive', () => {
             expect(body.prefix).toBe(`inbox/${toUserId}/live/`);
             expect(body.up_to).toBe('msg-compact-001');
 
+            sender.free();
             mgr.destroy();
         });
 

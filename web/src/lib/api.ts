@@ -391,30 +391,6 @@ async function processEnvelopes(
                     timestamp: new Date(envelope.sent_at ?? 0),
                 });
                 seenMsgIds.add(envelope.msg_id);
-            } else if (envelope.content_type === 'text/plain') {
-                // Legacy ECIES-encrypted messages
-                const encryptedPayload = {
-                    ephemeralKey: base64UrlDecode(
-                        envelope.payload.ephemeral_key,
-                    ),
-                    iv: base64UrlDecode(envelope.payload.iv),
-                    ciphertext: base64UrlDecode(envelope.payload.ciphertext),
-                };
-                const plaintext = await eciesDecrypt(
-                    sharingPrivateKey,
-                    encryptedPayload,
-                );
-                messages.push({
-                    id: envelope.msg_id,
-                    conversationId:
-                        envelope.payload.conversation_id ??
-                        conversationId(envelope.from_user, userId),
-                    fromUser: envelope.from_user,
-                    fromDevice: envelope.from_device,
-                    text: new TextDecoder().decode(plaintext),
-                    timestamp: new Date(envelope.sent_at ?? 0),
-                });
-                seenMsgIds.add(envelope.msg_id);
             }
         } catch (error) {
             console.error(`Failed to decrypt message ${key}:`, error);
