@@ -19,6 +19,7 @@ interface Props {
     serverOk: boolean | null;
     conversations: StoredConversation[];
     contacts: Map<string, string>;
+    displayNames: Map<string, string>;
     userId: string;
     onNewChat: (handle: string) => void;
     onLogout: () => void;
@@ -29,6 +30,7 @@ export default function ChatsView({
     serverOk,
     conversations,
     contacts,
+    displayNames,
     userId,
     onNewChat,
     onLogout,
@@ -50,12 +52,13 @@ export default function ChatsView({
         (c) => !c.conversationId.startsWith('self:'),
     );
 
-    // Extract peer handle from conversationId "dm:U1:U2"
-    const peerHandle = (convId: string): string => {
+    // Extract peer userId from conversationId "dm:U1:U2"
+    const peerId = (convId: string): string => {
         const parts = convId.split(':');
-        const peerUserId = parts[1] === userId ? parts[2] : parts[1];
-        return contacts.get(peerUserId) ?? peerUserId.slice(0, 8);
+        return parts[1] === userId ? parts[2] : parts[1];
     };
+    const peerHandle = (uid: string) => contacts.get(uid) ?? uid.slice(0, 8);
+    const peerLabel = (uid: string) => displayNames.get(uid) || peerHandle(uid);
 
     return (
         <div className="min-h-screen bg-background p-8 font-mono text-sm">
@@ -66,6 +69,12 @@ export default function ChatsView({
                         <h1 className="text-2xl font-bold">atmin</h1>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Link
+                            to="/settings"
+                            className="text-xs text-muted-foreground hover:text-foreground"
+                        >
+                            Settings
+                        </Link>
                         <span
                             className={`inline-block h-2 w-2 rounded-full ${
                                 serverOk === true
@@ -125,7 +134,9 @@ export default function ChatsView({
 
                     {/* DM conversations */}
                     {dmConvs.map((conv) => {
-                        const handle = peerHandle(conv.conversationId);
+                        const uid = peerId(conv.conversationId);
+                        const handle = peerHandle(uid);
+                        const label = peerLabel(uid);
                         return (
                             <Link
                                 key={conv.conversationId}
@@ -138,7 +149,7 @@ export default function ChatsView({
                                     </div>
                                     <div className="min-w-0 flex-1">
                                         <div className="font-medium">
-                                            {handle}
+                                            {label}
                                         </div>
                                         <div className="truncate text-xs text-muted-foreground">
                                             {conv.lastMessageText}

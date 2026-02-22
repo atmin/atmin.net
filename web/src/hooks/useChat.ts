@@ -59,12 +59,14 @@ export function useChat(
     sessionManager: SessionManager | null,
 ): ChatState {
     const isSaved = handle === 'saved';
-    const chatTitle = isSaved ? 'Saved Messages' : (handle ?? '');
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [sending, setSending] = useState(false);
     const [loading, setLoading] = useState(true);
     const [convId, setConvId] = useState<string | null>(null);
+    const [chatTitle, setChatTitle] = useState(
+        isSaved ? 'Saved Messages' : (handle ?? ''),
+    );
 
     // Resolve conversation ID from handle
     useEffect(() => {
@@ -75,6 +77,7 @@ export function useChat(
         if (!handle) return;
 
         resolve(handle).then(async (res) => {
+            if (res.display_name) setChatTitle(res.display_name);
             await saveContact(res.user_id, handle);
             uploadContacts(
                 session.token,

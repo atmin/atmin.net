@@ -20,6 +20,7 @@ export const Empty: Story = {
         serverOk: true,
         conversations: [],
         contacts: new Map(),
+        displayNames: new Map(),
         userId: '01USER123',
     },
 };
@@ -52,6 +53,7 @@ export const WithConversations: Story = {
             ['01OTHER456', 'silver-hawk'],
             ['01ALICE789', 'gentle-breeze'],
         ]),
+        displayNames: new Map([['01ALICE789', 'Alice Wonderland']]),
         userId: '01USER123',
     },
 };
@@ -62,6 +64,7 @@ export const ServerDown: Story = {
         serverOk: false,
         conversations: [],
         contacts: new Map(),
+        displayNames: new Map(),
         userId: '01USER123',
     },
 };
@@ -72,6 +75,7 @@ export const ServerConnecting: Story = {
         serverOk: null,
         conversations: [],
         contacts: new Map(),
+        displayNames: new Map(),
         userId: '01USER123',
     },
 };

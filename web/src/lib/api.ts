@@ -58,6 +58,13 @@ export interface RegisterResponse {
 export interface ResolveResponse {
     user_id: string;
     sharing_public_key: string;
+    display_name?: string;
+    avatar_url?: string;
+}
+
+export interface ProfileUpdateRequest {
+    display_name?: string;
+    avatar_url?: string;
 }
 
 export interface Envelope {
@@ -107,6 +114,13 @@ export function register(req: RegisterRequest): Promise<RegisterResponse> {
 
 export function addDevice(req: AddDeviceRequest): Promise<AddDeviceResponse> {
     return request('POST', '/v1/devices', { body: req });
+}
+
+export function updateProfile(
+    token: string,
+    req: ProfileUpdateRequest,
+): Promise<void> {
+    return request('PUT', '/v1/profile', { token, body: req });
 }
 
 export function resolve(handle: string): Promise<ResolveResponse> {

@@ -5,6 +5,7 @@ import Chats from '@/routes/chats';
 import Landing from '@/routes/landing';
 import Login from '@/routes/login';
 import Register from '@/routes/register';
+import Settings from '@/routes/settings';
 
 export default function App() {
     const { session, sessionManager, loading, handleLogin, handleLogout } =
@@ -33,6 +34,18 @@ export default function App() {
                             <Navigate to="/" replace />
                         ) : (
                             <Login onSuccess={handleLogin} />
+                        )
+                    }
+                />
+
+                {/* Settings */}
+                <Route
+                    path="/settings"
+                    element={
+                        session ? (
+                            <Settings session={session} />
+                        ) : (
+                            <Navigate to="/login" replace />
                         )
                     }
                 />

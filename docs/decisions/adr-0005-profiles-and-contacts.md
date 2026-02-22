@@ -214,8 +214,14 @@ No new server-side logic needed.
 - The local IndexedDB store caches `{userId, handle}` only. The encrypted blob
   uses the same fields (with `v: 1` for future expansion). The ADR schema fields
   `display_name`, `sharing_public_key`, and `added_at` are not yet populated.
-- Contact display names are not user-editable. The handle shown comes from the
-  peer's profile at resolve time.
+- Contact display names are not user-editable. The label shown is the peer's
+  `display_name` (if set) or `invite_handle`, fetched from `profile.json`.
+- Display names refresh on two triggers:
+  1. **Entering a chat**: `resolve(handle)` returns the latest `display_name`
+     from the invite file; the contact is updated in IndexedDB.
+  2. **Loading the chat list**: the client re-fetches `profile.json` for every
+     conversation peer and updates contacts whose `display_name` changed.
+  Both paths are best-effort — a fetch failure preserves the cached label.
 
 ### Deferred
 

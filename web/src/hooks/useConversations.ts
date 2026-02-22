@@ -14,6 +14,7 @@ import type { SessionManager } from '@/lib/megolm-session';
 export interface ConversationsState {
     conversations: StoredConversation[];
     contacts: Map<string, string>;
+    displayNames: Map<string, string>;
     serverOk: boolean | null;
 }
 
@@ -26,6 +27,9 @@ export function useConversations(
         [],
     );
     const [contacts, setContacts] = useState<Map<string, string>>(new Map());
+    const [displayNames, setDisplayNames] = useState<Map<string, string>>(
+        new Map(),
+    );
 
     useEffect(() => {
         fetch('/healthz')
@@ -45,21 +49,23 @@ export function useConversations(
             setConversations(convs);
             setContacts(contactMap);
 
-            // Resolve unknown peer handles from server profiles
-            const unknownPeers: string[] = [];
+            // Collect all conversation peer IDs
+            const peerIds: string[] = [];
             for (const conv of convs) {
                 if (conv.conversationId.startsWith('self:')) continue;
                 const parts = conv.conversationId.split(':');
                 const peerUserId =
                     parts[1] === session.userId ? parts[2] : parts[1];
-                if (!contactMap.has(peerUserId)) {
-                    unknownPeers.push(peerUserId);
-                }
+                peerIds.push(peerUserId);
             }
-            if (unknownPeers.length > 0) {
-                const resolved = new Map(contactMap);
+
+            // Refresh handles and display names from server profiles
+            if (peerIds.length > 0) {
+                const resolvedContacts = new Map(contactMap);
+                const resolvedNames = new Map<string, string>();
+                let contactsChanged = false;
                 await Promise.all(
-                    unknownPeers.map(async (uid) => {
+                    peerIds.map(async (uid) => {
                         try {
                             const buf = await storeGet(
                                 session.token,
@@ -68,23 +74,39 @@ export function useConversations(
                             const profile = JSON.parse(
                                 new TextDecoder().decode(buf),
                             );
-                            if (profile.invite_handle) {
-                                resolved.set(uid, profile.invite_handle);
+                            // Save invite_handle in contacts (for routing)
+                            if (
+                                profile.invite_handle &&
+                                resolvedContacts.get(uid) !==
+                                    profile.invite_handle
+                            ) {
+                                resolvedContacts.set(
+                                    uid,
+                                    profile.invite_handle,
+                                );
                                 await saveContact(uid, profile.invite_handle);
+                                contactsChanged = true;
+                            }
+                            // Track display_name separately (for rendering)
+                            if (profile.display_name) {
+                                resolvedNames.set(uid, profile.display_name);
                             }
                         } catch {
-                            // Profile not found — keep userId fallback
+                            // Profile not found — keep existing contact or userId fallback
                         }
                     }),
                 );
-                setContacts(resolved);
-
-                // Sync contacts to S3 (fire-and-forget)
-                uploadContacts(
-                    session.token,
-                    session.userId,
-                    session.backupKey,
-                ).catch((err) => console.error('Contact backup failed:', err));
+                setDisplayNames(resolvedNames);
+                if (contactsChanged) {
+                    setContacts(resolvedContacts);
+                    uploadContacts(
+                        session.token,
+                        session.userId,
+                        session.backupKey,
+                    ).catch((err) =>
+                        console.error('Contact backup failed:', err),
+                    );
+                }
             }
         };
 
@@ -120,5 +142,5 @@ export function useConversations(
         return () => events.close();
     }, [session, sessionManager]);
 
-    return { conversations, contacts, serverOk };
+    return { conversations, contacts, displayNames, serverOk };
 }

@@ -82,9 +82,9 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
-    --bubble-sent: oklch(0.80 0 0);
+    --bubble-sent: oklch(0.8 0 0);
     --bubble-sent-foreground: oklch(0.145 0 0);
-    --bubble-received: oklch(0.90 0 0);
+    --bubble-received: oklch(0.9 0 0);
     --bubble-received-foreground: oklch(0.145 0 0);
 }
 
@@ -138,7 +138,7 @@
 @layer components {
     .bubble-tail-sent {
         &::before {
-            content: '';
+            content: "";
             position: absolute;
             top: 0;
             right: -10px;
@@ -148,7 +148,7 @@
         }
 
         &::after {
-            content: '';
+            content: "";
             position: absolute;
             top: 0;
             right: -10px;
@@ -161,7 +161,7 @@
 
     .bubble-tail-received {
         &::before {
-            content: '';
+            content: "";
             position: absolute;
             top: 0;
             left: -10px;
@@ -171,7 +171,7 @@
         }
 
         &::after {
-            content: '';
+            content: "";
             position: absolute;
             top: 0;
             left: -10px;

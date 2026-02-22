@@ -15,10 +15,8 @@ export default function ChatsRoute({
     sessionManager,
     onLogout,
 }: Props) {
-    const { conversations, contacts, serverOk } = useConversations(
-        session,
-        sessionManager,
-    );
+    const { conversations, contacts, displayNames, serverOk } =
+        useConversations(session, sessionManager);
     const navigate = useNavigate();
 
     return (
@@ -27,6 +25,7 @@ export default function ChatsRoute({
             serverOk={serverOk}
             conversations={conversations}
             contacts={contacts}
+            displayNames={displayNames}
             userId={session.userId}
             onNewChat={(handle) => navigate(`/${encodeURIComponent(handle)}`)}
             onLogout={onLogout}

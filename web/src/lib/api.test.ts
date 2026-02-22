@@ -11,6 +11,7 @@ import {
     register,
     resolve,
     sendTextMessage,
+    updateProfile,
 } from './api';
 import { base64UrlEncode, deriveKeys, generateBackupSecret } from './crypto';
 import {
@@ -327,6 +328,53 @@ describe('api - register()', () => {
             status: 429,
             code: 'rate_limit',
             message: 'Too many registration attempts',
+        });
+    });
+});
+
+describe('api - updateProfile()', () => {
+    beforeEach(() => {
+        fetchMock.mockReset();
+    });
+
+    it('sends PUT /v1/profile with display_name and auth token', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+        } as unknown as Response);
+
+        await updateProfile('test-token', { display_name: 'Alice W.' });
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            '/v1/profile',
+            expect.objectContaining({
+                method: 'PUT',
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer test-token',
+                    'Content-Type': 'application/json',
+                }),
+            }),
+        );
+
+        const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+        expect(body).toEqual({ display_name: 'Alice W.' });
+    });
+
+    it('throws APIError on 400 (bad request)', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 400,
+            statusText: 'Bad Request',
+            json: async () => ({
+                error: 'bad_request',
+                message: 'At least one field required',
+            }),
+        } as Response);
+
+        await expect(updateProfile('test-token', {})).rejects.toMatchObject({
+            status: 400,
+            code: 'bad_request',
         });
     });
 });
