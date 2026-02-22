@@ -250,18 +250,19 @@ The plaintext is the Megolm session key (base64, as returned by `session_key()`)
 
 All data follows the same lifecycle: write immutable object → compact into archive → delete originals.
 
-Compaction is triggered by the client (e.g. on Megolm session rotation,
-or after syncing and backing up received keys):
+Compaction is triggered by the client after every sync that receives new
+messages (fire-and-forget). Both inbox messages and key backups are compacted
+in the same pass:
 
-1. Client ensures all Megolm keys for messages up to cursor are in key backup.
-2. Client calls `POST /v1/store/compact` with prefix and cursor.
+1. Client calls `POST /v1/store/compact` for the inbox prefix (up to the last synced key).
+2. Client calls `POST /v1/store/compact` for the key-backup prefix (all live keys).
 3. Server merges new live objects with any existing same-day archive,
    writes a single CBOR archive per date, deletes originals and old archives.
 
 ### Merge-on-compact algorithm
 
-Multiple compactions may occur on the same calendar day (e.g. two session
-rotations in a busy chat). The server maintains **one archive per day** by
+Multiple compactions may occur on the same calendar day (one per sync cycle).
+The server maintains **one archive per day** by
 merging:
 
 1. List live objects under prefix up to cursor.
