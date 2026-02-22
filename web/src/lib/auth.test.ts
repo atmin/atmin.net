@@ -50,7 +50,7 @@ describe('session - Session management', () => {
             token: 'test-token-abc123',
             userId: '01TESTUSER123',
             deviceId: '01TESTDEVICE456',
-            inviteHandle: 'test-handle',
+            handle: 'test-handle',
             sharingPrivateKey: keys.sharing.privateKey,
             sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
             backupKey: keys.backupKey,
@@ -69,9 +69,7 @@ describe('session - Session management', () => {
             expect(localStorage.getItem('atmin:deviceId')).toBe(
                 '01TESTDEVICE456',
             );
-            expect(localStorage.getItem('atmin:inviteHandle')).toBe(
-                'test-handle',
-            );
+            expect(localStorage.getItem('atmin:handle')).toBe('test-handle');
 
             // Verify public key bytes in localStorage (base64 encoded)
             const storedPublicKey = localStorage.getItem(
@@ -128,7 +126,7 @@ describe('session - Session management', () => {
             expect(loaded?.token).toBe('test-token-abc123');
             expect(loaded?.userId).toBe('01TESTUSER123');
             expect(loaded?.deviceId).toBe('01TESTDEVICE456');
-            expect(loaded?.inviteHandle).toBe('test-handle');
+            expect(loaded?.handle).toBe('test-handle');
             expect(loaded?.sharingPublicKeyBytes).toEqual(
                 testSession.sharingPublicKeyBytes,
             );
@@ -169,9 +167,9 @@ describe('session - Session management', () => {
             expect(loaded).toBeNull();
         });
 
-        it('returns null when inviteHandle is missing', async () => {
+        it('returns null when handle is missing', async () => {
             await saveSession(testSession);
-            localStorage.removeItem('atmin:inviteHandle');
+            localStorage.removeItem('atmin:handle');
 
             const loaded = await loadSession();
             expect(loaded).toBeNull();
@@ -264,7 +262,7 @@ describe('session - Session management', () => {
             expect(localStorage.getItem('atmin:token')).toBeNull();
             expect(localStorage.getItem('atmin:userId')).toBeNull();
             expect(localStorage.getItem('atmin:deviceId')).toBeNull();
-            expect(localStorage.getItem('atmin:inviteHandle')).toBeNull();
+            expect(localStorage.getItem('atmin:handle')).toBeNull();
             expect(
                 localStorage.getItem('atmin:sharingPublicKeyBytes'),
             ).toBeNull();

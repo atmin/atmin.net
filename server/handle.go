@@ -19,8 +19,8 @@ func init() {
 	}
 }
 
-// generateInviteHandle returns two random BIP39 words joined by a hyphen.
-func generateInviteHandle() string {
+// generateHandle returns two random BIP39 words joined by a hyphen.
+func generateHandle() string {
 	return bip39Words[randWord()] + "-" + bip39Words[randWord()]
 }
 

@@ -34,7 +34,7 @@ test.describe('Session Rotation', () => {
 
         // ── 3. Bob reloads (rotation-on-start → new session) ───────
         await bob.goto('/');
-        await bob.waitForSelector('text=Your invite handle', {
+        await bob.waitForSelector('text=Your handle', {
             timeout: 15_000,
         });
 

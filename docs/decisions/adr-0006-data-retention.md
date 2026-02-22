@@ -32,7 +32,7 @@ The profile write is a read-merge-write: read the existing profile, update
 ```json
 {
   "user_id": "01ABC...",
-  "invite_handle": "crazy-badger",
+  "handle": "crazy-badger",
   "auth_public_key": "...",
   "sharing_public_key": "...",
   "display_name": "Alice",
@@ -104,7 +104,7 @@ Both call the same function. No new infrastructure required.
 ### Positive
 
 - Storage costs stay bounded without manual intervention.
-- Abandoned registrations are cleaned up quickly, reducing invite handle pollution.
+- Abandoned registrations are cleaned up quickly, reducing handle pollution.
 - No new infrastructure — uses existing S3 operations.
 - The cleanup function is testable with MemStore.
 
@@ -112,7 +112,7 @@ Both call the same function. No new infrastructure required.
 
 - The `last_active` write on SSE connect adds one read-merge-write per session.
   Negligible at current scale (one extra S3 round-trip per login).
-- Cleanup iterates all invites on each run. At thousands of users this is fine;
+- Cleanup iterates all handles on each run. At thousands of users this is fine;
   at hundreds of thousands, it would need an index or pagination optimization.
 - Users have no warning before deletion. There is no way to reach an
   inactive user — the system has no email, phone, or push channel.
@@ -140,6 +140,6 @@ achieves the same result with no new dependencies.
 
 ### Never delete, rely on cheap storage
 
-Rejected. Even with cheap S3 storage, unbounded growth of invite handles
+Rejected. Even with cheap S3 storage, unbounded growth of handles
 pollutes the namespace, and abandoned accounts create a false sense of
 user count. Active cleanup is good hygiene.

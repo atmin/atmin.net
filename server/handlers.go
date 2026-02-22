@@ -38,25 +38,25 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 		deviceID := ulid.Make().String()
 		token := generateToken(cfg.ServerSecret, userID, deviceID)
 
-		// Generate invite handle, retry on collision
-		var inviteHandle string
+		// Generate handle, retry on collision
+		var handle string
 		for i := 0; i < 10; i++ {
-			candidate := generateInviteHandle()
-			inviteKey := "handles/" + candidate + ".json"
-			if err := store.HeadObject(r.Context(), inviteKey); errors.Is(err, ErrNotFound) {
-				inviteHandle = candidate
+			candidate := generateHandle()
+			handleKey := "handles/" + candidate + ".json"
+			if err := store.HeadObject(r.Context(), handleKey); errors.Is(err, ErrNotFound) {
+				handle = candidate
 				break
 			}
 		}
-		if inviteHandle == "" {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to generate invite handle"})
+		if handle == "" {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to generate handle"})
 			return
 		}
 
 		// Write profile
 		profile, _ := json.Marshal(map[string]string{
 			"user_id":            userID,
-			"invite_handle":      inviteHandle,
+			"handle":             handle,
 			"auth_public_key":    req.AuthPublicKey,
 			"sharing_public_key": req.SharingPublicKey,
 			"created_at":         time.Now().UTC().Format(time.RFC3339),
@@ -77,18 +77,18 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			return
 		}
 
-		// Write invite
-		invite, _ := json.Marshal(map[string]string{"user_id": userID, "sharing_public_key": req.SharingPublicKey})
-		if err := store.PutObject(r.Context(), "handles/"+inviteHandle+".json", invite, "application/json"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write invite"})
+		// Write handle file
+		handleData, _ := json.Marshal(map[string]string{"user_id": userID, "sharing_public_key": req.SharingPublicKey})
+		if err := store.PutObject(r.Context(), "handles/"+handle+".json", handleData, "application/json"); err != nil {
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write handle"})
 			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]string{
-			"user_id":       userID,
-			"device_id":     deviceID,
-			"token":         token,
-			"invite_handle": inviteHandle,
+			"user_id":   userID,
+			"device_id": deviceID,
+			"token":     token,
+			"handle":    handle,
 		})
 	}
 }
@@ -199,42 +199,42 @@ func handleRevokeDevice(store Store, cfg Config) http.HandlerFunc {
 	}
 }
 
-// GET /v1/resolve/{invite_handle}
+// GET /v1/resolve/{handle}
 func handleResolve(store Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		handle := r.PathValue("invite_handle")
+		handle := r.PathValue("handle")
 		if handle == "" {
 			writeError(w, errBadRequest)
 			return
 		}
 
-		inviteData, err := store.GetObject(r.Context(), "handles/"+handle+".json")
+		handleData, err := store.GetObject(r.Context(), "handles/"+handle+".json")
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
 				return
 			}
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read invite"})
+			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read handle"})
 			return
 		}
 
-		var invite map[string]string
-		json.Unmarshal(inviteData, &invite)
+		var handleObj map[string]string
+		json.Unmarshal(handleData, &handleObj)
 
 		resp := map[string]string{
-			"user_id":            invite["user_id"],
-			"sharing_public_key": invite["sharing_public_key"],
+			"user_id":            handleObj["user_id"],
+			"sharing_public_key": handleObj["sharing_public_key"],
 		}
-		if v := invite["display_name"]; v != "" {
+		if v := handleObj["display_name"]; v != "" {
 			resp["display_name"] = v
 		}
-		if v := invite["avatar_url"]; v != "" {
+		if v := handleObj["avatar_url"]; v != "" {
 			resp["avatar_url"] = v
 		}
 
-		// Fallback: if invite lacks sharing_public_key, read from profile
+		// Fallback: if handle file lacks sharing_public_key, read from profile
 		if resp["sharing_public_key"] == "" {
-			profileData, err := store.GetObject(r.Context(), "users/"+invite["user_id"]+"/profile.json")
+			profileData, err := store.GetObject(r.Context(), "users/"+handleObj["user_id"]+"/profile.json")
 			if err == nil {
 				var profile map[string]string
 				json.Unmarshal(profileData, &profile)
@@ -291,16 +291,16 @@ func handleProfile(store Store) http.HandlerFunc {
 			return
 		}
 
-		// Project public fields to invite file
-		handle := profile["invite_handle"]
+		// Project public fields to handle file
+		handle := profile["handle"]
 		if handle != "" {
-			invite, _ := json.Marshal(map[string]string{
+			handleData, _ := json.Marshal(map[string]string{
 				"user_id":            userID,
 				"sharing_public_key": profile["sharing_public_key"],
 				"display_name":       profile["display_name"],
 				"avatar_url":         profile["avatar_url"],
 			})
-			store.PutObject(r.Context(), "handles/"+handle+".json", invite, "application/json")
+			store.PutObject(r.Context(), "handles/"+handle+".json", handleData, "application/json")
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -312,7 +312,7 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := userIDFrom(r.Context())
 
-		// Read profile to get invite_handle
+		// Read profile to get handle
 		profileData, err := store.GetObject(r.Context(), "users/"+userID+"/profile.json")
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
@@ -346,8 +346,8 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 			}
 		}
 
-		// Delete invite file
-		if handle := profile["invite_handle"]; handle != "" {
+		// Delete handle file
+		if handle := profile["handle"]; handle != "" {
 			store.DeleteObject(r.Context(), "handles/"+handle+".json")
 		}
 

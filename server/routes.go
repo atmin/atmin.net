@@ -10,7 +10,7 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 
 	// Public endpoints
 	mux.HandleFunc("POST /v1/register", handleRegister(store, cfg))
-	mux.HandleFunc("GET /v1/resolve/{invite_handle}", handleResolve(store))
+	mux.HandleFunc("GET /v1/resolve/{handle}", handleResolve(store))
 	mux.HandleFunc("POST /v1/devices", handleAddDevice(store, cfg))
 
 	// Authenticated endpoints

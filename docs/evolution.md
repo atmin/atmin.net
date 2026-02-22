@@ -83,9 +83,9 @@ schema (`v: 1`). The server sees no difference.
 
 ---
 
-## Usernames (invite handles → stable identifiers)
+## Usernames (handles → stable identifiers)
 
-- v0.1 invite handles are two BIP39 words (e.g. `copper-falcon`), server-generated.
+- v0.1 handles are two BIP39 words (e.g. `copper-falcon`), server-generated.
 - If users could choose their handle (with uniqueness enforcement), handles become usernames.
 - The resolve infrastructure (`handles/{handle}.json` → user_id) already supports this.
 - A user could claim multiple handles (aliases).

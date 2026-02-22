@@ -15,7 +15,7 @@ function timeAgo(ts: number): string {
 }
 
 interface Props {
-    inviteHandle: string;
+    handle: string;
     serverOk: boolean | null;
     conversations: StoredConversation[];
     contacts: Map<string, string>;
@@ -26,7 +26,7 @@ interface Props {
 }
 
 export default function ChatsView({
-    inviteHandle,
+    handle,
     serverOk,
     conversations,
     contacts,
@@ -39,7 +39,7 @@ export default function ChatsView({
     const [handleInput, setHandleInput] = useState('');
 
     const copyHandle = () => {
-        navigator.clipboard.writeText(inviteHandle);
+        navigator.clipboard.writeText(handle);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -89,10 +89,10 @@ export default function ChatsView({
 
                 <div className="mb-6 rounded bg-muted p-4">
                     <p className="mb-1 text-xs text-muted-foreground">
-                        Your invite handle
+                        Your handle
                     </p>
                     <div className="flex items-center justify-between">
-                        <span className="text-lg">{inviteHandle}</span>
+                        <span className="text-lg">{handle}</span>
                         <button
                             type="button"
                             onClick={copyHandle}

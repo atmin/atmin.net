@@ -185,7 +185,7 @@ describe('api - register()', () => {
             user_id: '01NEWUSER123',
             device_id: '01NEWDEVICE456',
             token: 'new-auth-token-abc123',
-            invite_handle: 'copper-falcon',
+            handle: 'copper-falcon',
         };
 
         fetchMock.mockResolvedValueOnce(
@@ -221,7 +221,7 @@ describe('api - register()', () => {
         expect(result.user_id).toBe('01NEWUSER123');
         expect(result.device_id).toBe('01NEWDEVICE456');
         expect(result.token).toBe('new-auth-token-abc123');
-        expect(result.invite_handle).toBe('copper-falcon');
+        expect(result.handle).toBe('copper-falcon');
     });
 
     it('throws APIError when device_label is missing (400)', async () => {

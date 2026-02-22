@@ -3,13 +3,13 @@ import { Link } from 'react-router-dom';
 import { updateProfile } from '@/lib/api';
 
 interface Props {
-    inviteHandle: string;
+    handle: string;
     token: string;
     initialDisplayName?: string;
 }
 
 export default function ProfileSettings({
-    inviteHandle,
+    handle,
     token,
     initialDisplayName = '',
 }: Props) {
@@ -37,7 +37,7 @@ export default function ProfileSettings({
     };
 
     const copyHandle = () => {
-        navigator.clipboard.writeText(inviteHandle);
+        navigator.clipboard.writeText(handle);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
@@ -56,10 +56,10 @@ export default function ProfileSettings({
 
                 <div className="mb-6 rounded bg-muted p-4">
                     <p className="mb-1 text-xs text-muted-foreground">
-                        Your invite handle
+                        Your handle
                     </p>
                     <div className="flex items-center justify-between">
-                        <span className="text-lg">{inviteHandle}</span>
+                        <span className="text-lg">{handle}</span>
                         <button
                             type="button"
                             onClick={copyHandle}

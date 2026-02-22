@@ -28,12 +28,12 @@ func testServer(t *testing.T) (*MemStore, http.Handler, Config) {
 // testUser registers a user with a real Ed25519 keypair and returns everything
 // needed to make authenticated requests and sign auth proofs.
 type testUserInfo struct {
-	UserID       string
-	DeviceID     string
-	Token        string
-	InviteHandle string
-	AuthPub      ed25519.PublicKey
-	AuthPriv     ed25519.PrivateKey
+	UserID   string
+	DeviceID string
+	Token    string
+	Handle   string
+	AuthPub  ed25519.PublicKey
+	AuthPriv ed25519.PrivateKey
 }
 
 func registerTestUser(t *testing.T, mux http.Handler, label string) testUserInfo {
@@ -56,20 +56,20 @@ func registerTestUser(t *testing.T, mux http.Handler, label string) testUserInfo
 	}
 
 	var resp struct {
-		UserID       string `json:"user_id"`
-		DeviceID     string `json:"device_id"`
-		Token        string `json:"token"`
-		InviteHandle string `json:"invite_handle"`
+		UserID   string `json:"user_id"`
+		DeviceID string `json:"device_id"`
+		Token    string `json:"token"`
+		Handle   string `json:"handle"`
 	}
 	json.NewDecoder(w.Body).Decode(&resp)
 
 	return testUserInfo{
-		UserID:       resp.UserID,
-		DeviceID:     resp.DeviceID,
-		Token:        resp.Token,
-		InviteHandle: resp.InviteHandle,
-		AuthPub:      pub,
-		AuthPriv:     priv,
+		UserID:   resp.UserID,
+		DeviceID: resp.DeviceID,
+		Token:    resp.Token,
+		Handle:   resp.Handle,
+		AuthPub:  pub,
+		AuthPriv: priv,
 	}
 }
 
@@ -120,37 +120,37 @@ func TestRegisterAndResolve(t *testing.T) {
 	store, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice's laptop")
 
-	// Invite handle should be two words
-	parts := strings.Split(alice.InviteHandle, "-")
+	// Handle should be two words
+	parts := strings.Split(alice.Handle, "-")
 	if len(parts) != 2 {
-		t.Fatalf("invite_handle = %q, want two-word format", alice.InviteHandle)
+		t.Fatalf("handle = %q, want two-word format", alice.Handle)
 	}
 
-	// Verify profile.json contains invite_handle
+	// Verify profile.json contains handle
 	profileData, err := store.GetObject(context.Background(), "users/"+alice.UserID+"/profile.json")
 	if err != nil {
 		t.Fatalf("reading profile: %v", err)
 	}
 	var profile map[string]string
 	json.Unmarshal(profileData, &profile)
-	if profile["invite_handle"] != alice.InviteHandle {
-		t.Fatalf("profile invite_handle = %q, want %q", profile["invite_handle"], alice.InviteHandle)
+	if profile["handle"] != alice.Handle {
+		t.Fatalf("profile handle = %q, want %q", profile["handle"], alice.Handle)
 	}
 
-	// Verify invite file contains sharing_public_key
-	inviteData, err := store.GetObject(context.Background(), "handles/"+alice.InviteHandle+".json")
+	// Verify handle file contains sharing_public_key
+	handleData, err := store.GetObject(context.Background(), "handles/"+alice.Handle+".json")
 	if err != nil {
-		t.Fatalf("reading invite: %v", err)
+		t.Fatalf("reading handle: %v", err)
 	}
-	var invite map[string]string
-	json.Unmarshal(inviteData, &invite)
-	if invite["sharing_public_key"] == "" {
-		t.Fatal("invite sharing_public_key is empty")
+	var handleObj map[string]string
+	json.Unmarshal(handleData, &handleObj)
+	if handleObj["sharing_public_key"] == "" {
+		t.Fatal("handle sharing_public_key is empty")
 	}
 
 	// Resolve
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.InviteHandle, nil))
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.Handle, nil))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("resolve status = %d; body = %s", w.Code, w.Body.String())
@@ -206,12 +206,12 @@ func TestUpdateProfile(t *testing.T) {
 		t.Fatalf("profile avatar_url = %q", profile["avatar_url"])
 	}
 
-	// Verify invite file was updated
-	inviteData, _ := store.GetObject(context.Background(), "handles/"+alice.InviteHandle+".json")
-	var invite map[string]string
-	json.Unmarshal(inviteData, &invite)
-	if invite["display_name"] != "Alice Wonderland" {
-		t.Fatalf("invite display_name = %q, want %q", invite["display_name"], "Alice Wonderland")
+	// Verify handle file was updated
+	handleData, _ := store.GetObject(context.Background(), "handles/"+alice.Handle+".json")
+	var handleObj map[string]string
+	json.Unmarshal(handleData, &handleObj)
+	if handleObj["display_name"] != "Alice Wonderland" {
+		t.Fatalf("handle display_name = %q, want %q", handleObj["display_name"], "Alice Wonderland")
 	}
 }
 
@@ -249,7 +249,7 @@ func TestResolveWithDisplayName(t *testing.T) {
 
 	// Resolve should include display_name
 	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.InviteHandle, nil))
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.Handle, nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("resolve status = %d", w.Code)
 	}
@@ -298,10 +298,10 @@ func TestDeleteProfile(t *testing.T) {
 		t.Fatal("profile still exists after delete")
 	}
 
-	// Invite should be gone
-	_, err = store.GetObject(context.Background(), "handles/"+alice.InviteHandle+".json")
+	// Handle should be gone
+	_, err = store.GetObject(context.Background(), "handles/"+alice.Handle+".json")
 	if err == nil {
-		t.Fatal("invite still exists after delete")
+		t.Fatal("handle still exists after delete")
 	}
 
 	// Inbox should be gone
@@ -312,7 +312,7 @@ func TestDeleteProfile(t *testing.T) {
 
 	// Resolve should 404
 	w = httptest.NewRecorder()
-	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.InviteHandle, nil))
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.Handle, nil))
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("resolve after delete: status = %d, want 404", w.Code)
 	}

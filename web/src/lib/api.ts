@@ -52,7 +52,7 @@ export interface RegisterResponse {
     user_id: string;
     device_id: string;
     token: string;
-    invite_handle: string;
+    handle: string;
 }
 
 export interface ResolveResponse {

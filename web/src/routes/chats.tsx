@@ -21,7 +21,7 @@ export default function ChatsRoute({
 
     return (
         <ChatsView
-            inviteHandle={session.inviteHandle}
+            handle={session.handle}
             serverOk={serverOk}
             conversations={conversations}
             contacts={contacts}

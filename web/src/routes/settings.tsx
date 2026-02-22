@@ -6,10 +6,5 @@ interface Props {
 }
 
 export default function SettingsRoute({ session }: Props) {
-    return (
-        <ProfileSettings
-            inviteHandle={session.inviteHandle}
-            token={session.token}
-        />
-    );
+    return <ProfileSettings handle={session.handle} token={session.token} />;
 }

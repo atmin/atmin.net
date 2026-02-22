@@ -34,7 +34,7 @@ test.describe('Profile Management', () => {
 
         // ── 5. Bob goes to chat list — sees "Alice Wonderland" ───
         await bob.goto('/');
-        await bob.waitForSelector('text=Your invite handle', {
+        await bob.waitForSelector('text=Your handle', {
             timeout: 15_000,
         });
         await expect(
@@ -73,7 +73,7 @@ test.describe('Profile Management', () => {
         await openChat(bob, aliceHandle);
         await sendMessage(bob, 'Hey');
         await bob.goto('/');
-        await bob.waitForSelector('text=Your invite handle', {
+        await bob.waitForSelector('text=Your handle', {
             timeout: 15_000,
         });
         await expect(bob.locator('text=Alice')).toBeVisible({
@@ -88,7 +88,7 @@ test.describe('Profile Management', () => {
 
         // ── 5. Bob reloads chat list — sees updated name ─────────
         await bob.goto('/');
-        await bob.waitForSelector('text=Your invite handle', {
+        await bob.waitForSelector('text=Your handle', {
             timeout: 15_000,
         });
         await expect(

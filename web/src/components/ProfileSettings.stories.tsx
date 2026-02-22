@@ -11,14 +11,14 @@ type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {
     args: {
-        inviteHandle: 'copper-falcon',
+        handle: 'copper-falcon',
         token: 'fake-token',
     },
 };
 
 export const WithDisplayName: Story = {
     args: {
-        inviteHandle: 'copper-falcon',
+        handle: 'copper-falcon',
         token: 'fake-token',
         initialDisplayName: 'Alice Wonderland',
     },

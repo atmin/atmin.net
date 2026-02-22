@@ -10,7 +10,7 @@ The system currently stores a minimal profile at registration time
 There is no mechanism for users to set a display name, avatar, or manage contacts.
 
 These are prerequisites for a usable messaging experience:
-- Other users need to see a name and avatar when resolving an invite handle.
+- Other users need to see a name and avatar when resolving an handle.
 - Each user needs a private contact list that syncs across their devices.
 
 The design must work within the existing S3 storage model (ADR-0001)
@@ -27,7 +27,7 @@ It is the canonical record, written by the server on registration and profile up
 ```json
 {
   "user_id": "01ABC...",
-  "invite_handle": "crazy-badger",
+  "handle": "crazy-badger",
   "auth_public_key": "...",
   "sharing_public_key": "...",
   "display_name": "Alice",
@@ -52,7 +52,7 @@ On profile update, the server writes `profile.json` first (source of truth),
 then `handles/{handle}.json`. Each `PutObject` is individually atomic —
 readers always see a complete file, never a partial write.
 
-If the server crashes between the two writes, the invite file may be stale.
+If the server crashes between the two writes, the handle file may be stale.
 This is self-correcting: the next profile update reads `profile.json`,
 derives the current state, and writes both files again. The client can also
 detect divergence during profile editing (it reads both files) and trigger
@@ -64,7 +64,7 @@ Internal operations (add-device, revoke-device) look up the profile by user_id
 to verify the auth public key. Moving the profile to `handles/{handle}.json` would
 require a reverse lookup from user_id to handle, which does not exist.
 
-The invite file serves a different audience: unauthenticated resolve requests and
+The handle file serves a different audience: unauthenticated resolve requests and
 future discovery services. Denormalizing the public fields avoids an extra S3 read
 on every resolve and lets a discovery cache warm from a single `ListObjects("handles/")`
 plus one `GetObject` per handle.
@@ -89,7 +89,7 @@ Both fields are optional — omitted fields are left unchanged.
 1. Read `users/{uid}/profile.json` (source of truth).
 2. Merge the submitted fields into the existing profile.
 3. Write `users/{uid}/profile.json` with merged data.
-4. Read `invite_handle` from the profile, project public fields,
+4. Read `handle` from the profile, project public fields,
    write `handles/{handle}.json`.
 5. Return the updated profile.
 
@@ -143,7 +143,7 @@ above ensures users can only presign writes to their own `users/{uid}/` prefix.
 No new server-side logic is needed for contacts.
 
 On adding a contact, the client:
-1. Resolves the invite handle to get user_id and sharing_public_key.
+1. Resolves the handle to get user_id and sharing_public_key.
 2. Appends to the local contact list.
 3. Encrypts and uploads `users/{uid}/contacts.json`.
 
@@ -156,7 +156,7 @@ A new authenticated endpoint for self-service account deletion.
 
 **Server logic:**
 
-1. Read `users/{uid}/profile.json` to get `invite_handle`.
+1. Read `users/{uid}/profile.json` to get `handle`.
 2. Delete all objects under `users/{uid}/`, `inbox/{uid}/`,
    `keys/{uid}/`, `media/{uid}/`.
 3. Delete `handles/{handle}.json`.
@@ -184,7 +184,7 @@ No new server-side logic needed.
 - New endpoint: `PUT /v1/profile` (authenticated, read-merge-write both files).
 - New endpoint: `DELETE /v1/profile` (authenticated, deletes all user data).
 - New function: `authorizeKeyWrite` (restricts `users/` writes to own uid).
-- Update `handleRegister` to include `invite_handle` in `profile.json`.
+- Update `handleRegister` to include `handle` in `profile.json`.
 - Update `handleStorePresign` to use `authorizeKeyWrite` instead of `authorizeKey`.
 
 ### Positive
@@ -198,7 +198,7 @@ No new server-side logic needed.
 ### Negative
 
 - Two files must be kept in sync on profile update. A crash between the two writes
-  leaves the invite file stale. This is self-correcting on the next profile update
+  leaves the handle file stale. This is self-correcting on the next profile update
   or edit screen load (which reads both and can detect divergence).
 - Last-write-wins for contacts means near-simultaneous edits from two devices
   could lose an addition. This is unlikely in practice and the user can re-add.
@@ -215,10 +215,10 @@ No new server-side logic needed.
   uses the same fields (with `v: 1` for future expansion). The ADR schema fields
   `display_name`, `sharing_public_key`, and `added_at` are not yet populated.
 - Contact display names are not user-editable. The label shown is the peer's
-  `display_name` (if set) or `invite_handle`, fetched from `profile.json`.
+  `display_name` (if set) or `handle`, fetched from `profile.json`.
 - Display names refresh on two triggers:
   1. **Entering a chat**: `resolve(handle)` returns the latest `display_name`
-     from the invite file; the contact is updated in IndexedDB.
+     from the handle file; the contact is updated in IndexedDB.
   2. **Loading the chat list**: the client re-fetches `profile.json` for every
      conversation peer and updates contacts whose `display_name` changed.
   Both paths are best-effort — a fetch failure preserves the cached label.
@@ -238,7 +238,7 @@ No new server-side logic needed.
 ### Single profile at handles/{handle}.json
 
 Rejected. Internal auth flows reference profiles by user_id. Storing the canonical
-profile under the invite handle would require a user_id→handle reverse mapping
+profile under the handle would require a user_id→handle reverse mapping
 that doesn't exist and adds complexity.
 
 ### Server-side contacts database

@@ -12,16 +12,16 @@ import {
 interface Props {
     loading: boolean;
     error: string;
-    onLogin: (inviteHandle: string, mnemonic: string) => void;
+    onLogin: (handle: string, mnemonic: string) => void;
 }
 
 export default function LoginForm({ loading, error, onLogin }: Props) {
-    const [inviteHandle, setInviteHandle] = useState('');
+    const [handle, setHandle] = useState('');
     const [mnemonic, setMnemonic] = useState('');
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onLogin(inviteHandle, mnemonic);
+        onLogin(handle, mnemonic);
     };
 
     return (
@@ -44,18 +44,16 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label
-                                    htmlFor="invite-handle"
+                                    htmlFor="handle"
                                     className="mb-1 block text-sm font-medium"
                                 >
-                                    Invite Handle
+                                    Handle
                                 </label>
                                 <input
-                                    id="invite-handle"
+                                    id="handle"
                                     type="text"
-                                    value={inviteHandle}
-                                    onChange={(e) =>
-                                        setInviteHandle(e.target.value)
-                                    }
+                                    value={handle}
+                                    onChange={(e) => setHandle(e.target.value)}
                                     placeholder="copper-falcon"
                                     required
                                     className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
@@ -94,7 +92,7 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
 
                             <Button
                                 type="submit"
-                                disabled={loading || !inviteHandle || !mnemonic}
+                                disabled={loading || !handle || !mnemonic}
                                 className="w-full"
                             >
                                 {loading ? 'Signing in...' : 'Sign In'}

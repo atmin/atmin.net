@@ -11,7 +11,7 @@ import { detectDeviceLabel } from '@/lib/utils';
 export interface LoginState {
     loading: boolean;
     error: string;
-    handleLogin: (inviteHandle: string, mnemonic: string) => Promise<void>;
+    handleLogin: (handle: string, mnemonic: string) => Promise<void>;
 }
 
 export function useLogin(onSuccess: (session: Session) => void): LoginState {
@@ -19,13 +19,13 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const handleLogin = async (inviteHandle: string, mnemonic: string) => {
+    const handleLogin = async (handle: string, mnemonic: string) => {
         setLoading(true);
         setError('');
 
         try {
-            // Resolve invite handle to get user_id
-            const resolveRes = await resolve(inviteHandle.trim());
+            // Resolve handle to get user_id
+            const resolveRes = await resolve(handle.trim());
             const userId = resolveRes.user_id;
 
             // Derive keys from mnemonic
@@ -61,7 +61,7 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
                 token: deviceRes.token,
                 userId,
                 deviceId: deviceRes.device_id,
-                inviteHandle: inviteHandle.trim(),
+                handle: handle.trim(),
                 sharingPrivateKey: keys.sharing.privateKey,
                 sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,
@@ -77,7 +77,7 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
                 setError(e.message);
             } else {
                 setError(
-                    'Login failed. Please check your invite handle and recovery phrase.',
+                    'Login failed. Please check your handle and recovery phrase.',
                 );
             }
             setLoading(false);

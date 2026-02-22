@@ -74,17 +74,13 @@ export function useConversations(
                             const profile = JSON.parse(
                                 new TextDecoder().decode(buf),
                             );
-                            // Save invite_handle in contacts (for routing)
+                            // Save handle in contacts (for routing)
                             if (
-                                profile.invite_handle &&
-                                resolvedContacts.get(uid) !==
-                                    profile.invite_handle
+                                profile.handle &&
+                                resolvedContacts.get(uid) !== profile.handle
                             ) {
-                                resolvedContacts.set(
-                                    uid,
-                                    profile.invite_handle,
-                                );
-                                await saveContact(uid, profile.invite_handle);
+                                resolvedContacts.set(uid, profile.handle);
+                                await saveContact(uid, profile.handle);
                                 contactsChanged = true;
                             }
                             // Track display_name separately (for rendering)

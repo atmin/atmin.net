@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test';
 const MSG_SELECTOR = '[data-testid="message"]';
 
 /**
- * Register a new user via the UI and return their invite handle.
+ * Register a new user via the UI and return their handle.
  * Assumes the page is not logged in.
  */
 export async function registerUser(page: Page): Promise<string> {
@@ -12,7 +12,7 @@ export async function registerUser(page: Page): Promise<string> {
 }
 
 /**
- * Register a new user via the UI and return both their invite handle
+ * Register a new user via the UI and return both their handle
  * and recovery mnemonic (needed for multi-device login).
  */
 export async function registerUserWithMnemonic(
@@ -35,19 +35,19 @@ export async function registerUserWithMnemonic(
     await page.getByRole('button', { name: 'Register' }).click();
 
     // Wait for redirect to home page
-    await page.waitForSelector('text=Your invite handle', {
+    await page.waitForSelector('text=Your handle', {
         timeout: 15_000,
     });
 
-    // Extract invite handle
+    // Extract handle
     const handle = await page.locator('.text-lg').textContent();
-    if (!handle) throw new Error('Could not extract invite handle');
+    if (!handle) throw new Error('Could not extract handle');
 
     return { handle: handle.trim(), mnemonic: mnemonic.trim() };
 }
 
 /**
- * Log in on a second device using an existing user's invite handle
+ * Log in on a second device using an existing user's handle
  * and recovery mnemonic. Assumes the page is not logged in.
  */
 export async function loginUser(
@@ -57,12 +57,12 @@ export async function loginUser(
 ): Promise<void> {
     await page.goto('/login');
 
-    await page.fill('#invite-handle', handle);
+    await page.fill('#handle', handle);
     await page.fill('#mnemonic', mnemonic);
     await page.getByRole('button', { name: 'Sign In' }).click();
 
     // Wait for redirect to home page
-    await page.waitForSelector('text=Your invite handle', {
+    await page.waitForSelector('text=Your handle', {
         timeout: 15_000,
     });
 }
@@ -109,7 +109,7 @@ export async function resyncChat(
     handle: string,
 ): Promise<void> {
     await page.goto('/');
-    await page.waitForSelector('text=Your invite handle', {
+    await page.waitForSelector('text=Your handle', {
         timeout: 15_000,
     });
     await openChat(page, handle);

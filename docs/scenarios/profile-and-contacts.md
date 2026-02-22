@@ -18,7 +18,7 @@ exchanged messages. Alice also has a second device (`adev02`) from
 Relevant subset:
 
 ```
-users/alice01/profile.json        ← { user_id, invite_handle, auth_public_key, sharing_public_key }
+users/alice01/profile.json        ← { user_id, handle, auth_public_key, sharing_public_key }
 users/alice01/devices/adev01.json
 users/alice01/devices/adev02.json
 users/bob01/profile.json
@@ -167,9 +167,9 @@ media/alice01/avatar/abc123.jpg   ← avatar blob
 
 ## What to test
 
-- `PUT /v1/profile` with both fields updates profile and invite file.
+- `PUT /v1/profile` with both fields updates profile and handle file.
 - Partial update (one field) preserves the other.
-- `GET /v1/resolve` returns display_name and avatar_url from enriched invite.
+- `GET /v1/resolve` returns display_name and avatar_url from enriched handle.
 - Presigned write to own `users/{uid}/` succeeds; to another user's returns 403.
 - Contacts encrypt/upload/download round-trips correctly.
 - Second device can decrypt contacts with the same backup key.

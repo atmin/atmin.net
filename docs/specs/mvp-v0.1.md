@@ -46,7 +46,7 @@ See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime d
 - `device_id`: ULID
 - `msg_id`: ULID (sender-generated)
 - `session_id`: Megolm session identifier
-- `invite_handle`: two BIP39 words joined by hyphen (e.g. `copper-falcon`).
+- `handle`: two BIP39 words joined by hyphen (e.g. `copper-falcon`).
   Server-generated from the same 2048-word English wordlist used for backup mnemonics.
   ~22 bits of entropy (~4M combinations); sufficient for v0.1 namespace.
   Server retries on collision.
@@ -322,7 +322,7 @@ Source of truth for all profile data (see [ADR-0005](../decisions/adr-0005-profi
 ```json
 {
   "user_id": "01HWQA...",
-  "invite_handle": "copper-falcon",
+  "handle": "copper-falcon",
   "auth_public_key": "<base64url Ed25519, 32 bytes>",
   "sharing_public_key": "<base64url X25519, 32 bytes>",
   "display_name": "Alice",
@@ -363,7 +363,7 @@ Error codes used by the server:
 | 401 | `unauthorized` | Missing or invalid token |
 | 403 | `device_revoked` | Device file deleted (triggers client self-wipe) |
 | 403 | `forbidden` | Prefix access denied |
-| 404 | `not_found` | Object or invite does not exist |
+| 404 | `not_found` | Object or handle does not exist |
 | 413 | `quota_exceeded` | Upload exceeds storage quota |
 
 ## API (HTTP)
@@ -390,12 +390,12 @@ Input:
 - `auth_public_key` (base64url Ed25519)
 - `sharing_public_key` (base64url X25519)
 
-Server generates `user_id`, `device_id` (both ULIDs), `invite_handle` (two BIP39 words),
+Server generates `user_id`, `device_id` (both ULIDs), `handle` (two BIP39 words),
 and `token`.
 
 Output:
 
-- `user_id`, `device_id`, `token`, `invite_handle`
+- `user_id`, `device_id`, `token`, `handle`
 
 This is the only unauthenticated endpoint (no existing token to present).
 
@@ -445,9 +445,9 @@ When a client receives `403 device_revoked`, it must wipe all local state
 the welcome screen. This is best-effort — an offline attacker won't trigger it —
 but any network request from the stolen device causes self-wipe.
 
-### Resolve invite
+### Resolve handle
 
-`GET /v1/resolve/{invite_handle}`
+`GET /v1/resolve/{handle}`
 
 Output:
 
@@ -626,7 +626,7 @@ Realtime hint:
 - Profiles:
     - set display name
     - resolve handle shows display name
-    - delete account, resolve returns 404, inbox and invite gone
+    - delete account, resolve returns 404, inbox and handle gone
 - Write isolation:
     - presign upload to own `users/{uid}/contacts.json` succeeds
     - presign upload to another user's `users/` prefix returns 403

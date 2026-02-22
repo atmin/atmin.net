@@ -55,7 +55,7 @@ export function useRegister(
                 token: res.token,
                 userId: res.user_id,
                 deviceId: res.device_id,
-                inviteHandle: res.invite_handle,
+                handle: res.handle,
                 sharingPrivateKey: keys.sharing.privateKey,
                 sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,

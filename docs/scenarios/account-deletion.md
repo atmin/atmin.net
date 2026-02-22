@@ -1,7 +1,7 @@
 # Scenario: Account deletion
 
 Alice decides to leave the service and deletes her account.
-All her data is removed and her invite handle becomes unresolvable.
+All her data is removed and her handle becomes unresolvable.
 
 **Prerequisite**: [Profile and contacts](./profile-and-contacts.md) completed.
 Alice has a profile with display name, avatar, contacts, messages, and key backups.
@@ -48,7 +48,7 @@ DELETE /v1/profile
 ```
 
 Server logic:
-1. Reads `users/alice01/profile.json` to get `invite_handle: "alice-xyz"`.
+1. Reads `users/alice01/profile.json` to get `handle: "alice-xyz"`.
 2. Lists and deletes all objects under `users/alice01/`.
 3. Lists and deletes all objects under `inbox/alice01/`.
 4. Lists and deletes all objects under `keys/alice01/`.
@@ -77,7 +77,7 @@ GET /v1/resolve/alice-xyz
 → 404
 ```
 
-Bob's client shows "User not found." The invite handle `alice-xyz` is now
+Bob's client shows "User not found." The handle `alice-xyz` is now
 available for future registrations (though collision is unlikely with random
 two-word handles).
 
@@ -134,7 +134,7 @@ inbox/bob01/live/msg002..msg009
 
 - `DELETE /v1/profile` returns 200 and removes all user objects.
 - `GET /v1/resolve` returns 404 after deletion.
-- Inbox, backups, media, and invite file are all gone.
+- Inbox, backups, media, and handle file are all gone.
 - Second `DELETE /v1/profile` returns 404.
 - Subsequent authenticated requests return 401 (device file gone).
 - Client clears local state and returns to welcome screen.

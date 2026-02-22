@@ -4,8 +4,8 @@ Two users register, exchange an invite, establish E2E, and send messages.
 
 ## Cast
 
-- **Alice** — registers first, shares her invite handle
-- **Bob** — resolves Alice's invite, initiates conversation
+- **Alice** — registers first, shares her handle
+- **Bob** — resolves Alice's handle, initiates conversation
 
 ## 1. Alice registers
 
@@ -20,11 +20,11 @@ POST /v1/register
   "auth_public_key": "<alice_auth_pub>",
   "sharing_public_key": "<alice_sharing_pub>"
 }
-→ { "user_id": "alice01", "device_id": "adev01", "token": "tok_a1", "invite_handle": "alice-xyz" }
+→ { "user_id": "alice01", "device_id": "adev01", "token": "tok_a1", "handle": "alice-xyz" }
 ```
 
 S3 writes:
-- `users/alice01/profile.json` — `{ user_id, invite_handle, auth_public_key, sharing_public_key, created_at }`
+- `users/alice01/profile.json` — `{ user_id, handle, auth_public_key, sharing_public_key, created_at }`
 - `users/alice01/devices/adev01.json` — `{ device_label: "Alice's laptop" }`
 - `handles/alice-xyz.json` — `{ user_id, sharing_public_key }`
 
@@ -37,7 +37,7 @@ Backup secret is discarded from memory.
 
 ## 2. Bob registers
 
-Same flow. Bob gets `user_id: "bob01"`, `invite_handle: "bob-abc"`.
+Same flow. Bob gets `user_id: "bob01"`, `handle: "bob-abc"`.
 
 S3 writes:
 - `users/bob01/profile.json`
@@ -50,7 +50,7 @@ Alice sends `"alice-xyz"` to Bob via any channel (SMS, email, QR code, etc.).
 
 No API calls. No S3 writes.
 
-## 4. Bob resolves Alice's invite
+## 4. Bob resolves Alice's handle
 
 ```
 GET /v1/resolve/alice-xyz
