@@ -123,49 +123,6 @@ export async function getMessageCount(page: Page): Promise<number> {
 }
 
 /**
- * Trigger server-side compaction of a user's inbox via the API.
- * Reads the auth token from localStorage and compacts all live messages.
- */
-export async function compactInbox(
-    page: Page,
-    userId: string,
-): Promise<{ archived: number; archive_key: string }> {
-    return page.evaluate(async (uid: string) => {
-        const token = localStorage.getItem('atmin:token');
-        if (!token) throw new Error('No auth token in localStorage');
-
-        // List all live messages to find the last key
-        const listRes = await fetch(
-            `/v1/store/list?${new URLSearchParams({ prefix: `inbox/${uid}/live/` })}`,
-            { headers: { Authorization: `Bearer ${token}` } },
-        );
-        if (!listRes.ok) throw new Error(`List failed: ${listRes.status}`);
-        const { keys } = (await listRes.json()) as { keys: string[] };
-        if (keys.length === 0) throw new Error('No live messages to compact');
-
-        // Extract the last msg_id from the key path
-        const prefix = `inbox/${uid}/live/`;
-        const lastMsgId = keys[keys.length - 1].slice(prefix.length);
-
-        // Call compact
-        const compactRes = await fetch('/v1/store/compact', {
-            method: 'POST',
-            headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ prefix, up_to: lastMsgId }),
-        });
-        if (!compactRes.ok)
-            throw new Error(`Compact failed: ${compactRes.status}`);
-        return compactRes.json() as Promise<{
-            archived: number;
-            archive_key: string;
-        }>;
-    }, userId);
-}
-
-/**
  * Read Megolm session state from IndexedDB.
  */
 export async function getMegolmState(page: Page) {

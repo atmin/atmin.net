@@ -1,6 +1,5 @@
 import { expect, test } from '@playwright/test';
 import {
-    compactInbox,
     getMessageCount,
     getMegolmState,
     loginUser,
@@ -90,10 +89,17 @@ test.describe('Session Rotation', () => {
         await sendMessage(alice, 'Got it');
         expect(await getMessageCount(alice)).toBe(2);
 
-        // ── 4. Compact Alice's inbox (moves live → CBOR archive) ─────
-        const compactResult = await compactInbox(alice, aliceUserId!);
-        expect(compactResult.archived).toBeGreaterThan(0);
-        expect(compactResult.archive_key).toContain('archive/');
+        // ── 4. Verify sync compacted Alice's inbox into an archive ─────
+        const archiveKeys = await alice.evaluate(async (uid) => {
+            const token = localStorage.getItem('atmin:token');
+            const res = await fetch(
+                `/v1/store/list?${new URLSearchParams({ prefix: `inbox/${uid}/archive/` })}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+            );
+            const { keys } = await res.json();
+            return keys;
+        }, aliceUserId!);
+        expect(archiveKeys.length).toBeGreaterThan(0);
 
         // ── 5. Alice's new device logs in with mnemonic ──────────────
         const phoneContext = await browser.newContext();

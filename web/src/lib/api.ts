@@ -205,8 +205,6 @@ export async function sendTextMessage(
     if (sessionManager.needsRotation(session)) {
         session = await sessionManager.rotate();
         isNew = true;
-        // Compact inbox in background (per spec: triggered on session rotation)
-        compactAfterRotation(token, fromUserId).catch(console.error);
     }
 
     const envelopes: Envelope[] = [];
@@ -311,23 +309,6 @@ export async function sendTextMessage(
     }
 
     await send(token, envelopes);
-}
-
-// Compact inbox after session rotation (fire-and-forget).
-// Key backups are NOT compacted: sessionId lives in the key path
-// and would be lost in a CBOR archive blob.
-export async function compactAfterRotation(
-    token: string,
-    userId: string,
-): Promise<void> {
-    const { loadSyncCursor } = await import('./db');
-
-    const inboxPrefix = `inbox/${userId}/live/`;
-    const inboxCursor = await loadSyncCursor(inboxPrefix);
-    if (inboxCursor) {
-        const upTo = inboxCursor.slice(inboxPrefix.length);
-        await storeCompact(token, inboxPrefix, upTo);
-    }
 }
 
 // Helper to fetch and decrypt messages from inbox
@@ -558,6 +539,9 @@ export async function fetchMessages(
     if (listRes.keys.length > 0) {
         const lastKey = listRes.keys[listRes.keys.length - 1];
         await saveSyncCursor(prefix, lastKey);
+        // Compact processed live objects into daily archive (fire-and-forget)
+        const upTo = lastKey.slice(prefix.length);
+        storeCompact(token, prefix, upTo).catch(console.error);
     }
 
     const messages = [...live.messages, ...archive.messages];

@@ -5,7 +5,6 @@ import {
     MegolmOutbound,
 } from '../../crypto/pkg-node/atmin_crypto.js';
 import {
-    compactAfterRotation,
     fetchMessages,
     type RegisterRequest,
     register,
@@ -1153,35 +1152,103 @@ describe('api - Megolm send/receive', () => {
         });
     });
 
-    describe('compactAfterRotation', () => {
-        it('calls storeCompact with inbox cursor', async () => {
-            // Pre-seed a cursor
-            const prefix = `inbox/${fromUserId}/live/`;
-            await saveSyncCursor(prefix, `${prefix}01LASTMSGID`);
+    describe('fetchMessages compaction', () => {
+        it('triggers compaction after syncing live messages', async () => {
+            const mgr = await createSessionManager(wasm);
 
-            // Mock storeCompact response
+            const { eciesEncrypt } = await import('./crypto');
+            const encrypted = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode('Hello'),
+            );
+
+            const envelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-compact-001',
+                content_type: 'text/plain',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encrypted.ephemeralKey),
+                    iv: base64UrlEncode(encrypted.iv),
+                    ciphertext: base64UrlEncode(encrypted.ciphertext),
+                },
+            };
+
+            // Mock: live storeList
             fetchMock.mockResolvedValueOnce(
                 mockJsonResponse({
-                    archived: 5,
-                    archive_key: `inbox/${fromUserId}/archive/2025-01-15-01ARCHIVEID`,
+                    keys: [`inbox/${toUserId}/live/msg-compact-001`],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Mock: live storeGet
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(envelope)).buffer,
+                ) as Response,
+            );
+            // Mock: archive storeList (empty)
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Mock: storeCompact (fire-and-forget)
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    archived: 1,
+                    archive_key: `inbox/${toUserId}/archive/2025-01-15-01ARCHIVEID`,
                 }) as Response,
             );
 
-            await compactAfterRotation(token, fromUserId);
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
 
             // Verify storeCompact was called with correct args
-            const call = fetchMock.mock.calls[0];
-            expect(call[0]).toBe('/v1/store/compact');
-            const body = JSON.parse(call[1].body);
-            expect(body.prefix).toBe(prefix);
-            expect(body.up_to).toBe('01LASTMSGID');
+            const compactCall = fetchMock.mock.calls.find(
+                (call: unknown[]) => call[0] === '/v1/store/compact',
+            );
+            expect(compactCall).toBeDefined();
+            const body = JSON.parse(compactCall?.[1].body);
+            expect(body.prefix).toBe(`inbox/${toUserId}/live/`);
+            expect(body.up_to).toBe('msg-compact-001');
+
+            mgr.destroy();
         });
 
-        it('skips compaction when no cursor exists', async () => {
-            await compactAfterRotation(token, fromUserId);
+        it('skips compaction when no live messages are fetched', async () => {
+            const mgr = await createSessionManager(wasm);
 
-            // No fetch calls should have been made
-            expect(fetchMock).not.toHaveBeenCalled();
+            // Mock: live storeList returns empty
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [],
+                    next_cursor: '',
+                }) as Response,
+            );
+
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // No compact call should have been made
+            const compactCall = fetchMock.mock.calls.find(
+                (call: unknown[]) => call[0] === '/v1/store/compact',
+            );
+            expect(compactCall).toBeUndefined();
+
+            mgr.destroy();
         });
     });
 });
