@@ -24,9 +24,21 @@ import {
 import { createSessionManager } from './megolm-session';
 import type { WasmModule } from './wasm';
 
-// Setup fetch mock
+// Setup fetch mock — default resolves to an ok response so fire-and-forget
+// calls (e.g. compaction) that outlive explicit mockResolvedValueOnce() don't
+// blow up with "Cannot read properties of undefined".
 const fetchMock = vi.fn();
 globalThis.fetch = fetchMock as typeof fetch;
+
+function resetFetchMock() {
+    fetchMock.mockReset();
+    // Shape satisfies StoreListResponse (for storeList) and is harmless for
+    // fire-and-forget storeCompact calls that go through request().
+    fetchMock.mockResolvedValue(
+        mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+    );
+}
+resetFetchMock();
 
 // Helper to create mock Response with proper headers
 function mockJsonResponse(data: unknown): unknown {
@@ -165,7 +177,7 @@ describe('api - resolve()', () => {
 
 describe('api - register()', () => {
     beforeEach(() => {
-        fetchMock.mockReset();
+        resetFetchMock();
     });
 
     it('successfully registers a new user with valid keys', async () => {
@@ -333,7 +345,7 @@ describe('api - register()', () => {
 
 describe('api - updateProfile()', () => {
     beforeEach(() => {
-        fetchMock.mockReset();
+        resetFetchMock();
     });
 
     it('sends PUT /v1/profile with display_name and auth token', async () => {
@@ -395,7 +407,7 @@ describe('api - Megolm send/receive', () => {
     let senderKeys: Awaited<ReturnType<typeof deriveKeys>>;
 
     beforeEach(async () => {
-        fetchMock.mockReset();
+        resetFetchMock();
         globalThis.indexedDB = new IDBFactory();
         globalThis.IDBKeyRange = FakeIDBKeyRange;
 
