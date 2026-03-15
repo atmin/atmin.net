@@ -43,6 +43,7 @@ Never renumber or rewrite old ADRs — add a new one if the decision changes.
 
 An ADR may be:
 
+- **Draft** (proposed, not yet accepted)
 - **Accepted** (default)
 - **Superseded** (by a newer ADR)
 - **Deprecated** (no longer relevant)
