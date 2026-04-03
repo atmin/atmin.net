@@ -1,3 +1,5 @@
+DOCKER ?= docker
+
 .PHONY: all build test lint fmt clean dev run e2e
 .PHONY: server server-build server-test server-lint server-fmt
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
@@ -63,7 +65,7 @@ web-fmt:
 # --- Dev (all-in-one) ---
 
 dev:
-	docker compose up -d
+	$(DOCKER) compose up -d
 	@set -a; . ./.env; set +a; \
 	trap 'kill 0' EXIT; \
 	(cd server && go run .) & \
@@ -76,13 +78,13 @@ run:
 # --- Docker (local dev) ---
 
 up:
-	docker compose up -d
+	$(DOCKER) compose up -d
 
 down:
-	docker compose down
+	$(DOCKER) compose down
 
 e2e:
-	docker compose up -d
+	$(DOCKER) compose up -d
 	cd web && npx playwright test
 
 clean:
