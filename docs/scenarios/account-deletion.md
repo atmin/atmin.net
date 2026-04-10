@@ -4,6 +4,38 @@ Alice decides to leave the service and deletes her account.
 All her data is removed and her handle becomes unresolvable.
 
 **Prerequisite**: [Profile and contacts](./profile-and-contacts.md) completed.
+
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant A as Alice
+    participant S as Server / S3
+    participant B as Bob
+
+    note over A,B: Deletion
+    A->>A: Confirmation dialog
+    A->>S: DELETE /v1/profile
+    S->>S: Delete users/alice01/**
+    S->>S: Delete inbox/alice01/**
+    S->>S: Delete keys/alice01/**
+    S->>S: Delete media/alice01/**
+    S->>S: Delete handles/alice-xyz.json
+    S-->>A: 200
+    A->>A: Clear IndexedDB, return to welcome
+
+    note over A,B: Token implicitly dead
+    A->>S: Any request
+    S-->>A: 401 (device file gone)
+
+    note over A,B: Bob tries to reach Alice
+    B->>S: GET /v1/resolve/alice-xyz
+    S-->>B: 404
+
+    B->>S: POST /v1/send (to alice01)
+    S-->>B: 200 (dead letter — no one will read it)
+    note right of S: Orphaned object, cleaned up<br/>by retention policy (ADR-0006)
+```
 Alice has a profile with display name, avatar, contacts, messages, and key backups.
 
 ## Cast

@@ -2,6 +2,48 @@
 
 Two users register, exchange an invite, establish E2E, and send messages.
 
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant A as Alice
+    participant S as Server / S3
+    participant B as Bob
+
+    note over A,B: Registration
+    A->>S: POST /v1/register
+    S-->>A: user_id, handle "alice-xyz", token
+    B->>S: POST /v1/register
+    S-->>B: user_id, handle "bob-abc", token
+
+    note over A,B: Invite (out of band)
+    A-->>B: "alice-xyz" (SMS, QR, etc.)
+
+    note over A,B: Handle resolution
+    B->>S: GET /v1/resolve/alice-xyz
+    S-->>B: alice user_id + sharing_public_key
+
+    note over A,B: Bob sends first message
+    B->>S: PUT key backup (S1)
+    B->>S: POST /v1/send [key_share + message + self-copy]
+    S-->>A: SSE: new_message
+
+    note over A,B: Alice syncs and reads
+    A->>S: GET /v1/store/list + objects
+    note right of A: Decrypt key share → session S1<br/>Decrypt message → "Hey Alice"
+    A->>S: PUT key backup (S1 received)
+
+    note over A,B: Alice replies
+    A->>S: GET profile (Bob's sharing key)
+    A->>S: PUT key backup (S2)
+    A->>S: POST /v1/send [key_share + message + self-copy]
+    S-->>B: SSE: new_message
+
+    note over A,B: Bob syncs and reads
+    B->>S: GET /v1/store/list + objects
+    note right of B: Decrypt key share → session S2<br/>Decrypt message → "Hey Bob"
+```
+
 ## Cast
 
 - **Alice** — registers first, shares her handle

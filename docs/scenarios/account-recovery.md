@@ -7,6 +7,43 @@ using only her 12-word mnemonic.
 of Alice's devices are lost (laptop broken, phone stolen and revoked).
 Some inbox messages have been compacted into archives.
 
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant N as Alice (new phone)
+    participant S as Server / S3
+    participant B as Bob
+
+    note over N,B: Add new device + revoke lost ones
+    N->>S: POST /v1/devices (auth proof from mnemonic)
+    S-->>N: device_id adev03, token
+    N->>S: POST /v1/devices/revoke adev01
+
+    note over N,B: Restore keys from backup
+    N->>S: GET keys/alice01/live/* (S1, S2, S3)
+    N->>S: GET keys/alice01/archive/* (if any)
+    note right of N: Decrypt all with backup key
+
+    note over N,B: Sync live inbox
+    N->>S: GET inbox/alice01/live/*
+    note right of N: Decrypt with restored session keys
+
+    note over N,B: Backfill archived history
+    N->>S: GET inbox/alice01/archive/*
+    note right of N: Decode CBOR → decrypt messages<br/>Full history restored
+
+    note over N,B: Resume conversation
+    B->>S: POST /v1/send msg010 (S1)
+    S-->>N: SSE: new_message
+    note right of N: Decrypt with S1 (from backup) ✓
+
+    N->>S: PUT key backup (S4)
+    N->>S: POST /v1/send [key_share S4 + message + self-copy]
+    S-->>B: SSE: new_message
+    note right of B: Learn S4 → decrypt ✓
+```
+
 ## Cast
 
 - **Alice** — recovers her account on a new device

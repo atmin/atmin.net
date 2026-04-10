@@ -3,6 +3,31 @@
 Alice sends a photo to Bob. The file is encrypted client-side before upload.
 
 **Prerequisite**: [First conversation](./first-conversation.md) completed.
+
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant A as Alice
+    participant S as Server / S3
+    participant B as Bob
+
+    note over A,B: Client-side encryption + upload
+    A->>A: Generate random AES-256-GCM key + IV
+    A->>A: Encrypt photo.jpg, compute SHA-256 of plaintext
+    A->>S: PUT encrypted blob (presigned URL)
+
+    note over A,B: Send file reference inside Megolm message
+    A->>S: POST /v1/send [message + self-copy]
+    note right of S: Envelope is opaque — server cannot<br/>link the blob to the message
+    S-->>B: SSE: new_message
+
+    note over A,B: Bob syncs, downloads, decrypts
+    B->>S: GET message
+    note right of B: Megolm decrypt → {url, key, iv, sha256}
+    B->>S: GET encrypted blob
+    note right of B: AES-GCM decrypt → photo.jpg<br/>Verify SHA-256 ✓
+```
 Alice (session S2) and Bob (session S1) can already exchange messages.
 
 ## Cast

@@ -4,6 +4,37 @@ Alice sets up her profile, Bob resolves her handle and sees her display name,
 then both add each other as contacts and sync across devices.
 
 **Prerequisite**: [First conversation](./first-conversation.md) completed.
+
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant L as Alice (laptop)
+    participant S as Server / S3
+    participant P as Alice (phone)
+    participant B as Bob
+
+    note over L,B: Profile setup
+    L->>S: PUT avatar (presigned)
+    L->>S: PUT /v1/profile {display_name, avatar_url}
+    note right of S: Merges into profile.json<br/>Projects to handles/alice-xyz.json
+
+    note over L,B: Bob sees enriched profile
+    B->>S: GET /v1/resolve/alice-xyz
+    S-->>B: user_id, sharing_key, display_name, avatar_url
+
+    note over L,B: Partial update
+    L->>S: PUT /v1/profile {display_name only}
+    note right of S: Merges: name changes, avatar preserved
+
+    note over L,B: Contacts (encrypted, backup-key)
+    B->>S: PUT users/bob01/contacts.json (encrypted)
+    L->>S: PUT users/alice01/contacts.json (encrypted)
+
+    note over L,B: Cross-device contact sync
+    P->>S: GET users/alice01/contacts.json
+    note right of P: Decrypt with backup key → contact list
+```
 Alice (`alice01`, device `adev01`) and Bob (`bob01`, device `bdev01`) have
 exchanged messages. Alice also has a second device (`adev02`) from
 [Multi-device](./multi-device.md).

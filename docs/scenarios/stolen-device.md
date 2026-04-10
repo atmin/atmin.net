@@ -4,6 +4,40 @@ Alice's phone is stolen. She revokes it from her laptop,
 and the thief's access is terminated.
 
 **Prerequisite**: [Multi-device](./multi-device.md) completed.
+
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant L as Alice (laptop)
+    participant S as Server / S3
+    participant E as Eve (stolen phone)
+    participant B as Bob
+
+    note over L,B: Before Alice notices
+    E->>E: Reads local IndexedDB (history, keys)
+    B->>S: POST /v1/send msg008
+    E->>S: GET inbox (tok_a2)
+    S-->>E: msg008
+    note right of E: Decrypts with S1 — reading in real time
+
+    note over L,B: Alice revokes phone
+    L->>S: POST /v1/devices/revoke adev02 (auth proof)
+    S->>S: Delete devices/adev02.json
+
+    note over L,B: Eve's next request fails
+    E->>S: GET inbox
+    S-->>E: 403 device_revoked
+    note right of E: Client self-wipes:<br/>IndexedDB cleared, token cleared
+
+    note over L,B: Eve's keys are now useless
+    note over E: Has sharing key, session keys, backup key<br/>but cannot reach any API endpoint
+
+    note over L,B: Alice continues normally
+    L->>S: POST /v1/send msg009 (S2)
+    S-->>B: SSE: new_message
+    note over E: Cannot fetch msg009
+```
 Alice has a laptop (`adev01`) and phone (`adev02`). Bob has `bdev01`.
 
 ## Cast

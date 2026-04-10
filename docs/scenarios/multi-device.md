@@ -3,6 +3,49 @@
 Alice adds a second device, syncs history, and both devices stay in sync going forward.
 
 **Prerequisite**: [First conversation](./first-conversation.md) completed.
+
+## Overview
+
+```mermaid
+sequenceDiagram
+    participant L as Alice (laptop)
+    participant S as Server / S3
+    participant P as Alice (phone)
+    participant B as Bob
+
+    note over L,B: Add second device
+    P->>S: POST /v1/devices (auth proof signed with backup secret)
+    S-->>P: device_id, token
+
+    note over L,B: Phone syncs key backups
+    P->>S: GET keys/alice01/live/*
+    note right of P: Decrypt with backup key → S1, S2
+
+    note over L,B: Phone syncs inbox (full history)
+    P->>S: GET inbox/alice01/live/*
+    note right of P: Decrypt key share → S1 (idempotent)<br/>Decrypt messages → "Hey Alice", "Hey Bob"
+
+    note over L,B: Alice sends from phone
+    P->>S: PUT key backup (S3)
+    P->>S: POST /v1/send [key_share + message + self-copy]
+    S-->>B: SSE: new_message
+    S-->>L: SSE: new_message
+
+    note over L,B: Bob syncs
+    B->>S: GET new messages
+    note right of B: Decrypt key share → S3<br/>Decrypt → "Sent from my phone"
+
+    note over L,B: Laptop syncs (sibling key discovery)
+    L->>S: GET inbox (msg006 uses unknown S3)
+    L->>S: GET keys/alice01/live/S3
+    note right of L: Decrypt via backup key → S3<br/>Retry msg006 → "Sent from my phone"
+
+    note over L,B: Bob replies (no new key share needed)
+    B->>S: POST /v1/send [message + self-copy] (reuses S1)
+    S-->>L: SSE: new_message
+    S-->>P: SSE: new_message
+    note over L,P: Both decrypt with S1
+```
 Alice has a laptop (`adev01`), Bob has his device (`bdev01`).
 
 ## Cast
