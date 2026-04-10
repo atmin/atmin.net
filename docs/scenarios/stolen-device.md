@@ -161,7 +161,7 @@ Bob syncs and decrypts normally. Eve cannot fetch `msg009` — request is reject
 **Note**: Alice's existing session keys (S2) remain valid for Megolm encryption.
 Eve has S2 but cannot download the ciphertexts. If Alice wants defense-in-depth
 against compound threats (e.g. a future server compromise), she can rotate her
-backup secret — see [evolution notes](../evolution.md#device-revocation-and-key-rotation).
+backup secret — see [evolution notes](../evolution/device-revocation.md).
 
 ## S3 state after scenario
 

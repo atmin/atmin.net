@@ -379,7 +379,7 @@ Error codes used by the server:
 - **Revocation check**: server does S3 HEAD on `users/{user_id}/devices/{device_id}.json`,
   cached with short TTL. Missing file = `403 device_revoked`.
 - Backup secret rotation (re-keying) is deferred.
-  See [evolution notes](../evolution.md#device-revocation-and-key-rotation).
+  See [evolution notes](../evolution/device-revocation.md).
 
 ### Register (first device)
 

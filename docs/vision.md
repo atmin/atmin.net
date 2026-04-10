@@ -55,7 +55,7 @@ cryptographic keys are useless — they cannot obtain new ciphertexts to decrypt
 Damage is limited to whatever was already downloaded before revocation.
 
 Backup secret rotation (defense-in-depth against compound threats) is deferred.
-See [evolution notes](./evolution.md#device-revocation-and-key-rotation).
+See [evolution notes](./evolution/device-revocation.md).
 
 This is inherent to any E2E messenger where keys must be available on-device for operation.
 OS-level device lock (PIN, biometrics) is the first line of defense — not the application.
