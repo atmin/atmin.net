@@ -29,8 +29,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache cargo installs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ hashFiles('web/crypto/Cargo.lock') }}
+
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: which wasm-pack || curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Install web dependencies
         run: cd web && npm ci
@@ -63,8 +69,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache cargo installs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ hashFiles('web/crypto/Cargo.lock') }}
+
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: which wasm-pack || curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Install web dependencies
         run: cd web && npm ci
@@ -109,8 +121,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache cargo installs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin
+          key: cargo-bin-${{ hashFiles('web/crypto/Cargo.lock') }}
+
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: which wasm-pack || curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Install web dependencies
         run: cd web && npm ci
@@ -121,8 +139,20 @@ jobs:
       - name: Copy web assets for server
         run: cp -r web/dist server/dist
 
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('web/package-lock.json') }}
+
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: cd web && npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: cd web && npx playwright install-deps chromium
 
       - name: Run e2e tests
         run: cd web && npx playwright test
