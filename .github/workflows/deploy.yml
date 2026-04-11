@@ -8,6 +8,7 @@ on:
 env:
   REGISTRY: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
   IMAGE_NAME: atmindotnet
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   lint:
@@ -24,6 +25,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,6 +66,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -116,6 +119,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -180,9 +184,16 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
+      - name: Install Scaleway CLI
+        run: |
+          curl -fsSL https://github.com/scaleway/scaleway-cli/releases/latest/download/scaleway-cli_linux_amd64 -o /usr/local/bin/scw
+          chmod +x /usr/local/bin/scw
+
       - name: Deploy to Scaleway Serverless Container
-        uses: scaleway/serverless-container-deploy-action@v1
-        with:
-          container_id: ${{ secrets.SCW_CONTAINER_ID }}
-          registry_image_url: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-          secret_key: ${{ secrets.SCW_SECRET_KEY }}
+        env:
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_DEFAULT_REGION: fr-par
+        run: scw container container deploy ${{ secrets.SCW_CONTAINER_ID }}

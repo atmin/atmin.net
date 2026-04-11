@@ -53,7 +53,10 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 
 | Secret | Description |
 |--------|-------------|
+| `SCW_ACCESS_KEY` | Scaleway access key (starts with `SCW`) |
 | `SCW_SECRET_KEY` | Scaleway API secret key (used for registry login + deploy) |
+| `SCW_ORGANIZATION_ID` | Scaleway organization ID |
+| `SCW_PROJECT_ID` | Scaleway project ID |
 | `SCW_REGISTRY_ENDPOINT` | e.g. `rg.fr-par.scw.cloud/atmin` |
 | `SCW_CONTAINER_ID` | Serverless Container ID |
 
@@ -98,7 +101,7 @@ scw container container create \
   secret-environment-variables.4.value=<SECRET>
 
 # 6. Custom domain — add CNAME record:
-#    atmin.net → <container-endpoint>.scw.cloud
+#    app.atmin.net → <container-endpoint>.scw.cloud
 ```
 
 ### Deploying
