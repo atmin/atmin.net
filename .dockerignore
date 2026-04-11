@@ -1,0 +1,11 @@
+.git
+.env
+bin/
+web/node_modules/
+web/dist/
+web/crypto/target/
+web/crypto/pkg/
+web/crypto/pkg-node/
+docs/
+.vscode/
+*.md
