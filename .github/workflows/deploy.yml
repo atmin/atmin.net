@@ -8,7 +8,6 @@ on:
 env:
   REGISTRY: ${{ secrets.SCW_REGISTRY_ENDPOINT }}
   IMAGE_NAME: atmindotnet
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   lint:
