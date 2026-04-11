@@ -35,8 +35,11 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
-      - name: Build WASM
-        run: cd web && npm run build:wasm
+      - name: Build web
+        run: make web-build
+
+      - name: Copy web assets for server
+        run: cp -r web/dist server/dist
 
       - name: Lint
         run: make lint
@@ -66,8 +69,11 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
-      - name: Build WASM
-        run: cd web && npm run build:wasm
+      - name: Build web
+        run: make web-build
+
+      - name: Copy web assets for server
+        run: cp -r web/dist server/dist
 
       - name: Unit tests
         run: make test
@@ -76,17 +82,17 @@ jobs:
     runs-on: ubuntu-latest
     services:
       minio:
-        image: minio/minio:latest
+        image: bitnami/minio:latest
         ports:
           - 9000:9000
         env:
           MINIO_ROOT_USER: minioadmin
           MINIO_ROOT_PASSWORD: minioadmin
         options: >-
-          --health-cmd "mc ready local || curl -f http://localhost:9000/minio/health/live"
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 3
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -110,8 +116,11 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
-      - name: Build WASM
-        run: cd web && npm run build:wasm
+      - name: Build web
+        run: make web-build
+
+      - name: Copy web assets for server
+        run: cp -r web/dist server/dist
 
       - name: Install Playwright browsers
         run: cd web && npx playwright install --with-deps chromium

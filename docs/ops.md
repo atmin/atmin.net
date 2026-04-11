@@ -72,14 +72,15 @@ scw registry namespace create name=atmin region=fr-par
 scw container namespace create name=atmin region=fr-par
 
 # 4. Push initial image (registry creates the repo on first push)
+#    Scaleway requires amd64 — build with --platform on ARM Macs
 docker login rg.fr-par.scw.cloud/atmin -u nologin -p <SCW_SECRET_KEY>
-docker tag atmin rg.fr-par.scw.cloud/atmin/atmindotnet:latest
+docker build --platform=linux/amd64 -t rg.fr-par.scw.cloud/atmin/atmindotnet:latest .
 docker push rg.fr-par.scw.cloud/atmin/atmindotnet:latest
 
 # 5. Create the container (first deploy)
 scw container container create \
   namespace-id=<NAMESPACE_ID> \
-  name=atmin \
+  name=atmindotnet \
   registry-image=rg.fr-par.scw.cloud/atmin/atmindotnet:latest \
   min-scale=1 max-scale=1 \
   memory-limit=128 \
@@ -118,6 +119,37 @@ Pushing to `master` without a tag runs the full CI pipeline (lint, test, e2e) bu
 ```bash
 docker build -t atmin .
 docker run --env-file .env -p 8080:8080 atmin
+```
+
+## Troubleshooting
+
+```bash
+# List containers and their status
+scw container container list
+
+# Get container details (including error messages)
+scw container container get <CONTAINER_ID>
+
+# View container logs
+scw container container logs <CONTAINER_ID>
+
+# Redeploy after pushing a new image
+scw container container deploy <CONTAINER_ID>
+
+# Update container config (e.g. memory, env vars)
+scw container container update <CONTAINER_ID> memory-limit=256
+
+# List images in the registry
+scw registry image list
+
+# List registry namespaces
+scw registry namespace list
+
+# List serverless container namespaces
+scw container namespace list
+
+# Delete a container
+scw container container delete <CONTAINER_ID>
 ```
 
 ## Future considerations
