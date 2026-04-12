@@ -51,9 +51,18 @@ func NewS3Client(ctx context.Context, cfg Config) (*S3Client, error) {
 		o.UsePathStyle = true // required for MinIO
 	})
 
+	// Separate client for presigning so URLs use a browser-reachable endpoint.
+	presignClient := client
+	if cfg.S3PublicEndpoint != cfg.S3Endpoint {
+		presignClient = s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+			o.BaseEndpoint = aws.String(cfg.S3PublicEndpoint)
+			o.UsePathStyle = true
+		})
+	}
+
 	return &S3Client{
 		client:    client,
-		presigner: s3.NewPresignClient(client),
+		presigner: s3.NewPresignClient(presignClient),
 		bucket:    cfg.S3Bucket,
 	}, nil
 }

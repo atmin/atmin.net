@@ -6,24 +6,27 @@ import (
 )
 
 type Config struct {
-	ListenAddr   string
-	ServerSecret []byte
-	S3Endpoint   string
-	S3Bucket     string
-	S3Region     string
-	S3AccessKey  string
-	S3SecretKey  string
+	ListenAddr       string
+	ServerSecret     []byte
+	S3Endpoint       string
+	S3PublicEndpoint string
+	S3Bucket         string
+	S3Region         string
+	S3AccessKey      string
+	S3SecretKey      string
 }
 
 func loadConfig() Config {
+	endpoint := envRequired("S3_ENDPOINT")
 	cfg := Config{
-		ListenAddr:   envOr("LISTEN_ADDR", ":8080"),
-		ServerSecret: []byte(envRequired("SERVER_SECRET")),
-		S3Endpoint:   envRequired("S3_ENDPOINT"),
-		S3Bucket:     envRequired("S3_BUCKET"),
-		S3Region:     envOr("S3_REGION", "auto"),
-		S3AccessKey:  envRequired("S3_ACCESS_KEY"),
-		S3SecretKey:  envRequired("S3_SECRET_KEY"),
+		ListenAddr:       envOr("LISTEN_ADDR", ":8080"),
+		ServerSecret:     []byte(envRequired("SERVER_SECRET")),
+		S3Endpoint:       endpoint,
+		S3PublicEndpoint: envOr("S3_PUBLIC_ENDPOINT", endpoint),
+		S3Bucket:         envRequired("S3_BUCKET"),
+		S3Region:         envOr("S3_REGION", "auto"),
+		S3AccessKey:      envRequired("S3_ACCESS_KEY"),
+		S3SecretKey:      envRequired("S3_SECRET_KEY"),
 	}
 	return cfg
 }

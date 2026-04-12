@@ -13,8 +13,10 @@ WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
-COPY web/ .
+COPY web/crypto ./crypto
 RUN npm run build:wasm
+
+COPY web/ .
 RUN npm run build
 
 # Stage 2: Build Go binary

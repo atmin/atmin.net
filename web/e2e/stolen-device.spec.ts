@@ -26,7 +26,13 @@ test.describe('Stolen Device', () => {
         // ── 2. Alice adds her phone (second device) ─────────────────────
         const phoneCtx = await browser.newContext();
         const phone = await phoneCtx.newPage();
+        const addDeviceResp = phone.waitForResponse(
+            (r) =>
+                r.url().endsWith('/v1/devices') &&
+                r.request().method() === 'POST',
+        );
         await loginUser(phone, aliceHandle, mnemonic);
+        expect((await addDeviceResp).status(), 'phone addDevice').toBe(200);
 
         // ── 3. Bob sends "Hey Alice", phone syncs and sees it ────────────
         await openChat(bob, aliceHandle);
@@ -41,7 +47,7 @@ test.describe('Stolen Device', () => {
             timeout: 15_000,
         });
         const deviceItems = laptop.locator('[data-testid="device-item"]');
-        expect(await deviceItems.count()).toBe(2);
+        await expect(deviceItems).toHaveCount(2, { timeout: 15_000 });
 
         // Verify "this device" indicator is shown
         await expect(laptop.locator('text=(this device)')).toBeVisible();
@@ -63,14 +69,9 @@ test.describe('Stolen Device', () => {
         await expect(deviceItems).toHaveCount(1, { timeout: 15_000 });
         await expect(laptop.locator('text=(this device)')).toBeVisible();
 
-        // ── 7. Phone triggers a sync — sees welcome/landing screen ───────
-        // Navigate phone home, then open a chat to force fetchMessages (triggers 403)
-        await phone.goto('/');
-        await phone.waitForSelector('text=Your handle', { timeout: 15_000 });
-        // Opening a chat triggers useChat → fetchMessages → storeList → 403 → self-wipe
-        await phone.fill('input[placeholder="Enter a handle..."]', bobHandle);
-        await phone.getByRole('button', { name: 'Chat' }).click();
-        // The self-wipe redirects to /login which shows the "Sign In" button
+        // ── 7. Phone triggers a sync — server returns 403 → self-wipe ────
+        // Navigating directly to a chat triggers useChat → fetchMessages → storeList → 403.
+        await phone.goto(`/${bobHandle}`);
         await expect(
             phone.getByRole('button', { name: 'Sign In' }),
         ).toBeVisible({ timeout: 30_000 });

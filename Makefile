@@ -83,9 +83,24 @@ up:
 down:
 	$(DOCKER) compose down
 
-e2e:
+e2e: web-build
 	$(DOCKER) compose up -d
-	cd web && npx playwright test
+	$(DOCKER) build --build-arg APP_VERSION=dev -t atmindotnet:e2e .
+	$(DOCKER) rm -f atmin-e2e 2>/dev/null || true
+	$(DOCKER) run -d --name atmin-e2e \
+		-p 8080:8080 \
+		--add-host=host.docker.internal:host-gateway \
+		--add-host=host.containers.internal:host-gateway \
+		-e SERVER_SECRET=e2e-test-secret \
+		-e S3_ENDPOINT=http://host.containers.internal:9000 \
+		-e S3_PUBLIC_ENDPOINT=http://localhost:9000 \
+		-e S3_BUCKET=atmin-e2e-local \
+		-e S3_REGION=us-east-1 \
+		-e S3_ACCESS_KEY=minioadmin \
+		-e S3_SECRET_KEY=minioadmin \
+		atmindotnet:e2e
+	cd web && E2E_BUCKET=atmin-e2e-local npx playwright test; \
+		status=$$?; $(DOCKER) rm -f atmin-e2e; exit $$status
 
 clean:
 	rm -rf bin/
