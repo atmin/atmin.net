@@ -4,7 +4,19 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
+
+const gitVersion = (() => {
+    if (process.env.APP_VERSION) return process.env.APP_VERSION;
+    try {
+        return execSync('git describe --tags --always --dirty', {
+            encoding: 'utf8',
+        }).trim();
+    } catch {
+        return 'dev';
+    }
+})();
 
 const dirname =
     typeof __dirname !== 'undefined'
@@ -14,6 +26,9 @@ const apiUrl = process.env.VITE_API_URL || 'http://localhost:8080';
 
 export default defineConfig({
     plugins: [react(), tailwindcss()],
+    define: {
+        __APP_VERSION__: JSON.stringify(gitVersion),
+    },
     test: {
         exclude: ['e2e/**', 'node_modules/**'],
         projects: [

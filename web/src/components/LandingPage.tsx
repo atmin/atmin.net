@@ -41,7 +41,7 @@ export default function LandingPage() {
                 </div>
 
                 <p className="mt-6 text-center text-xs text-muted-foreground">
-                    v0.1 • Open source •{' '}
+                    {__APP_VERSION__} • Open source •{' '}
                     <a
                         href="https://github.com/yourusername/atmin"
                         className="underline"
