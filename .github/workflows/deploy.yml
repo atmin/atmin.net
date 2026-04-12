@@ -42,8 +42,21 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
+      - name: Cache WASM build
+        id: wasm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            web/crypto/pkg
+            web/crypto/pkg-node
+          key: wasm-${{ hashFiles('web/crypto/Cargo.lock', 'web/crypto/src/**') }}
+
+      - name: Build WASM
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: cd web && npm run build:wasm
+
       - name: Build web
-        run: make web-build
+        run: cd web && npm run build
 
       - name: Copy web assets for server
         run: cp -r web/dist server/dist
@@ -83,8 +96,21 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
+      - name: Cache WASM build
+        id: wasm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            web/crypto/pkg
+            web/crypto/pkg-node
+          key: wasm-${{ hashFiles('web/crypto/Cargo.lock', 'web/crypto/src/**') }}
+
+      - name: Build WASM
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: cd web && npm run build:wasm
+
       - name: Build web
-        run: make web-build
+        run: cd web && npm run build
 
       - name: Copy web assets for server
         run: cp -r web/dist server/dist
@@ -137,8 +163,21 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
+      - name: Cache WASM build
+        id: wasm-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            web/crypto/pkg
+            web/crypto/pkg-node
+          key: wasm-${{ hashFiles('web/crypto/Cargo.lock', 'web/crypto/src/**') }}
+
+      - name: Build WASM
+        if: steps.wasm-cache.outputs.cache-hit != 'true'
+        run: cd web && npm run build:wasm
+
       - name: Build web
-        run: make web-build
+        run: cd web && npm run build
 
       - name: Copy web assets for server
         run: cp -r web/dist server/dist
