@@ -1,8 +1,9 @@
 # Large media (chunked encryption + streaming playback)
 
-v0.1 encrypts files as a single AES-256-GCM blob. This works for photos and small files
-but breaks down at ~100MB+: `crypto.subtle.encrypt` is not streaming (entire plaintext +
-ciphertext in memory), upload can't resume on failure, and playback requires full download.
+v0.1 encrypts files as a single AES-256-GCM blob and caps uploads at 25 MB to
+stay inside `crypto.subtle.encrypt`'s single-shot memory envelope. Beyond that,
+the single-blob model breaks down: no streaming (entire plaintext + ciphertext
+in memory), no resumable upload, no playback before full download.
 
 **Chunked encryption** solves all three:
 
@@ -24,12 +25,12 @@ Playback starts after the first chunk.
   "type": "media",
   "body": "video.mp4",
   "file": {
-    "url": "media/alice01/<sha256>/video.mp4",
+    "url": "media/alice01/<ulid>",
     "key": "<base64 AES-256-GCM key>",
     "base_iv": "<base64 8-byte>",
     "chunk_size": 5242880,
     "size": 1073741824,
-    "sha256": "<hex of plaintext>"
+    "name": "video.mp4"
   }
 }
 ```

@@ -75,7 +75,11 @@ Handles (lookup index):
 
 Media (encrypted by client):
 
-- `media/{user_id}/{sha256}/{filename}`
+- `media/{user_id}/{ulid}` — opaque encrypted blob, not content-addressed.
+  Per-upload random AES-256-GCM key + IV means the same plaintext produces
+  different ciphertext on each upload; a ULID path avoids collision-on-reupload.
+  SHA-256 of plaintext lives in the referencing envelope for integrity only
+  (see [Media](#media)).
 
 ## Multi-device
 
@@ -218,13 +222,16 @@ Media reference (inside Megolm-encrypted plaintext):
   "type": "media",
   "body": "photo.jpg",
   "file": {
-    "url": "media/<user_id>/<sha256>/photo.jpg",
+    "url": "media/<user_id>/<ulid>",
     "key": "<base64 AES-256-GCM key>",
     "iv": "<base64 12-byte IV>",
-    "sha256": "<hex>"
+    "name": "photo.jpg",
+    "size": 48080
   }
 }
 ```
+
+See [Media](#media) for size limits, rendering rules, lifecycle, and failure handling.
 
 **`megolm.key_share`** — ECIES-encrypted Megolm session key:
 
@@ -245,6 +252,147 @@ Individual live key backups are JSON, encrypted with the backup encryption key:
 ```
 
 The plaintext is the Megolm session key (base64, as returned by `session_key()`).
+
+## Media
+
+Media blobs are encrypted client-side and stored at `media/{user_id}/{ulid}`.
+Each upload uses a fresh random AES-256-GCM key and 12-byte IV. The key,
+IV, display name, and plaintext size travel inside the Megolm-encrypted
+envelope payload; the server sees only an opaque blob and its size.
+
+### Per-blob size cap
+
+- **25 MB ciphertext.** Enforced client-side before encryption (to avoid
+  OOM during Web Crypto single-shot AES-GCM) and server-side at
+  `POST /v1/store/presign` (`bytes` field is the ciphertext length).
+- Oversize requests return `413 too_large`.
+- Chunked uploads and streaming playback are deferred; see
+  [evolution/large-media.md](../evolution/large-media.md).
+
+### Presigned PUT headers
+
+The presigned PUT URL is signed with `Content-Length` equal to the `bytes`
+value from the presign request. S3 rejects PUTs whose body size differs,
+so a client cannot smuggle a larger file through a small-signed URL.
+
+`Content-Type` is **not** signed. The client sets
+`Content-Type: application/octet-stream` on PUT; the stored object's
+content type is therefore caller-controlled but irrelevant — reads flow
+through `GET /v1/store/object`, which sets its own response headers
+(`Cache-Control`, and `Content-Type: application/octet-stream` regardless
+of what was stored). No other headers are signed.
+
+### Per-user quota
+
+Server enforces a per-user media quota at `POST /v1/store/presign`. Usage
+is estimated by summing `Size` from `ListObjectsV2` on `media/{uid}/`,
+cached in-process for 10 minutes, with optimistic increment on successful
+presign. Presign returns `413 quota_exceeded` when
+`cached_usage + bytes > quota`. Quota value v0.1: **1 GiB**.
+
+The quota cache is in-process only, following the same "in-process now,
+shared-state later" pattern as [EventHub](../decisions/adr-0004-sse-realtime-notifications.md):
+v0.1 runs one container serving all traffic, so a `sync.Map` of
+`user_id → {usage, expiresAt}` is sufficient. When multi-instance
+deployment is introduced, the cache moves behind an interface backed by
+Redis (or equivalent) without changing the presign API. Until then,
+multi-instance drift is not a concern because there is no second instance.
+
+Note that optimistic increment is only reverted on presign-path failures
+(e.g. panic before response); a presign that succeeds but is never PUT to
+leaves the increment in place until the 10 min TTL expires and
+`ListObjectsV2` rebuilds from ground truth. This is intentional
+conservatism — it prevents a client from defeating the quota by rapidly
+presigning-without-uploading.
+
+### Blob count cap
+
+One `ListObjectsV2` page returns up to **1000 keys**. v0.1 caps per-user
+blob count at **1000** so quota recomputation is a single S3 call; a
+presign whose success would push the user over 1000 blobs returns `413
+quota_exceeded` with the same code (the cap is a quota-management detail,
+not a separate error). At the 1 GiB quota this is only restrictive for
+users with many small attachments; the cap will be lifted when quota
+bookkeeping moves to shared state and can afford paged enumeration or a
+maintained counter.
+
+### Integrity and failure handling
+
+Before rendering, the recipient AES-256-GCM-decrypts with the key and IV
+from the payload. If the auth tag fails → terminal `corrupt` state. GCM's
+auth tag is the sole integrity check; no separate SHA-256 is carried or
+verified.
+
+A `GET /v1/store/object` returning `404` is terminal `unavailable`.
+Network errors are transient `network-error` with a manual retry control;
+there is no automatic retry loop. Attachment failure never hides the
+containing message — the bubble still renders with timestamp and any
+caption in `body`.
+
+### Inline rendering rules
+
+The client sniffs magic bytes of the decrypted plaintext. Only PNG, JPEG,
+GIF, and WebP render inline via `<img>`. Everything else is exposed as a
+download link (`<a download href="blob:...">`). SVG, AVIF, HEIC, video,
+audio, and PDF are download-only in v0.1.
+
+Blob URLs are never used as iframe or embed sources. Navigation to a blob
+URL (click-through on the inline image, or following the download link)
+is allowed — the browser renders the decoded bytes in a fresh context
+without executing them as part of the app origin.
+
+### Display-name hygiene
+
+`file.name` is sender-controlled. Before using it as the `download`
+attribute or as visible text, the client strips path separators (`/`,
+`\`), NUL, and control characters (`\x00–\x1f`, `\x7f`), collapses
+leading dots, truncates to 255 bytes, and falls back to `"download"`
+when the result is empty.
+
+### Client-side lifecycle
+
+Decrypted attachments live in memory only, held as `ObjectURL`s owned by
+the rendering component. Unmount revokes the URL and aborts any in-flight
+fetch. Decrypted plaintext is never persisted to disk. Encrypted blobs
+under `media/` are served with
+`Cache-Control: private, immutable, max-age=31536000`, so browser HTTP
+cache shortcuts the network leg on refresh — decryption still happens per
+mount. Offline media and cross-session caching are deferred (see
+[evolution/large-media.md](../evolution/large-media.md)).
+
+### Upload reliability
+
+- PUT failure: client retries once on network/5xx; second failure surfaces
+  an inline "Upload failed — retry" control.
+- Presigned URL expiry: client re-presigns and retries.
+- `POST /v1/send` is idempotent by `msg_id`; the client retries the send
+  leg independently of the PUT leg.
+
+### Orphan blobs
+
+If PUT succeeds but the send is abandoned (tab closed, send retries
+exhausted), the blob is orphaned on S3. Server-side sweeps are not
+possible under E2E — envelopes are opaque. Orphans count against the
+per-user quota, and are reclaimed on account deletion.
+
+In steady state, orphans are rare: orphan creation requires PUT-success
+followed by send-abandonment, and the two legs are close-adjacent in
+time with independent retries, so the realistic window is "tab closed
+in the ~second between PUT and send." The 1 GiB / 1000-blob cap bounds
+the worst case regardless.
+
+Presigned-but-never-PUT reservations occupy cache usage (not real S3
+bytes) for up to the 10 min TTL and are not reverted on timeout; this
+is intentional friction against a presign-spam DoS, not a bug to fix.
+
+Client-cooperative garbage collection and a future deletable-attachment
+indirection are designed but not shipped in v0.1; see
+[evolution/media-gc.md](../evolution/media-gc.md).
+
+**Account deletion** (`DELETE /v1/profile`) wipes `media/{uid}/` along
+with `inbox/`, `users/`, and `keys/`, using a single `ListObjects` page
+per prefix (limit 1000). This is coupled to the 1000-blob cap above —
+raising the cap also requires making the deletion loop paginate.
 
 ## Compaction
 
@@ -365,7 +513,8 @@ Error codes used by the server:
 | 403 | `device_revoked` | Device file deleted (triggers client self-wipe) |
 | 403 | `forbidden` | Prefix access denied |
 | 404 | `not_found` | Object or handle does not exist |
-| 413 | `quota_exceeded` | Upload exceeds storage quota |
+| 413 | `too_large` | Single upload exceeds per-blob size cap |
+| 413 | `quota_exceeded` | Upload would exceed per-user storage quota |
 
 ## API (HTTP)
 
@@ -638,6 +787,19 @@ Realtime hint:
     - SSE connect sets `last_active` in profile
     - second SSE connect within 1 hour does not update `last_active`
 - Media:
-    - upload encrypted blob via presigned PUT
-    - send reference inside encrypted payload
-    - recipient downloads and decrypts
+    - Alice attaches a PNG fixture; it encrypts, uploads via presigned PUT
+      to `media/{alice}/{ulid}`, and a media envelope is sent referencing
+      it.
+    - Bob receives the message via SSE; `<img>` is rendered inline; the
+      rendered bytes hash equals the fixture hash.
+    - Tampered blob: overwriting the stored ciphertext and opening the
+      message in a fresh browser context (bypassing the immutable cache)
+      causes Bob to see a terminal `corrupt` state; the message bubble
+      still renders.
+    - Refresh Bob's page in the same browser context: the inline image
+      re-appears without a second `GET /v1/store/object` to the server
+      (browser HTTP cache).
+    - Oversize: attempting to attach a file >25 MB is rejected client-side
+      before any network request.
+    - Download variant: a small binary with no image magic renders as a
+      download link, not an `<img>`.

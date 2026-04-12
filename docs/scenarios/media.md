@@ -14,7 +14,7 @@ sequenceDiagram
 
     note over A,B: Client-side encryption + upload
     A->>A: Generate random AES-256-GCM key + IV
-    A->>A: Encrypt photo.jpg, compute SHA-256 of plaintext
+    A->>A: Encrypt photo.jpg (AES-256-GCM, auth tag = integrity)
     A->>S: PUT encrypted blob (presigned URL)
 
     note over A,B: Send file reference inside Megolm message
@@ -24,9 +24,9 @@ sequenceDiagram
 
     note over A,B: Bob syncs, downloads, decrypts
     B->>S: GET message
-    note right of B: Megolm decrypt → {url, key, iv, sha256}
+    note right of B: Megolm decrypt → {url, key, iv, name, size}
     B->>S: GET encrypted blob
-    note right of B: AES-GCM decrypt → photo.jpg<br/>Verify SHA-256 ✓
+    note right of B: AES-GCM decrypt → photo.jpg<br/>(auth tag verifies integrity)
 ```
 Alice (session S2) and Bob (session S1) can already exchange messages.
 
@@ -40,15 +40,22 @@ Alice (session S2) and Bob (session S1) can already exchange messages.
 Alice selects `photo.jpg` (48KB). Her client:
 
 1. Generates a random AES-256-GCM key and 12-byte IV.
-2. Encrypts the file: `encrypted_blob = AES-256-GCM(key, iv, photo.jpg)`.
-3. Computes `sha256` of the **plaintext** file (for integrity check after decryption).
+2. Checks `file.size` against the 25 MB per-blob cap (aborts with a
+   client-side error if oversize — no network request).
+3. Encrypts the file: `encrypted_blob = AES-256-GCM(key, iv, photo.jpg)`.
+   The GCM auth tag is the sole integrity check at the recipient.
 4. Requests a presigned PUT URL:
 
 ```
 POST /v1/store/presign
-{ "key": "media/alice01/<sha256>/photo.jpg", "bytes": 48080 }
+{ "key": "media/alice01/<ulid>", "bytes": 48080 }
 → { "presigned_url": "..." }
 ```
+
+The server validates `bytes ≤ 25 MB` (else `413 too_large`) and
+`cached_usage + bytes ≤ quota` (else `413 quota_exceeded`), then returns
+a presigned PUT URL signed with `Content-Length: 48080` (unsigned
+`Content-Type: application/octet-stream`).
 
 5. Uploads the encrypted blob:
 
@@ -58,7 +65,7 @@ PUT <presigned_url>
 ```
 
 S3 writes:
-- `media/alice01/<sha256>/photo.jpg` — encrypted file (opaque to server)
+- `media/alice01/<ulid>` — encrypted file (opaque to server)
 
 The per-file key never leaves Alice's device unencrypted — it travels
 inside the Megolm-encrypted message payload.
@@ -107,10 +114,11 @@ Where `inner_plaintext` (what Megolm encrypts) is:
   "type": "media",
   "body": "photo.jpg",
   "file": {
-    "url": "media/alice01/<sha256>/photo.jpg",
+    "url": "media/alice01/<ulid>",
     "key": "<base64 AES-256-GCM key>",
     "iv": "<base64 12-byte IV>",
-    "sha256": "<hex>"
+    "name": "photo.jpg",
+    "size": 48080
   }
 }
 ```
@@ -135,17 +143,17 @@ Bob decrypts with Megolm session S2 → gets the inner plaintext with file refer
 Bob's client downloads and decrypts the file:
 
 ```
-GET /v1/store/object?key=media/alice01/<sha256>/photo.jpg
+GET /v1/store/object?key=media/alice01/<ulid>
 ```
 
 1. Decrypts with the AES-256-GCM key and IV from the message payload.
-2. Computes SHA-256 of the decrypted file, verifies it matches the hash.
-3. Renders the photo.
+   The GCM auth tag failing is the single terminal `corrupt` signal.
+2. Sniffs magic bytes of the plaintext; PNG → renders as `<img>`.
 
 ## S3 state (new objects only)
 
 ```
-media/alice01/<sha256>/photo.jpg    ← encrypted file
+media/alice01/<ulid>    ← encrypted file
 
 inbox/bob01/live/msg008             ← message with file reference
 inbox/alice01/live/msg008           ← self-copy
@@ -153,15 +161,21 @@ inbox/alice01/live/msg008           ← self-copy
 
 ## Security properties
 
-- **Server sees**: an opaque encrypted blob at a content-addressed path and an opaque envelope. It cannot associate the blob with the message (the URL is inside the Megolm ciphertext).
+- **Server sees**: an opaque encrypted blob at a ULID path and an opaque envelope. It cannot associate the blob with the message (the URL is inside the Megolm ciphertext).
 - **Per-file key**: each file gets its own random AES-256-GCM key. Compromising one file key does not affect others.
-- **Integrity**: SHA-256 hash inside the encrypted payload lets the recipient verify the file was not tampered with at rest.
-- **Content-addressed path**: `media/{user_id}/{sha256}/{filename}` — uploading the same file twice is idempotent (same key, same path, same ciphertext).
+- **Integrity**: AES-256-GCM's auth tag is the sole integrity check — any bit flip in key, IV, or ciphertext yields a decryption failure and a terminal `corrupt` state.
+- **ULID path (not content-addressed)**: each upload occupies a fresh key. Re-uploading the same plaintext produces a new path and new ciphertext — no collision or overwrite risk, at the cost of no deduplication.
+- **Inline render safety**: only PNG/JPEG/GIF/WebP (sniffed from plaintext magic bytes) render via `<img>`. All other types are download-only. Blob URLs are never used as iframe or embed sources; navigation (click-through, download link) is allowed since the browser decodes the bytes in a fresh context, outside the app origin.
 
 ## What to test
 
 - Encrypted upload via presigned URL succeeds.
+- PUT with a body larger than the signed `Content-Length` is rejected by S3.
 - Bob decrypts the file using key/IV from the message payload.
-- SHA-256 integrity check passes.
-- Wrong file key fails decryption.
+- Wrong file key → AES-GCM auth tag fails → terminal `corrupt` state; message bubble still renders.
+- Tampering with the stored ciphertext (overwrite with random bytes) also yields `corrupt` on recipient when the blob is fetched in a fresh browser context that bypasses the immutable cache.
+- A PNG fixture renders inline as `<img>` with `data-testid="media-image"`; a non-image binary renders as `<a download>` with `data-testid="media-download"`.
+- Refresh of recipient page re-renders inline image without a second `GET /v1/store/object` (browser HTTP cache via `Cache-Control: private, immutable, max-age=31536000`).
+- Oversize attachment (>25 MB) is rejected client-side before any network request.
+- PUT succeeds but `/v1/send` fails once, then retries with same `msg_id` → recipient sees exactly one message.
 - Server cannot correlate blob path with envelope (URL only visible inside Megolm ciphertext).
