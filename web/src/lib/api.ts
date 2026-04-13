@@ -224,6 +224,117 @@ export function storePresign(
     });
 }
 
+// --- Media upload/download ---
+
+import type { EncryptedMedia } from './media';
+
+export class NotFoundError extends Error {
+    constructor() {
+        super('not found');
+        this.name = 'NotFoundError';
+    }
+}
+
+export class NetworkError extends Error {
+    constructor(msg = 'network error') {
+        super(msg);
+        this.name = 'NetworkError';
+    }
+}
+
+export const MEDIA_FETCH_TIMEOUT_MS = 60_000;
+
+async function putWithRetry(
+    url: string,
+    body: Uint8Array,
+    abort?: AbortSignal,
+): Promise<void> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const res = await fetch(url, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/octet-stream' },
+                body: body as BodyInit,
+                signal: abort,
+            });
+            if (res.ok) return;
+            // 4xx is terminal; only 5xx retries.
+            if (res.status < 500) {
+                throw new APIError(
+                    res.status,
+                    'upload_failed',
+                    `PUT failed: ${res.status}`,
+                );
+            }
+            lastErr = new APIError(
+                res.status,
+                'upload_failed',
+                `PUT failed: ${res.status}`,
+            );
+        } catch (e) {
+            if (e instanceof APIError) throw e;
+            if (abort?.aborted) throw e;
+            lastErr = e;
+        }
+    }
+    throw lastErr;
+}
+
+export async function uploadMedia(
+    token: string,
+    userId: string,
+    encrypted: EncryptedMedia,
+    abort?: AbortSignal,
+): Promise<{ url: string; mediaUlid: string }> {
+    const { ulid } = await import('ulid');
+    const mediaUlid = ulid();
+    const key = `media/${userId}/${mediaUlid}`;
+
+    const { presigned_url } = await storePresign(
+        token,
+        key,
+        encrypted.ciphertext.length,
+    );
+    await putWithRetry(presigned_url, encrypted.ciphertext, abort);
+    return { url: key, mediaUlid };
+}
+
+export async function fetchMedia(
+    token: string,
+    url: string,
+    abort: AbortSignal,
+): Promise<Uint8Array> {
+    // Chain caller abort with our timeout via a fresh controller.
+    const ctl = new AbortController();
+    const onAbort = () => ctl.abort();
+    abort.addEventListener('abort', onAbort);
+    const timer = setTimeout(() => ctl.abort(), MEDIA_FETCH_TIMEOUT_MS);
+
+    try {
+        const res = await fetch(
+            `/v1/store/object?${new URLSearchParams({ key: url })}`,
+            {
+                headers: { Authorization: `Bearer ${token}` },
+                signal: ctl.signal,
+            },
+        );
+        if (res.status === 404) throw new NotFoundError();
+        if (!res.ok) throw new NetworkError(`status ${res.status}`);
+        const buf = await res.arrayBuffer();
+        return new Uint8Array(buf);
+    } catch (e) {
+        if (e instanceof NotFoundError) throw e;
+        if (e instanceof NetworkError) throw e;
+        throw new NetworkError(
+            e instanceof Error ? e.message : 'network error',
+        );
+    } finally {
+        clearTimeout(timer);
+        abort.removeEventListener('abort', onAbort);
+    }
+}
+
 export function storeCompact(
     token: string,
     prefix: string,
