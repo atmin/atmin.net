@@ -1,6 +1,6 @@
 DOCKER ?= docker
 
-.PHONY: all build test lint fmt clean dev run e2e
+.PHONY: all build test lint fmt clean dev run e2e e2e-local
 .PHONY: server server-build server-test server-lint server-fmt
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
 .PHONY: up down
@@ -101,6 +101,38 @@ e2e: web-build
 		atmindotnet:e2e
 	cd web && E2E_BUCKET=atmin-e2e-local npx playwright test; \
 		status=$$?; $(DOCKER) rm -f atmin-e2e; exit $$status
+
+# Fast local e2e: runs the server natively (no docker build).
+# Still needs `docker compose up -d` for MinIO.
+#
+# Pass SPEC=... to scope the run:
+#   make e2e-local SPEC=media                     # one file (substring match)
+#   make e2e-local SPEC=e2e/media.spec.ts         # path form
+#   make e2e-local SPEC="media -g 'inline image'" # filter by test title
+e2e-local: web-build server-build
+	@$(DOCKER) rm -f atmin-e2e 2>/dev/null || true
+	$(DOCKER) compose up -d
+	@BUCKET=atmin-e2e-local-$$$$; \
+	export SERVER_SECRET=e2e-test-secret; \
+	export S3_ENDPOINT=http://localhost:9000; \
+	export S3_PUBLIC_ENDPOINT=http://localhost:9000; \
+	export S3_BUCKET=$$BUCKET; \
+	export S3_REGION=us-east-1; \
+	export S3_ACCESS_KEY=minioadmin; \
+	export S3_SECRET_KEY=minioadmin; \
+	./bin/atmin & \
+	SERVER_PID=$$!; \
+	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT INT TERM; \
+	up=""; \
+	for i in $$(seq 1 50); do \
+		if curl -sf http://localhost:8080/healthz >/dev/null; then up=1; break; fi; \
+		sleep 0.2; \
+	done; \
+	if [ -z "$$up" ]; then echo "server did not come up on :8080" >&2; kill $$SERVER_PID 2>/dev/null || true; exit 1; fi; \
+	cd web && E2E_BUCKET=$$BUCKET npx playwright test $(SPEC); \
+	status=$$?; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	exit $$status
 
 clean:
 	rm -rf bin/

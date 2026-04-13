@@ -474,14 +474,19 @@ export async function sendTextMessage(
         });
     }
 
-    // Persist outbound state (ratchet advanced)
+    // Persist outbound state (ratchet advanced). Safe to persist even if
+    // the send fails — the retry will advance further, never reusing an
+    // index.
     await sessionManager.persistOutbound(session);
 
+    // Only record the share once the server has accepted the envelopes —
+    // otherwise a failed send leaves us believing the peer already has the
+    // key, and the retry (with `needsShare=false`) delivers a message the
+    // peer cannot decrypt.
+    await send(token, envelopes);
     if (needsShare) {
         await sessionManager.recordShare(session.session_id, toUserId);
     }
-
-    await send(token, envelopes);
 }
 
 // Helper to fetch and decrypt messages from inbox

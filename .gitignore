@@ -51,3 +51,6 @@ playwright-report/
 
 # Storybook
 storybook-static/
+
+# Pi Lens
+.pi-lens/

@@ -86,7 +86,11 @@ export default function MediaAttachment({ file, token }: Props) {
                 urlRef.current = null;
             }
         };
-    }, [file.url, file.key, file.iv, token, attempt]);
+        // key/iv are deterministically bound to file.url (same envelope),
+        // but toMessages allocates fresh Uint8Arrays on every refetch. Keep
+        // them out of deps so we don't refetch the same blob on each sync.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [file.url, token, attempt]);
 
     const displayName = sanitizeDownloadFilename(file.name);
 

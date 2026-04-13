@@ -26,7 +26,7 @@ func TestStoreObject_MediaSetsCacheControl(t *testing.T) {
 		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
 	}
 	got := w.Header().Get("Cache-Control")
-	want := "private, immutable, max-age=31536000"
+	want := "public, immutable, max-age=31536000"
 	if got != want {
 		t.Fatalf("Cache-Control = %q, want %q", got, want)
 	}

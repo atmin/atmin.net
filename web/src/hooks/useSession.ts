@@ -93,8 +93,15 @@ export function useSession(): SessionState {
         // Best-effort: remove device server-side before clearing local session
         const token = tokenRef.current;
         if (token) deleteDevice(token).catch(() => {});
-        await clearSession();
+        // Drop session state first so downstream components (useChat, SSE,
+        // any effect that opens IndexedDB) unmount and close their IDB
+        // connections. Otherwise `deleteDatabase` can be blocked by a
+        // still-live connection and hang until it's eventually closed.
         setSession(null);
+        // Yield so React flushes the unmount + effect cleanup before we
+        // tear down IndexedDB.
+        await new Promise((r) => setTimeout(r, 0));
+        await clearSession();
     }, []);
 
     useEffect(() => {

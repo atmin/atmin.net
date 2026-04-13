@@ -116,6 +116,33 @@ export async function resyncChat(
 }
 
 /**
+ * Attach a file via the chat's hidden file input and wait for send to settle.
+ */
+export async function sendMedia(page: Page, filePath: string): Promise<void> {
+    const before = await page
+        .locator('[data-testid="media-attachment"]')
+        .count();
+    await page.locator('input[type="file"]').setInputFiles(filePath);
+    // Wait for our own echoed attachment to render — this is the only
+    // reliable signal that encrypt+upload+send all succeeded.
+    await expect(
+        page.locator('[data-testid="media-attachment"]'),
+    ).toHaveCount(before + 1, { timeout: 30_000 });
+}
+
+export async function waitForMediaImage(page: Page): Promise<void> {
+    await expect(
+        page.locator('[data-testid="media-image"]').first(),
+    ).toBeVisible({ timeout: 15_000 });
+}
+
+export async function waitForMediaDownload(page: Page): Promise<void> {
+    await expect(
+        page.locator('[data-testid="media-download"]').first(),
+    ).toBeVisible({ timeout: 15_000 });
+}
+
+/**
  * Return the number of message bubbles currently visible.
  */
 export async function getMessageCount(page: Page): Promise<number> {

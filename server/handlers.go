@@ -453,6 +453,12 @@ func authorizeKey(userID, key string) bool {
 	if strings.HasPrefix(key, "users/") {
 		return true
 	}
+	// Media blobs are capability-protected: any authenticated user who
+	// knows the ULID path (delivered via the encrypted envelope) may GET.
+	// Write path (authorizeKeyWrite) remains restricted to the owner.
+	if strings.HasPrefix(key, "media/") {
+		return true
+	}
 	return false
 }
 
@@ -523,7 +529,10 @@ func handleStoreObject(store Store) http.HandlerFunc {
 		}
 
 		if strings.HasPrefix(key, "media/") {
-			w.Header().Set("Cache-Control", "private, immutable, max-age=31536000")
+			// `public` is required for browsers to cache responses to
+			// requests carrying an `Authorization` header (RFC 9111 §3.5).
+			// The bytes are GCM-sealed ciphertext, so shared caching is safe.
+			w.Header().Set("Cache-Control", "public, immutable, max-age=31536000")
 		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Write(data)

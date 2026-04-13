@@ -217,6 +217,15 @@ export function deleteDatabase(): Promise<void> {
         const request = indexedDB.deleteDatabase(DB_NAME);
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
+        // Fires when another connection (another tab, or a React component
+        // that reopened via getDB() before fully unmounting) is still open.
+        // The deletion will proceed once that connection closes, but without
+        // this handler the promise can hang silently. Log and keep waiting.
+        request.onblocked = () => {
+            console.warn(
+                'deleteDatabase: blocked by another open connection; waiting',
+            );
+        };
     });
 }
 
