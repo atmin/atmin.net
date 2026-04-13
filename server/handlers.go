@@ -522,13 +522,16 @@ func handleStoreObject(store Store) http.HandlerFunc {
 			return
 		}
 
+		if strings.HasPrefix(key, "media/") {
+			w.Header().Set("Cache-Control", "private, immutable, max-age=31536000")
+		}
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Write(data)
 	}
 }
 
 // POST /v1/store/presign
-func handleStorePresign(store Store) http.HandlerFunc {
+func handleStorePresign(store Store, quota MediaQuotaStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := userIDFrom(r.Context())
 
@@ -547,6 +550,21 @@ func handleStorePresign(store Store) http.HandlerFunc {
 		if !authorizeKeyWrite(userID, req.Key) {
 			writeError(w, errForbidden)
 			return
+		}
+		if strings.HasPrefix(req.Key, "media/") {
+			if req.Bytes > MAX_MEDIA_BYTES {
+				writeError(w, errTooLarge)
+				return
+			}
+			ok, _, err := quota.ReserveUpload(r.Context(), userID, req.Bytes)
+			if err != nil {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Quota check failed"})
+				return
+			}
+			if !ok {
+				writeError(w, errQuotaExceeded)
+				return
+			}
 		}
 
 		url, err := store.PresignPut(r.Context(), req.Key, req.Bytes, 15*time.Minute)

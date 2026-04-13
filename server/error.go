@@ -22,6 +22,7 @@ var (
 	errForbidden     = APIError{http.StatusForbidden, "forbidden", "Access denied"}
 	errNotFound      = APIError{http.StatusNotFound, "not_found", "Not found"}
 	errQuotaExceeded = APIError{http.StatusRequestEntityTooLarge, "quota_exceeded", "Storage quota exceeded"}
+	errTooLarge      = APIError{http.StatusRequestEntityTooLarge, "too_large", "Payload exceeds size limit"}
 )
 
 func writeError(w http.ResponseWriter, err APIError) {

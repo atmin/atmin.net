@@ -80,6 +80,27 @@ func (m *MemStore) ListObjects(_ context.Context, prefix string, limit int, curs
 	return keys, "", nil
 }
 
+func (m *MemStore) ListObjectSizes(_ context.Context, prefix string, limit int) (int64, int, bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var keys []string
+	for k := range m.objects {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	truncated := len(keys) > limit
+	if truncated {
+		keys = keys[:limit]
+	}
+	var total int64
+	for _, k := range keys {
+		total += int64(len(m.objects[k]))
+	}
+	return total, len(keys), truncated, nil
+}
+
 func (m *MemStore) PresignPut(_ context.Context, key string, _ int64, _ time.Duration) (string, error) {
 	// In tests, return a fake URL. The actual upload goes through PutObject.
 	return fmt.Sprintf("http://fake-presign/%s", key), nil

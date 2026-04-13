@@ -25,6 +25,9 @@ type Store interface {
 	DeleteObject(ctx context.Context, key string) error
 	DeleteObjects(ctx context.Context, keys []string) error
 	ListObjects(ctx context.Context, prefix string, limit int, cursor string) (keys []string, nextCursor string, err error)
+	// ListObjectSizes returns total bytes and object count under prefix, up to `limit` keys.
+	// `truncated` is true if more keys exist beyond `limit` (single page).
+	ListObjectSizes(ctx context.Context, prefix string, limit int) (totalBytes int64, count int, truncated bool, err error)
 	PresignPut(ctx context.Context, key string, contentLength int64, ttl time.Duration) (string, error)
 }
 
@@ -157,6 +160,25 @@ func (c *S3Client) ListObjects(ctx context.Context, prefix string, limit int, cu
 	}
 
 	return keys, nextCursor, nil
+}
+
+func (c *S3Client) ListObjectSizes(ctx context.Context, prefix string, limit int) (int64, int, bool, error) {
+	out, err := c.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+		Bucket:  &c.bucket,
+		Prefix:  &prefix,
+		MaxKeys: aws.Int32(int32(limit)),
+	})
+	if err != nil {
+		return 0, 0, false, err
+	}
+	var total int64
+	for _, obj := range out.Contents {
+		if obj.Size != nil {
+			total += *obj.Size
+		}
+	}
+	truncated := out.IsTruncated != nil && *out.IsTruncated
+	return total, len(out.Contents), truncated, nil
 }
 
 func (c *S3Client) PresignPut(ctx context.Context, key string, contentLength int64, ttl time.Duration) (string, error) {

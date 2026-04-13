@@ -26,7 +26,7 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 	mux.HandleFunc("GET /v1/events", auth(handleEvents(store, hub)))
 	mux.HandleFunc("GET /v1/store/list", auth(handleStoreList(store)))
 	mux.HandleFunc("GET /v1/store/object", auth(handleStoreObject(store)))
-	mux.HandleFunc("POST /v1/store/presign", auth(handleStorePresign(store)))
+	mux.HandleFunc("POST /v1/store/presign", auth(handleStorePresign(store, NewMediaQuota(store))))
 	mux.HandleFunc("POST /v1/store/compact", auth(handleStoreCompact(store)))
 
 	// Static web app (catch-all, lowest priority)
