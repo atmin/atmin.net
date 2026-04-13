@@ -18,6 +18,7 @@ export default function ChatRoute({ session, sessionManager }: Props) {
         encryptionReady,
         chatTitle,
         sendMessage,
+        sendMedia,
     } = useChat(handle, session, sessionManager);
 
     return (
@@ -29,7 +30,9 @@ export default function ChatRoute({ session, sessionManager }: Props) {
             loading={loading}
             sending={sending}
             encryptionReady={encryptionReady}
+            token={session.token}
             onSend={sendMessage}
+            onSendMedia={sendMedia}
         />
     );
 }

@@ -10,7 +10,9 @@ import {
 } from './media.js';
 
 function makeFile(bytes: Uint8Array, name = 'test.bin'): File {
-    return new File([bytes], name, { type: 'application/octet-stream' });
+    return new File([bytes as BlobPart], name, {
+        type: 'application/octet-stream',
+    });
 }
 
 describe('encryptMedia / decryptMedia', () => {

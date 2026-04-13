@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Message } from '@/hooks/useChat';
 import ChatMessage from './ChatMessage';
@@ -11,7 +11,9 @@ interface Props {
     loading: boolean;
     sending: boolean;
     encryptionReady: boolean;
+    token?: string;
     onSend: (text: string) => void;
+    onSendMedia?: (file: File) => void;
 }
 
 export default function ChatView({
@@ -22,9 +24,12 @@ export default function ChatView({
     loading,
     sending,
     encryptionReady,
+    token,
     onSend,
+    onSendMedia,
 }: Props) {
     const [inputValue, setInputValue] = useState('');
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -79,6 +84,8 @@ export default function ChatView({
                                     text={msg.text}
                                     timestamp={msg.timestamp}
                                     sent={msg.sent}
+                                    media={msg.media}
+                                    token={token}
                                 />
                             ))}
                         </div>
@@ -92,6 +99,30 @@ export default function ChatView({
                     onSubmit={handleSubmit}
                     className="mx-auto flex max-w-2xl gap-2"
                 >
+                    {onSendMedia && (
+                        <>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                className="hidden"
+                                onChange={(e) => {
+                                    const f = e.target.files?.[0];
+                                    if (f) onSendMedia(f);
+                                    e.target.value = '';
+                                }}
+                            />
+                            <button
+                                type="button"
+                                data-testid="attach-button"
+                                disabled={sending || !encryptionReady}
+                                onClick={() => fileInputRef.current?.click()}
+                                className="rounded border border-input px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
+                                aria-label="Attach file"
+                            >
+                                📎
+                            </button>
+                        </>
+                    )}
                     <input
                         type="text"
                         value={inputValue}

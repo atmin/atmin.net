@@ -4,7 +4,10 @@ import {
     fetchMessages,
     resolve,
     sendTextMessage,
+    uploadMedia,
 } from '@/lib/api';
+import { encryptMedia } from '@/lib/media';
+import type { MediaFile } from '@/components/MediaAttachment';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
 import {
@@ -19,6 +22,40 @@ export interface Message {
     text: string;
     timestamp: Date;
     sent: boolean;
+    media?: MediaFile;
+}
+
+interface MediaEnvelope {
+    type: 'media';
+    body: string;
+    file: {
+        url: string;
+        key: string;
+        iv: string;
+        name: string;
+        size: number;
+    };
+}
+
+function parseMediaEnvelope(text: string): MediaEnvelope | null {
+    if (!text.startsWith('{')) return null;
+    try {
+        const obj = JSON.parse(text);
+        if (
+            obj?.type === 'media' &&
+            typeof obj.body === 'string' &&
+            obj.file?.url &&
+            obj.file?.key &&
+            obj.file?.iv &&
+            typeof obj.file?.name === 'string' &&
+            typeof obj.file?.size === 'number'
+        ) {
+            return obj as MediaEnvelope;
+        }
+    } catch {
+        // not JSON
+    }
+    return null;
 }
 
 // Merge newly synced messages into existing state.
@@ -28,13 +65,33 @@ function toMessages(
     msgs: { id: string; text: string; timestamp: Date; fromUser: string }[],
     userId: string,
 ): Message[] {
-    return msgs.map((m) => ({
-        id: m.id,
-        text: m.text,
-        timestamp: m.timestamp,
-        sent: m.fromUser === userId,
-    }));
+    return msgs.map((m) => {
+        const env = parseMediaEnvelope(m.text);
+        if (env) {
+            return {
+                id: m.id,
+                text: env.body,
+                timestamp: m.timestamp,
+                sent: m.fromUser === userId,
+                media: {
+                    url: env.file.url,
+                    key: base64UrlDecode(env.file.key),
+                    iv: base64UrlDecode(env.file.iv),
+                    name: env.file.name,
+                    size: env.file.size,
+                },
+            };
+        }
+        return {
+            id: m.id,
+            text: m.text,
+            timestamp: m.timestamp,
+            sent: m.fromUser === userId,
+        };
+    });
 }
+
+import { base64UrlDecode, base64UrlEncode } from '@/lib/crypto';
 
 function mergeMessages(existing: Message[], synced: Message[]): Message[] {
     const byId = new Map(existing.map((m) => [m.id, m]));
@@ -51,6 +108,7 @@ export interface ChatState {
     encryptionReady: boolean;
     chatTitle: string;
     sendMessage: (text: string) => Promise<void>;
+    sendMedia: (file: File) => Promise<void>;
 }
 
 export function useChat(
@@ -244,6 +302,76 @@ export function useChat(
         }
     };
 
+    const sendMedia = async (file: File) => {
+        if (sending || !sessionManager) return;
+
+        setSending(true);
+        try {
+            let recipientUserId: string;
+            let recipientPubKeyBytes: Uint8Array;
+
+            if (isSaved) {
+                recipientUserId = session.userId;
+                recipientPubKeyBytes = session.sharingPublicKeyBytes;
+            } else {
+                if (!handle) throw new Error('No recipient handle');
+                const resolveRes = await resolve(handle);
+                recipientUserId = resolveRes.user_id;
+                recipientPubKeyBytes = base64UrlDecode(
+                    resolveRes.sharing_public_key,
+                );
+            }
+
+            const enc = await encryptMedia(file);
+            const { url } = await uploadMedia(
+                session.token,
+                session.userId,
+                enc,
+            );
+
+            const envelope = JSON.stringify({
+                type: 'media',
+                body: file.name,
+                file: {
+                    url,
+                    key: base64UrlEncode(enc.key),
+                    iv: base64UrlEncode(enc.iv),
+                    name: file.name,
+                    size: file.size,
+                },
+            });
+
+            await sendTextMessage(
+                session.token,
+                session.userId,
+                session.deviceId,
+                recipientUserId,
+                recipientPubKeyBytes,
+                session.sharingPublicKeyBytes,
+                envelope,
+                sessionManager,
+            );
+
+            const synced = await fetchMessages(
+                session.token,
+                session.userId,
+                session.sharingPrivateKey,
+                sessionManager ?? undefined,
+            );
+            const convMessages = toMessages(
+                synced.filter((m) => m.conversationId === convId),
+                session.userId,
+            );
+            setMessages((prev) => mergeMessages(prev, convMessages));
+            await saveMessages(session.userId, synced);
+        } catch (error) {
+            console.error('Failed to send media:', error);
+            alert('Failed to send attachment. Please try again.');
+        } finally {
+            setSending(false);
+        }
+    };
+
     return {
         messages,
         loading,
@@ -251,5 +379,6 @@ export function useChat(
         encryptionReady: !!sessionManager,
         chatTitle,
         sendMessage,
+        sendMedia,
     };
 }
