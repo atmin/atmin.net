@@ -3,11 +3,18 @@
  *
  * - HKDF-SHA256 key derivation from backup secret
  * - Ed25519 auth proofs (sign/verify)
- * - ECIES key share encryption (X25519 + HKDF + AES-256-GCM)
+ * - ECIES key share encryption (ECDH P-256 + HKDF + AES-256-GCM)
  * - AES-256-GCM key backup encryption
  *
- * Only Megolm uses WASM (vodozemac). Everything here is browser-native Web Crypto.
+ * The sharing private key is stored as a non-extractable CryptoKey: XSS can
+ * use it but cannot export the bytes. See ADR-0008.
+ *
+ * @noble/curves is used only to derive the P-256 public point from a
+ * deterministic seed scalar, because Web Crypto requires JWK with x,y,d on
+ * ECDH import and cannot compute the public point itself.
  */
+
+import { p256 } from '@noble/curves/nist.js';
 
 const enc = new TextEncoder();
 
@@ -21,11 +28,6 @@ const buf = (data: Uint8Array): Bytes => data as Bytes;
 
 const ED25519_PKCS8_PREFIX: Bytes = new Uint8Array([
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70,
-    0x04, 0x22, 0x04, 0x20,
-]) as Bytes;
-
-const X25519_PKCS8_PREFIX: Bytes = new Uint8Array([
-    0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e,
     0x04, 0x22, 0x04, 0x20,
 ]) as Bytes;
 
@@ -120,21 +122,32 @@ export async function deriveKeys(secret: Uint8Array): Promise<DerivedKeys> {
         ['verify'],
     );
 
-    // X25519 sharing keypair
+    // P-256 sharing keypair. Private is non-extractable — JS can deriveBits
+    // but cannot exfiltrate the scalar. See ADR-0008 for rationale.
+    // Web Crypto's ECDH JWK import requires x,y,d, so we compute the public
+    // point via @noble/curves rather than round-tripping through exportKey.
+    if (!p256.utils.isValidSecretKey(sharingSeed)) {
+        throw new Error('sharing seed out of range for P-256');
+    }
+    const sharingPublicKeyBytes = p256.getPublicKey(sharingSeed, false); // 0x04 || X(32) || Y(32)
     const sharingPrivateKey = await crypto.subtle.importKey(
-        'pkcs8',
-        wrapPkcs8(buf(X25519_PKCS8_PREFIX), buf(sharingSeed)),
-        { name: 'X25519' },
-        true,
+        'jwk',
+        {
+            kty: 'EC',
+            crv: 'P-256',
+            d: base64UrlEncode(sharingSeed),
+            x: base64UrlEncode(sharingPublicKeyBytes.slice(1, 33)),
+            y: base64UrlEncode(sharingPublicKeyBytes.slice(33, 65)),
+            ext: false,
+        },
+        { name: 'ECDH', namedCurve: 'P-256' },
+        false,
         ['deriveBits'],
     );
-    const sharingJwk = await crypto.subtle.exportKey('jwk', sharingPrivateKey);
-    // biome-ignore lint/style/noNonNullAssertion: X25519 JWK always has x
-    const sharingPublicKeyBytes = base64UrlDecode(sharingJwk.x!);
     const sharingPublicKey = await crypto.subtle.importKey(
         'raw',
         buf(sharingPublicKeyBytes),
-        { name: 'X25519' },
+        { name: 'ECDH', namedCurve: 'P-256' },
         true,
         [],
     );
@@ -189,12 +202,12 @@ export async function verifyAuthProof(
     );
 }
 
-// ── ECIES (X25519 + HKDF-SHA256 + AES-256-GCM) ────────────────────
+// ── ECIES (ECDH P-256 + HKDF-SHA256 + AES-256-GCM) ────────────────
 
 const ECIES_INFO = enc.encode('atmin.net key share');
 
 export interface ECIESCiphertext {
-    ephemeralKey: Uint8Array; // 32 bytes, X25519 public key
+    ephemeralKey: Uint8Array; // 65 bytes, uncompressed P-256 public key (0x04 || X || Y)
     iv: Uint8Array; // 12 bytes
     ciphertext: Uint8Array;
 }
@@ -203,16 +216,16 @@ export async function eciesEncrypt(
     recipientPublicKey: CryptoKey,
     plaintext: Uint8Array,
 ): Promise<ECIESCiphertext> {
-    // Ephemeral X25519 keypair
+    // Ephemeral P-256 keypair
     const ephemeral = (await crypto.subtle.generateKey(
-        { name: 'X25519' },
+        { name: 'ECDH', namedCurve: 'P-256' },
         true,
         ['deriveBits'],
     )) as CryptoKeyPair;
 
-    // ECDH
+    // ECDH (shared secret = x-coordinate, 32 bytes for P-256)
     const shared = await crypto.subtle.deriveBits(
-        { name: 'X25519', public: recipientPublicKey },
+        { name: 'ECDH', public: recipientPublicKey },
         ephemeral.privateKey,
         256,
     );
@@ -267,14 +280,14 @@ export async function eciesDecrypt(
     const ephPub = await crypto.subtle.importKey(
         'raw',
         buf(ephemeralKey),
-        { name: 'X25519' },
+        { name: 'ECDH', namedCurve: 'P-256' },
         false,
         [],
     );
 
     // ECDH
     const shared = await crypto.subtle.deriveBits(
-        { name: 'X25519', public: ephPub },
+        { name: 'ECDH', public: ephPub },
         recipientPrivateKey,
         256,
     );
@@ -350,13 +363,13 @@ export async function backupDecrypt(
 
 // ── Public key import helpers ───────────────────────────────────────
 
-export async function importX25519PublicKey(
+export async function importSharingPublicKey(
     raw: Uint8Array,
 ): Promise<CryptoKey> {
     return crypto.subtle.importKey(
         'raw',
         buf(raw),
-        { name: 'X25519' },
+        { name: 'ECDH', namedCurve: 'P-256' },
         true,
         [],
     );

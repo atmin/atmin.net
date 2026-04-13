@@ -3,6 +3,9 @@
 Status: Accepted
 Date: 2026-02-11
 
+Curve choice amended by [ADR-0008](adr-0008-p256-sharing-keypair.md) — ECIES is
+unchanged, but the curve is P-256 rather than X25519 as originally written.
+
 ## Context
 
 Megolm session keys must be delivered to recipients before they can decrypt messages.

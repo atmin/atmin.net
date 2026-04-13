@@ -227,8 +227,8 @@ describe('session - Session management', () => {
             const { eciesEncrypt, eciesDecrypt } = await import('./crypto');
 
             // Import public key from loaded bytes
-            const { importX25519PublicKey } = await import('./crypto');
-            const publicKey = await importX25519PublicKey(
+            const { importSharingPublicKey } = await import('./crypto');
+            const publicKey = await importSharingPublicKey(
                 loaded.sharingPublicKeyBytes,
             );
 

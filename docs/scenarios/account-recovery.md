@@ -241,7 +241,7 @@ POST /v1/send
       "content_type": "megolm.key_share",
       "msg_id": "msg011",
       "payload": {
-        "ephemeral_key": "<base64 X25519 pub>",
+        "ephemeral_key": "<base64 P-256 pub, uncompressed SEC1>",
         "iv": "<base64>",
         "ciphertext": "<base64 ECIES(bob_sharing_pub, S4 session key)>"
       }

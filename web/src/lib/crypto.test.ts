@@ -8,7 +8,7 @@ import {
     eciesDecrypt,
     eciesEncrypt,
     generateBackupSecret,
-    importX25519PublicKey,
+    importSharingPublicKey,
     signAuthProof,
     verifyAuthProof,
 } from './crypto.js';
@@ -51,10 +51,19 @@ describe('Web Crypto', () => {
             );
         });
 
-        it('auth and sharing public keys are 32 bytes', async () => {
+        it('auth public key is 32 bytes (Ed25519), sharing is 65 bytes (P-256 uncompressed)', async () => {
             const keys = await deriveKeys(generateBackupSecret());
             expect(keys.auth.publicKeyBytes).toHaveLength(32);
-            expect(keys.sharing.publicKeyBytes).toHaveLength(32);
+            expect(keys.sharing.publicKeyBytes).toHaveLength(65);
+            expect(keys.sharing.publicKeyBytes[0]).toBe(0x04);
+        });
+
+        it('sharing private key is non-extractable', async () => {
+            const keys = await deriveKeys(generateBackupSecret());
+            expect(keys.sharing.privateKey.extractable).toBe(false);
+            await expect(
+                crypto.subtle.exportKey('jwk', keys.sharing.privateKey),
+            ).rejects.toThrow();
         });
     });
 
@@ -124,7 +133,7 @@ describe('Web Crypto', () => {
                 keys.sharing.publicKey,
                 sessionKey,
             );
-            expect(encrypted.ephemeralKey).toHaveLength(32);
+            expect(encrypted.ephemeralKey).toHaveLength(65);
             expect(encrypted.iv).toHaveLength(12);
 
             const decrypted = await eciesDecrypt(
@@ -193,7 +202,7 @@ describe('Web Crypto', () => {
             const profilePubKeyBytes = aliceKeys.sharing.publicKeyBytes;
 
             // Bob resolves Alice's profile, imports her public key
-            const alicePub = await importX25519PublicKey(profilePubKeyBytes);
+            const alicePub = await importSharingPublicKey(profilePubKeyBytes);
 
             // Bob encrypts a Megolm session key for Alice
             const sessionKey = new TextEncoder().encode(

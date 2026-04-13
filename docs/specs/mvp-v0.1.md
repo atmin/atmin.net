@@ -19,7 +19,7 @@ See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime d
 
 - Crypto:
     - Megolm for message encryption (even for 1:1) — via vodozemac WASM (~188KB)
-    - Key shares encrypted with ECIES (X25519 + HKDF-SHA256 + AES-256-GCM) — via Web Crypto API
+    - Key shares encrypted with ECIES (ECDH P-256 + HKDF-SHA256 + AES-256-GCM) — via Web Crypto API
     - No Olm: the user-level sharing key replaces device-to-device key exchange
     - HKDF key derivation, Ed25519 signing, AES-256-GCM — all via Web Crypto API
 - Storage:
@@ -95,7 +95,7 @@ Three keys are derived from the backup secret via HKDF-SHA256:
 PRK = HKDF-Extract(salt="atmin.net", ikm=backup_secret)
 
 auth_seed    = HKDF-Expand(PRK, info="auth-v1",    L=32)  → Ed25519 keypair
-sharing_seed = HKDF-Expand(PRK, info="sharing-v1", L=32)  → X25519 keypair
+sharing_seed = HKDF-Expand(PRK, info="sharing-v1", L=32)  → P-256 keypair (scalar)
 backup_key   = HKDF-Expand(PRK, info="backup-v1",  L=32)  → AES-256-GCM key
 ```
 
@@ -104,9 +104,11 @@ Version suffixes (`-v1`) allow future derivation path changes without changing t
 - **Auth key** (Ed25519) — proves account ownership when adding devices.
   Public half stored in `profile.json`.
   Private half used only transiently during device addition, then discarded.
-- **Sharing key** (X25519) — public half stored in `profile.json`.
+- **Sharing key** (ECDH P-256) — public half stored in `profile.json` as
+  uncompressed SEC1 (65 bytes, `0x04 || X || Y`).
   Other users encrypt Megolm session keys with it via ECIES.
-  Private half stored on device (IndexedDB) for ongoing key-share decryption.
+  Private half stored on device (IndexedDB) as a **non-extractable** CryptoKey
+  for ongoing key-share decryption. See [ADR-0008](../decisions/adr-0008-p256-sharing-keypair.md).
 - **Backup encryption key** (AES-256-GCM) — encrypts key backups on S3.
   Stored on device (IndexedDB) for ongoing key backup writes.
   Never transmitted.
@@ -133,8 +135,8 @@ When Bob starts a conversation with Alice, he creates a Megolm session
 and encrypts the session key with Alice's sharing public key (from her profile)
 using ECIES:
 
-1. Generate ephemeral X25519 keypair
-2. ECDH: `shared = ephemeral_private × alice_sharing_public`
+1. Generate ephemeral P-256 keypair
+2. ECDH: `shared = x-coord(ephemeral_private × alice_sharing_public)` (32 bytes)
 3. `key = HKDF-SHA256(ikm=shared, salt="", info="atmin.net key share", L=32)`
 4. `ciphertext = AES-256-GCM(key, session_key_bytes)`
 
@@ -237,7 +239,7 @@ See [Media](#media) for size limits, rendering rules, lifecycle, and failure han
 
 ```json
 "payload": {
-  "ephemeral_key": "<base64 X25519 public key, 32 bytes>",
+  "ephemeral_key": "<base64 P-256 public key, uncompressed SEC1, 65 bytes>",
   "iv": "<base64 12-byte IV>",
   "ciphertext": "<base64 AES-256-GCM ciphertext of session key>"
 }
@@ -473,7 +475,7 @@ Source of truth for all profile data (see [ADR-0005](../decisions/adr-0005-profi
   "user_id": "01HWQA...",
   "handle": "copper-falcon",
   "auth_public_key": "<base64url Ed25519, 32 bytes>",
-  "sharing_public_key": "<base64url X25519, 32 bytes>",
+  "sharing_public_key": "<base64url P-256 uncompressed SEC1, 65 bytes>",
   "display_name": "Alice",
   "avatar_url": "media/01HWQA.../avatar/photo.jpg",
   "last_active": "2026-02-15T10:30:00Z",
@@ -538,7 +540,7 @@ Input:
 
 - `device_label`
 - `auth_public_key` (base64url Ed25519)
-- `sharing_public_key` (base64url X25519)
+- `sharing_public_key` (base64url P-256 uncompressed SEC1)
 
 Server generates `user_id`, `device_id` (both ULIDs), `handle` (two BIP39 words),
 and `token`.

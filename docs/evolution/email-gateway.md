@@ -14,8 +14,9 @@ Gateway sees plaintext — inherent to email, not a new compromise.
 
 **PGP-encrypted email** (true E2E):
 
-The sharing key is Curve25519, which PGP supports. It can be published as a PGP
-public key via WKD (Web Key Directory) at `atmin.net`.
+The sharing key is ECDH P-256 (see [ADR-0008](../decisions/adr-0008-p256-sharing-keypair.md)),
+which PGP supports (RFC 6637). It can be published as a PGP public key via WKD
+(Web Key Directory) at `atmin.net`.
 
 1. External sender encrypts email with Alice's PGP key (= sharing public key).
 2. Gateway receives PGP ciphertext — **cannot read it**.

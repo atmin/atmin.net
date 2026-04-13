@@ -113,7 +113,7 @@ POST /v1/send
       "content_type": "megolm.key_share",
       "msg_id": "msg201",
       "payload": {
-        "ephemeral_key": "<base64 X25519 pub>",
+        "ephemeral_key": "<base64 P-256 pub, uncompressed SEC1>",
         "iv": "<base64>",
         "ciphertext": "<base64 ECIES(alice_sharing_pub, S3 session key)>"
       }

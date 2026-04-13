@@ -52,7 +52,7 @@ sequenceDiagram
 ## 1. Alice registers
 
 Client generates a 128-bit backup secret (displayed as a 12-word BIP39 mnemonic),
-derives three keys via HKDF-SHA256 (auth Ed25519, sharing X25519, backup AES-256-GCM),
+derives three keys via HKDF-SHA256 (auth Ed25519, sharing ECDH P-256, backup AES-256-GCM),
 displays the mnemonic for Alice to save in her password manager.
 
 ```
@@ -133,7 +133,7 @@ POST /v1/send
       "sent_at": "...",
       "content_type": "megolm.key_share",
       "payload": {
-        "ephemeral_key": "<base64 X25519 pub>",
+        "ephemeral_key": "<base64 P-256 pub, uncompressed SEC1>",
         "iv": "<base64 12-byte IV>",
         "ciphertext": "<base64 ECIES(alice_sharing_pub, S1 session key)>"
       }
@@ -229,7 +229,7 @@ POST /v1/send
       "content_type": "megolm.key_share",
       "msg_id": "msg003",
       "payload": {
-        "ephemeral_key": "<base64 X25519 pub>",
+        "ephemeral_key": "<base64 P-256 pub, uncompressed SEC1>",
         "iv": "<base64>",
         "ciphertext": "<base64 ECIES(bob_sharing_pub, S2 session key)>"
       }

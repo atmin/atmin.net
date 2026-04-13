@@ -43,6 +43,7 @@
         "vitest": "^3.0.6"
     },
     "dependencies": {
+        "@noble/curves": "^2.2.0",
         "@scure/bip39": "^2.0.1",
         "@storybook/addon-themes": "^10.2.10",
         "cbor-x": "^1.6.0",

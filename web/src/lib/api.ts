@@ -256,7 +256,7 @@ export async function sendTextMessage(
     messageText: string,
     sessionManager: SessionManager,
 ): Promise<void> {
-    const { eciesEncrypt, importX25519PublicKey, base64UrlEncode } =
+    const { eciesEncrypt, importSharingPublicKey, base64UrlEncode } =
         await import('./crypto');
     const { ulid } = await import('ulid');
 
@@ -282,7 +282,7 @@ export async function sendTextMessage(
         const keyShareMsgId = ulid();
 
         // Key share to recipient
-        const recipientPubKey = await importX25519PublicKey(toPublicKeyBytes);
+        const recipientPubKey = await importSharingPublicKey(toPublicKeyBytes);
         const encrypted = await eciesEncrypt(recipientPubKey, sessionKeyBytes);
         envelopes.push({
             v: 1,
@@ -302,7 +302,7 @@ export async function sendTextMessage(
 
         // Key share to self (so other devices can decrypt self-copies)
         if (toUserId !== fromUserId) {
-            const selfPubKey = await importX25519PublicKey(selfPublicKeyBytes);
+            const selfPubKey = await importSharingPublicKey(selfPublicKeyBytes);
             const selfEncrypted = await eciesEncrypt(
                 selfPubKey,
                 sessionKeyBytes,
