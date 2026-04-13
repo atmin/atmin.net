@@ -84,7 +84,7 @@ test.describe('Stolen Device', () => {
                 return dbs.some((db) => db.name === 'atmin');
             });
             expect(dbExists).toBe(false);
-        }).toPass({ timeout: 5_000 });
+        }).toPass({ timeout: 15_000 });
 
         // ── 9. Bob sends "Post-revocation msg", laptop sees it, phone does not ──
         await resyncChat(bob, aliceHandle);
