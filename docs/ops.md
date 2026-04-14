@@ -68,8 +68,10 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 # 1. Container Registry
 scw registry namespace create name=atmin region=fr-par
 
-# 2. Object Storage bucket (via console or s3cmd)
-#    Create bucket "atmin" in fr-par, generate API keys
+# 2. Object Storage bucket (via console)
+#    Create bucket "atmindotnet" in fr-par, generate API keys.
+#    Then apply CORS (see "Bucket CORS" below) so browsers can PUT
+#    to presigned URLs from app.atmin.net.
 
 # 3. Serverless Container namespace
 scw container namespace create name=atmin region=fr-par
@@ -103,6 +105,54 @@ scw container container create \
 # 6. Custom domain — add CNAME record:
 #    app.atmin.net → <container-endpoint>.scw.cloud
 ```
+
+### Bucket CORS
+
+Browser uploads use presigned PUT URLs. The bucket must allow the app origin, or the browser blocks the request at preflight. Scaleway's console doesn't expose CORS — it's API-only. Use `s3cmd`.
+
+Install and configure once:
+
+```bash
+brew install s3cmd
+s3cmd --configure
+```
+
+Answers for the Scaleway prompts:
+
+| Prompt | Value |
+|--------|-------|
+| Access Key / Secret Key | Scaleway API key pair |
+| Default Region | `fr-par` |
+| S3 Endpoint | `s3.fr-par.scw.cloud` |
+| DNS-style bucket+hostname template | `%(bucket)s.s3.fr-par.scw.cloud` |
+| Encryption password / GPG path | blank / default |
+| Use HTTPS protocol | Yes |
+| HTTP Proxy | blank |
+
+Save `cors.xml`:
+
+```xml
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://app.atmin.net</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedMethod>HEAD</AllowedMethod>
+    <AllowedHeader>*</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3000</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
+```
+
+Apply and verify:
+
+```bash
+s3cmd setcors cors.xml s3://atmindotnet
+s3cmd info s3://atmindotnet
+```
+
+Takes effect immediately.
 
 ### Deploying
 
