@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+    decryptMedia,
+    encryptMedia,
     FileTooLargeError,
     MAX_MEDIA_BYTES,
     MediaCorruptError,
-    decryptMedia,
-    encryptMedia,
     sanitizeDownloadFilename,
     sniffInlineImageMime,
 } from './media.js';
@@ -92,20 +92,18 @@ describe('sniffInlineImageMime', () => {
         ).toBe('image/png');
     });
     it('detects JPEG', () => {
-        expect(sniffInlineImageMime(pad([0xff, 0xd8, 0xff]))).toBe('image/jpeg');
+        expect(sniffInlineImageMime(pad([0xff, 0xd8, 0xff]))).toBe(
+            'image/jpeg',
+        );
     });
     it('detects GIF87a', () => {
         expect(
-            sniffInlineImageMime(
-                pad([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]),
-            ),
+            sniffInlineImageMime(pad([0x47, 0x49, 0x46, 0x38, 0x37, 0x61])),
         ).toBe('image/gif');
     });
     it('detects GIF89a', () => {
         expect(
-            sniffInlineImageMime(
-                pad([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]),
-            ),
+            sniffInlineImageMime(pad([0x47, 0x49, 0x46, 0x38, 0x39, 0x61])),
         ).toBe('image/gif');
     });
     it('detects WebP', () => {
@@ -118,10 +116,14 @@ describe('sniffInlineImageMime', () => {
         expect(
             sniffInlineImageMime(new TextEncoder().encode('<?xml version')),
         ).toBeNull();
-        expect(sniffInlineImageMime(new TextEncoder().encode('<svg xmlns'))).toBeNull();
+        expect(
+            sniffInlineImageMime(new TextEncoder().encode('<svg xmlns')),
+        ).toBeNull();
     });
     it('rejects PDF', () => {
-        expect(sniffInlineImageMime(new TextEncoder().encode('%PDF-1.4\n\n\n\n'))).toBeNull();
+        expect(
+            sniffInlineImageMime(new TextEncoder().encode('%PDF-1.4\n\n\n\n')),
+        ).toBeNull();
     });
     it('rejects MP4 (ftyp)', () => {
         const b = new Uint8Array(16);
@@ -129,7 +131,9 @@ describe('sniffInlineImageMime', () => {
         expect(sniffInlineImageMime(b)).toBeNull();
     });
     it('rejects plain text', () => {
-        expect(sniffInlineImageMime(new TextEncoder().encode('hello world!'))).toBeNull();
+        expect(
+            sniffInlineImageMime(new TextEncoder().encode('hello world!')),
+        ).toBeNull();
     });
     it('rejects all-zero bytes', () => {
         expect(sniffInlineImageMime(new Uint8Array(16))).toBeNull();
@@ -159,7 +163,7 @@ describe('sanitizeDownloadFilename', () => {
         expect(sanitizeDownloadFilename('.....')).toBe('download');
     });
     it('truncates long names to 255 bytes', () => {
-        const long = 'a'.repeat(300) + '.txt';
+        const long = `${'a'.repeat(300)}.txt`;
         const out = sanitizeDownloadFilename(long);
         expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(255);
     });

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
+import type { MediaState } from '@/hooks/useMedia';
 import ChatMessage from './ChatMessage';
 
 const meta = {
@@ -34,9 +35,6 @@ export const NoTimestamp: Story = {
 };
 
 // --- Media variants ---
-// These render MediaAttachment, which performs a real fetch; in Storybook
-// (no server) the fetch fails and the component surfaces `network-error` or
-// `unavailable`. The stories exist to exercise layout across states.
 
 const fakeMedia = {
     url: 'media/01STORY/fixture',
@@ -46,13 +44,21 @@ const fakeMedia = {
     size: 12_345,
 };
 
+const state = (s: MediaState): MediaState => s;
+const noop = () => {};
+
 export const MediaImage: Story = {
     args: {
         text: 'Check out this photo',
         timestamp: new Date('2025-01-15T14:32:00'),
         sent: false,
         media: fakeMedia,
-        token: 'fake-token',
+        mediaState: state({
+            status: 'network-error',
+            blobUrl: null,
+            mime: null,
+        }),
+        onMediaRetry: noop,
     },
 };
 
@@ -62,7 +68,12 @@ export const MediaDownload: Story = {
         timestamp: new Date('2025-01-15T14:33:00'),
         sent: true,
         media: { ...fakeMedia, name: 'report.bin', size: 98_765 },
-        token: 'fake-token',
+        mediaState: state({
+            status: 'network-error',
+            blobUrl: null,
+            mime: null,
+        }),
+        onMediaRetry: noop,
     },
 };
 
@@ -72,7 +83,8 @@ export const MediaCorrupt: Story = {
         timestamp: new Date('2025-01-15T14:34:00'),
         sent: false,
         media: fakeMedia,
-        token: 'fake-token',
+        mediaState: state({ status: 'corrupt', blobUrl: null, mime: null }),
+        onMediaRetry: noop,
     },
 };
 
@@ -82,7 +94,12 @@ export const MediaUnavailable: Story = {
         timestamp: new Date('2025-01-15T14:35:00'),
         sent: false,
         media: fakeMedia,
-        token: 'fake-token',
+        mediaState: state({
+            status: 'unavailable',
+            blobUrl: null,
+            mime: null,
+        }),
+        onMediaRetry: noop,
     },
 };
 
@@ -92,6 +109,7 @@ export const MediaLoading: Story = {
         timestamp: new Date('2025-01-15T14:36:00'),
         sent: false,
         media: fakeMedia,
-        token: 'fake-token',
+        mediaState: state({ status: 'loading', blobUrl: null, mime: null }),
+        onMediaRetry: noop,
     },
 };

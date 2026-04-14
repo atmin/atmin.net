@@ -6,8 +6,6 @@ import {
     sendTextMessage,
     uploadMedia,
 } from '@/lib/api';
-import { encryptMedia } from '@/lib/media';
-import type { MediaFile } from '@/components/MediaAttachment';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
 import {
@@ -15,6 +13,8 @@ import {
     saveContact,
     saveMessages,
 } from '@/lib/db';
+import type { MediaFile } from '@/lib/media';
+import { encryptMedia } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
 
 export interface Message {

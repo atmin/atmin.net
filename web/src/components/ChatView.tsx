@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Message } from '@/hooks/useChat';
+import type { MediaState } from '@/hooks/useMedia';
 import ChatMessage from './ChatMessage';
 
 interface Props {
@@ -11,7 +12,8 @@ interface Props {
     loading: boolean;
     sending: boolean;
     encryptionReady: boolean;
-    token?: string;
+    mediaStates?: Record<string, MediaState>;
+    onMediaRetry?: (url: string) => void;
     onSend: (text: string) => void;
     onSendMedia?: (file: File) => void;
 }
@@ -24,12 +26,12 @@ export default function ChatView({
     loading,
     sending,
     encryptionReady,
-    token,
+    mediaStates = {},
+    onMediaRetry = () => {},
     onSend,
     onSendMedia,
 }: Props) {
     const [inputValue, setInputValue] = useState('');
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -85,7 +87,12 @@ export default function ChatView({
                                     timestamp={msg.timestamp}
                                     sent={msg.sent}
                                     media={msg.media}
-                                    token={token}
+                                    mediaState={
+                                        msg.media
+                                            ? mediaStates[msg.media.url]
+                                            : undefined
+                                    }
+                                    onMediaRetry={onMediaRetry}
                                 />
                             ))}
                         </div>
@@ -100,28 +107,28 @@ export default function ChatView({
                     className="mx-auto flex max-w-2xl gap-2"
                 >
                     {onSendMedia && (
-                        <>
+                        <label
+                            data-testid="attach-button"
+                            aria-label="Attach file"
+                            aria-disabled={sending || !encryptionReady}
+                            className={`rounded border border-input px-3 py-2 text-sm hover:bg-accent ${
+                                sending || !encryptionReady
+                                    ? 'pointer-events-none opacity-50'
+                                    : 'cursor-pointer'
+                            }`}
+                        >
+                            📎
                             <input
-                                ref={fileInputRef}
                                 type="file"
                                 className="hidden"
+                                disabled={sending || !encryptionReady}
                                 onChange={(e) => {
                                     const f = e.target.files?.[0];
                                     if (f) onSendMedia(f);
                                     e.target.value = '';
                                 }}
                             />
-                            <button
-                                type="button"
-                                data-testid="attach-button"
-                                disabled={sending || !encryptionReady}
-                                onClick={() => fileInputRef.current?.click()}
-                                className="rounded border border-input px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
-                                aria-label="Attach file"
-                            >
-                                📎
-                            </button>
-                        </>
+                        </label>
                     )}
                     <input
                         type="text"

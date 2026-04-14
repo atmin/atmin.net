@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-    NetworkError,
-    NotFoundError,
-    fetchMedia,
-    uploadMedia,
-} from './api';
+import { fetchMedia, NetworkError, NotFoundError, uploadMedia } from './api';
 import type { EncryptedMedia } from './media';
 
 const fetchMock = vi.fn();
@@ -22,7 +17,10 @@ function okJson(data: unknown): Response {
     return {
         ok: true,
         status: 200,
-        headers: { get: (n: string) => (n === 'content-type' ? 'application/json' : null) },
+        headers: {
+            get: (n: string) =>
+                n === 'content-type' ? 'application/json' : null,
+        },
         json: async () => data,
     } as unknown as Response;
 }
@@ -65,7 +63,9 @@ describe('uploadMedia', () => {
 
         const [, putInit] = fetchMock.mock.calls[1];
         expect(putInit.method).toBe('PUT');
-        expect(putInit.headers['Content-Type']).toBe('application/octet-stream');
+        expect(putInit.headers['Content-Type']).toBe(
+            'application/octet-stream',
+        );
     });
 
     it('retries PUT once on 5xx', async () => {

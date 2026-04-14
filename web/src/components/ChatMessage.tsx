@@ -1,11 +1,14 @@
-import MediaAttachment, { type MediaFile } from './MediaAttachment';
+import type { MediaState } from '@/hooks/useMedia';
+import type { MediaFile } from '@/lib/media';
+import MediaAttachment from './MediaAttachment';
 
 interface Props {
     text: string;
     timestamp: Date;
     sent: boolean;
     media?: MediaFile;
-    token?: string;
+    mediaState?: MediaState;
+    onMediaRetry?: (url: string) => void;
 }
 
 export default function ChatMessage({
@@ -13,7 +16,8 @@ export default function ChatMessage({
     timestamp,
     sent,
     media,
-    token,
+    mediaState,
+    onMediaRetry,
 }: Props) {
     return (
         <div
@@ -24,9 +28,14 @@ export default function ChatMessage({
                     : 'mr-8 rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-received text-bubble-received-foreground bubble-tail-received'
             }`}
         >
-            {media && token && (
+            {media && mediaState && onMediaRetry && (
                 <div className="mb-1">
-                    <MediaAttachment file={media} token={token} />
+                    <MediaAttachment
+                        state={mediaState}
+                        name={media.name}
+                        size={media.size}
+                        onRetry={() => onMediaRetry(media.url)}
+                    />
                 </div>
             )}
             {text && <p className="text-sm">{text}</p>}

@@ -26,6 +26,14 @@ export class MediaCorruptError extends Error {
     }
 }
 
+export interface MediaFile {
+    url: string;
+    key: Uint8Array;
+    iv: Uint8Array;
+    name: string;
+    size: number;
+}
+
 export interface EncryptedMedia {
     ciphertext: Uint8Array; // plaintext.length + 16 (GCM tag)
     key: Uint8Array; // 32 bytes
@@ -92,9 +100,7 @@ export type InlineMime =
     | 'image/webp';
 
 /** Returns the inline MIME type if the first bytes match a v0.1 image format, else null. */
-export function sniffInlineImageMime(
-    plaintext: Uint8Array,
-): InlineMime | null {
+export function sniffInlineImageMime(plaintext: Uint8Array): InlineMime | null {
     if (plaintext.length < 12) return null;
     const b = plaintext;
 
