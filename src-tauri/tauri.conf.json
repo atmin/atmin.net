@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "atmin",
+  "version": "0.1.0",
+  "identifier": "net.atmin.app",
+  "build": {
+    "frontendDist": "../web/dist",
+    "devUrl": "http://localhost:5173"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "atmin",
+        "width": 390,
+        "height": 780,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "visible": false,
+        "skipTaskbar": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

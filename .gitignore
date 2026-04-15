@@ -54,7 +54,3 @@ storybook-static/
 
 # Pi Lens
 .pi-lens/
-
-
-# IMPORTANT! remove following if you want to continue with tauri-spike
-src-tauri/
