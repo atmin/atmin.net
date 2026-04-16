@@ -1,7 +1,7 @@
 # ADR-0009 — Native wrapper strategy: Tauri (desktop) + Capacitor (mobile)
 
 **Date:** 2026-04-14 / updated 2026-04-15  
-**Status:** Open — pending further investigation (see Decision section)  
+**Status:** Accepted — Tauri (desktop) + Capacitor (mobile)  
 **Supersedes:** `docs/evolution/native-apps.md` (Capacitor-only)  
 **Spike branch:** `tauri-spike` — contains `src-tauri/`, the generated Xcode project
 (`src-tauri/gen/apple/`), and all Tauri build artifacts. Only this ADR is merged to
@@ -177,7 +177,7 @@ target; Tauri uses native and mobile targets. They share the same `rustup` insta
 
 ## Decision
 
-**Open. The spike answered the desktop question conclusively but not the mobile question.**
+**Tauri for desktop. Capacitor for mobile.**
 
 ### Tauri for macOS / Windows / Linux (desktop) — confirmed viable
 
@@ -190,29 +190,24 @@ The spike confirmed Tauri works cleanly for the desktop tray panel use case:
 
 **Desktop: adopt Tauri.**
 
-### Tauri for iOS / Android (mobile) — not yet answerable
+### Tauri for iOS / Android (mobile) — not adopted
 
-iOS runtime was not verified end-to-end. The simulator could not complete a login because
-WKWebView drops HTTP POST bodies to localhost — a dev environment constraint that affects
-any WKWebView app (Capacitor included), not a Tauri defect. It says nothing about whether
-Tauri mobile works in production. WASM, SSE, and real-device behaviour are all untested.
+**Mobile: adopt Capacitor.**
 
-The ecosystem gaps are real but bounded:
+Desktop and web are strictly equivalent — no mobile-exclusive features exist on either.
+Mobile-only features (contacts discovery, push notifications) are therefore always in
+mobile-only code paths and never need to branch against a desktop equivalent.
 
-1. **Contacts** — no plugin exists, but Capacitor's implementation is portable Swift;
-   writing a Tauri equivalent is plumbing work (~3–5 days), not novel engineering.
-2. **Push notifications** — community plugins only, no official support.
+Given that constraint, Tauri all-in for mobile was considered and ruled out. The plugin
+gaps are not theoretical: contacts and push notifications are table-stakes for a messaging
+app, Capacitor provides first-party plugins for both, and Tauri mobile's ecosystem does not.
+Writing and owning custom native plugins would add maintenance burden with no architectural
+benefit — the two frameworks serve entirely disjoint targets (tray panel vs phone app) and
+never interact.
 
-These gaps favour Capacitor for mobile, but they are not the same as confirming that Tauri
-mobile doesn't work. The open questions are:
-
-- Does the app run correctly on a real iOS device over HTTPS? (WASM, crypto, SSE)
-- Does the app run correctly on a real Android device?
-- Is writing a custom contacts plugin actually 3–5 days, or more?
-
-**Mobile: decision deferred.** The fallback of Tauri desktop + Capacitor mobile is a
-reasonable working assumption while mobile investigation continues, but it should not be
-treated as settled until real-device testing is done.
+The iOS simulator work in the spike (boot confirmed, login blocked by the WKWebView POST
+body localhost limitation) is a dev environment constraint, not a Tauri defect, and does
+not change the decision.
 
 ---
 
@@ -233,14 +228,12 @@ treated as settled until real-device testing is done.
 
 1. **Start Capacitor mobile** per the implementation order already in
    `docs/evolution/native-apps.md` (add Capacitor, generate iOS/Android projects,
-   on-device testing, contacts plugin).
+   on-device testing, contacts plugin, push notifications).
 2. **Continue Tauri desktop** — fix media download CSP, generate app icons, test on
    Windows, enumerate remaining capabilities needed (notifications on desktop, keychain
    access, file system).
-3. **iOS dev environment** — before the next Tauri iOS testing session, set up a local
-   HTTPS server using `mkcert` + a TLS-terminating proxy in front of the Go server, or
-   point the simulator at a deployed staging URL. This unblocks login testing and WASM
-   verification on the simulator without needing a physical device.
-4. When device attestation work begins, evaluate whether to write custom Tauri + Capacitor
-   plugins in parallel or consolidate on one bridge — both frameworks support the required
-   Swift/Kotlin native code paths.
+3. **iOS dev environment** — before any iOS simulator testing (Tauri or Capacitor), set up
+   a local HTTPS server using `mkcert` + a TLS-terminating proxy in front of the Go server,
+   or point the simulator at a deployed staging URL. WKWebView silently drops HTTP POST
+   bodies to `http://localhost` — this is a platform constraint affecting any WKWebView-based
+   wrapper, not a framework defect.
