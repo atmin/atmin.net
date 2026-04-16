@@ -120,7 +120,7 @@ scw container container create \
 scw container container create \
   namespace-id=<NAMESPACE_ID> \
   name=atmindotnet-staging \
-  registry-image=rg.fr-par.scw.cloud/atmin/atmindotnet:latest \
+  registry-image=rg.fr-par.scw.cloud/atmin/atmindotnet:master \
   min-scale=0 max-scale=1 \
   memory-limit=128 \
   port=8080 \
