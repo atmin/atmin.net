@@ -46,8 +46,10 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 - **Trigger**: push to `master` or `v*` tag
 - **lint** job: `go vet`, `biome check`, architecture lint — blocks on any violation
 - **test** job: Go unit tests, web unit tests
-- **e2e** job: Playwright against Go server + Vite + MinIO service container
-- **deploy** job: only runs on `v*` tags, after lint + test + e2e all pass
+- **build** job: Docker image build — runs on every push to `master`
+- **e2e** job: Playwright against Go server + Vite + MinIO service container — `v*` tags only
+- **deploy-staging** job: deploys to `staging.atmin.net` on every green master push (after lint + test + build)
+- **deploy-prod** job: deploys to `app.atmin.net` on `v*` tags only, after lint + test + e2e all pass
 
 ### GitHub Secrets required
 
@@ -58,7 +60,8 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 | `SCW_ORGANIZATION_ID` | Scaleway organization ID |
 | `SCW_PROJECT_ID` | Scaleway project ID |
 | `SCW_REGISTRY_ENDPOINT` | e.g. `rg.fr-par.scw.cloud/atmin` |
-| `SCW_CONTAINER_ID` | Serverless Container ID |
+| `SCW_CONTAINER_ID` | Serverless Container ID (production) |
+| `SCW_STAGING_CONTAINER_ID` | Serverless Container ID (staging) |
 
 ## Deployment
 
@@ -105,6 +108,43 @@ scw container container create \
 # 6. Custom domain — add CNAME record:
 #    app.atmin.net → <container-endpoint>.scw.cloud
 ```
+
+### Staging one-time setup
+
+```bash
+# 1. Object Storage bucket (via console)
+#    Create bucket "atmindotnetstaging" in fr-par.
+#    Apply CORS for https://staging.atmin.net (same procedure as production below).
+
+# 2. Create the staging container (min-scale=0 — idles to zero when unused)
+scw container container create \
+  namespace-id=<NAMESPACE_ID> \
+  name=atmindotnet-staging \
+  registry-image=rg.fr-par.scw.cloud/atmin/atmindotnet:latest \
+  min-scale=0 max-scale=1 \
+  memory-limit=128 \
+  port=8080 \
+  environment-variables.S3_REGION=fr-par \
+  secret-environment-variables.0.key=SERVER_SECRET \
+  secret-environment-variables.0.value=<run `openssl rand -base64 32` — must differ from production> \
+  secret-environment-variables.1.key=S3_ENDPOINT \
+  secret-environment-variables.1.value=https://s3.fr-par.scw.cloud \
+  secret-environment-variables.2.key=S3_BUCKET \
+  secret-environment-variables.2.value=atmindotnetstaging \
+  secret-environment-variables.3.key=S3_ACCESS_KEY \
+  secret-environment-variables.3.value=<KEY> \
+  secret-environment-variables.4.key=S3_SECRET_KEY \
+  secret-environment-variables.4.value=<SECRET>
+
+# 3. Custom domain — add CNAME record:
+#    staging.atmin.net → <staging-container-endpoint>.scw.cloud
+
+# 4. Add SCW_STAGING_CONTAINER_ID to GitHub secrets.
+```
+
+Same Docker image as production — only env vars differ (`S3_BUCKET`, `SERVER_SECRET`).
+The Go server serves the SPA; all fetch calls are same-origin relative, so no build-time
+URL changes are needed.
 
 ### Bucket CORS
 
@@ -156,16 +196,25 @@ Takes effect immediately.
 
 ### Deploying
 
-Tag a commit and push:
+**Staging** — automatic on every push to `master`:
+
+```bash
+git push origin master
+```
+
+Triggers lint → test → build → deploy to `staging.atmin.net`. No tagging needed.
+Staging always reflects the current state of `master`. Use it for mobile device testing
+and manual verification before cutting a release.
+
+**Production** — tag a commit and push:
 
 ```bash
 git tag v0.1.0
 git push --tags
 ```
 
-This triggers lint → test → e2e → deploy. The image is tagged with the version (e.g. `v0.1.0`) and `latest`.
-
-Pushing to `master` without a tag runs the full CI pipeline (lint, test, e2e) but does not deploy.
+Triggers lint → test → e2e → deploy to `app.atmin.net`. The image is tagged with the
+version (e.g. `v0.1.0`) and `latest`. e2e is a hard gate; staging has no e2e requirement.
 
 ### Local build & run
 
