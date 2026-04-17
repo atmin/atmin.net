@@ -232,14 +232,29 @@ scw container container list
 # Get container details (including error messages)
 scw container container get <CONTAINER_ID>
 
-# View container logs
-scw container container logs <CONTAINER_ID>
+# View container logs — not available via CLI
+# Logs are in Scaleway Cockpit (Grafana/Loki):
+# Console → Observability → Cockpit → Grafana → Explore → Loki
 
 # Redeploy after pushing a new image
 scw container container deploy <CONTAINER_ID>
 
-# Update container config (e.g. memory, env vars)
-scw container container update <CONTAINER_ID> memory-limit=256
+# Update container config — triggers automatic redeploy
+# Plain env vars (non-secret):
+scw container container update <CONTAINER_ID> environment-variables.APP_ENV=prod
+
+# Secret env vars — pass ALL secrets together to be safe; unclear if omitted ones are wiped or preserved:
+scw container container update <CONTAINER_ID> \
+  secret-environment-variables.0.key=SERVER_SECRET   secret-environment-variables.0.value=<VALUE> \
+  secret-environment-variables.1.key=S3_ENDPOINT     secret-environment-variables.1.value=<VALUE> \
+  secret-environment-variables.2.key=S3_BUCKET       secret-environment-variables.2.value=<VALUE> \
+  secret-environment-variables.3.key=S3_ACCESS_KEY   secret-environment-variables.3.value=<VALUE> \
+  secret-environment-variables.4.key=S3_SECRET_KEY   secret-environment-variables.4.value=<VALUE> \
+  secret-environment-variables.5.key=COCKPIT_LOKI_URL secret-environment-variables.5.value=<VALUE> \
+  secret-environment-variables.6.key=COCKPIT_TOKEN   secret-environment-variables.6.value=<VALUE>
+
+# Add --wait to block until the redeploy completes
+scw container container update <CONTAINER_ID> memory-limit=256 --wait
 
 # List images in the registry
 scw registry image list
@@ -253,6 +268,50 @@ scw container namespace list
 # Delete a container
 scw container container delete <CONTAINER_ID>
 ```
+
+## Logging (Cockpit / Loki)
+
+Server logs are pushed to Scaleway Cockpit from within the Go process (see ADR-0010).
+Stdout/stderr are **not** automatically forwarded — the push is explicit.
+
+### One-time setup
+
+```bash
+# Create a Cockpit token — the SecretKey is shown only once, save it immediately
+scw cockpit token create name=server-prod
+scw cockpit token create name=server-staging
+
+# Find your Loki push endpoint
+scw cockpit data-source list
+# Look for the row with TYPE=logs. COCKPIT_LOKI_URL = that URL + /loki/api/v1/push
+# e.g. https://<id>.logs.cockpit.fr-par.scw.cloud/loki/api/v1/push
+```
+
+### Container env vars
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `COCKPIT_LOKI_URL` | No | — | Full Loki push URL, e.g. `https://logs.cockpit.fr-par.scw.cloud/loki/api/v1/push` |
+| `COCKPIT_TOKEN` | No | — | Cockpit token value |
+| `APP_ENV` | Yes (if Loki set) | — | Loki label — `prod` or `staging`; fatal error if Loki is configured and this is absent |
+
+If either `COCKPIT_LOKI_URL` or `COCKPIT_TOKEN` is absent the server falls back to stderr only.
+
+### Querying logs
+
+Scaleway console → Observability → Cockpit → Open Grafana → Explore → Loki datasource
+
+```
+# Production logs
+{app="atmin", env="prod"}
+
+# Staging logs
+{app="atmin", env="staging"}
+```
+
+### Retention
+
+Default: **7 days** (intentional — logs contain IP addresses; see ADR-0010).
 
 ## Future considerations
 

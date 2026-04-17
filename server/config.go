@@ -14,6 +14,9 @@ type Config struct {
 	S3Region         string
 	S3AccessKey      string
 	S3SecretKey      string
+	CockpitLokiURL   string // optional; e.g. https://logs.cockpit.fr-par.scw.cloud/loki/api/v1/push
+	CockpitToken     string // optional; Scaleway Cockpit token
+	AppEnv           string // "prod" or "staging", used as Loki label
 }
 
 func loadConfig() Config {
@@ -27,6 +30,9 @@ func loadConfig() Config {
 		S3Region:         envOr("S3_REGION", "auto"),
 		S3AccessKey:      envRequired("S3_ACCESS_KEY"),
 		S3SecretKey:      envRequired("S3_SECRET_KEY"),
+		CockpitLokiURL:   os.Getenv("COCKPIT_LOKI_URL"),
+		CockpitToken:     os.Getenv("COCKPIT_TOKEN"),
+		AppEnv:           os.Getenv("APP_ENV"),
 	}
 	return cfg
 }
