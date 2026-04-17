@@ -289,14 +289,17 @@ Stdout/stderr are **not** automatically forwarded — the push is explicit.
 ### One-time setup
 
 ```bash
-# Create a Cockpit token — the SecretKey is shown only once, save it immediately
-scw cockpit token create name=server-prod
-scw cockpit token create name=server-staging
+# Create Cockpit tokens with write_only_logs scope — SecretKey shown only once, save immediately
+scw cockpit token create name=server-prod token-scopes.0=write_only_logs
+scw cockpit token create name=server-staging token-scopes.0=write_only_logs
 
 # Find your Loki push endpoint
 scw cockpit data-source list
 # Look for the row with TYPE=logs. COCKPIT_LOKI_URL = that URL + /loki/api/v1/push
 # e.g. https://<id>.logs.cockpit.fr-par.scw.cloud/loki/api/v1/push
+
+# Sync datasources to Grafana (required once before logs are queryable)
+scw cockpit grafana sync-data-sources
 ```
 
 ### Container env vars
