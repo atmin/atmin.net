@@ -94,6 +94,7 @@ scw container container create \
   memory-limit=128 \
   port=8080 \
   environment-variables.S3_REGION=fr-par \
+  environment-variables.APP_ENV=prod \
   secret-environment-variables.0.key=SERVER_SECRET \
   secret-environment-variables.0.value=<run `openssl rand -base64 32` for a good one> \
   secret-environment-variables.1.key=S3_ENDPOINT \
@@ -103,7 +104,11 @@ scw container container create \
   secret-environment-variables.3.key=S3_ACCESS_KEY \
   secret-environment-variables.3.value=<KEY> \
   secret-environment-variables.4.key=S3_SECRET_KEY \
-  secret-environment-variables.4.value=<SECRET>
+  secret-environment-variables.4.value=<SECRET> \
+  secret-environment-variables.5.key=COCKPIT_LOKI_URL \
+  secret-environment-variables.5.value=<LOKI_PUSH_URL> \
+  secret-environment-variables.6.key=COCKPIT_TOKEN \
+  secret-environment-variables.6.value=<TOKEN>
 
 # 6. Custom domain — add CNAME record:
 #    app.atmin.net → <container-endpoint>.scw.cloud
@@ -125,6 +130,7 @@ scw container container create \
   memory-limit=128 \
   port=8080 \
   environment-variables.S3_REGION=fr-par \
+  environment-variables.APP_ENV=staging \
   secret-environment-variables.0.key=SERVER_SECRET \
   secret-environment-variables.0.value=<run `openssl rand -base64 32` — must differ from production> \
   secret-environment-variables.1.key=S3_ENDPOINT \
@@ -134,7 +140,11 @@ scw container container create \
   secret-environment-variables.3.key=S3_ACCESS_KEY \
   secret-environment-variables.3.value=<KEY> \
   secret-environment-variables.4.key=S3_SECRET_KEY \
-  secret-environment-variables.4.value=<SECRET>
+  secret-environment-variables.4.value=<SECRET> \
+  secret-environment-variables.5.key=COCKPIT_LOKI_URL \
+  secret-environment-variables.5.value=<LOKI_PUSH_URL> \
+  secret-environment-variables.6.key=COCKPIT_TOKEN \
+  secret-environment-variables.6.value=<TOKEN>
 
 # 3. Custom domain — add CNAME record:
 #    staging.atmin.net → <staging-container-endpoint>.scw.cloud
@@ -243,15 +253,17 @@ scw container container deploy <CONTAINER_ID>
 # Plain env vars (non-secret):
 scw container container update <CONTAINER_ID> environment-variables.APP_ENV=prod
 
-# Secret env vars — pass ALL secrets together to be safe; unclear if omitted ones are wiped or preserved:
+# Full env update — pass ALL secrets together to be safe; unclear if omitted ones are wiped or preserved:
 scw container container update <CONTAINER_ID> \
-  secret-environment-variables.0.key=SERVER_SECRET   secret-environment-variables.0.value=<VALUE> \
-  secret-environment-variables.1.key=S3_ENDPOINT     secret-environment-variables.1.value=<VALUE> \
-  secret-environment-variables.2.key=S3_BUCKET       secret-environment-variables.2.value=<VALUE> \
-  secret-environment-variables.3.key=S3_ACCESS_KEY   secret-environment-variables.3.value=<VALUE> \
-  secret-environment-variables.4.key=S3_SECRET_KEY   secret-environment-variables.4.value=<VALUE> \
+  environment-variables.S3_REGION=fr-par \
+  environment-variables.APP_ENV=<prod|staging> \
+  secret-environment-variables.0.key=SERVER_SECRET    secret-environment-variables.0.value=<VALUE> \
+  secret-environment-variables.1.key=S3_ENDPOINT      secret-environment-variables.1.value=<VALUE> \
+  secret-environment-variables.2.key=S3_BUCKET        secret-environment-variables.2.value=<VALUE> \
+  secret-environment-variables.3.key=S3_ACCESS_KEY    secret-environment-variables.3.value=<VALUE> \
+  secret-environment-variables.4.key=S3_SECRET_KEY    secret-environment-variables.4.value=<VALUE> \
   secret-environment-variables.5.key=COCKPIT_LOKI_URL secret-environment-variables.5.value=<VALUE> \
-  secret-environment-variables.6.key=COCKPIT_TOKEN   secret-environment-variables.6.value=<VALUE>
+  secret-environment-variables.6.key=COCKPIT_TOKEN    secret-environment-variables.6.value=<VALUE>
 
 # Add --wait to block until the redeploy completes
 scw container container update <CONTAINER_ID> memory-limit=256 --wait
