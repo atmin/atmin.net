@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -74,7 +75,11 @@ func handleEvents(store Store, hub *EventHub) http.HandlerFunc {
 		// Create channel for this client (buffered to avoid blocking)
 		messages := make(chan string, 10)
 		hub.Register(userID, messages)
-		defer hub.Unregister(userID, messages)
+		slog.Info("sse connect", "user_id", userID)
+		defer func() {
+			hub.Unregister(userID, messages)
+			slog.Info("sse disconnect", "user_id", userID)
+		}()
 
 		// Update last_active in a background goroutine (detached context)
 		go updateLastActive(store, userID)

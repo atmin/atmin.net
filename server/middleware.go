@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ func newDeviceCache() *deviceCache {
 // Supports token from Authorization header (Bearer token) or query parameter (for SSE).
 func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		ip := remoteIP(r)
 		var token string
 
 		// Try Authorization header first
@@ -46,12 +48,14 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCa
 		}
 
 		if token == "" {
+			slog.Warn("auth: missing token", "ip", ip, "path", r.URL.Path)
 			writeError(w, errUnauthorized)
 			return
 		}
 
 		userID, deviceID, err := parseToken(cfg.ServerSecret, token)
 		if err != nil {
+			slog.Warn("auth: invalid token", "ip", ip, "path", r.URL.Path)
 			writeError(w, errUnauthorized)
 			return
 		}
@@ -61,6 +65,7 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCa
 		if !cache.valid(deviceKey) {
 			if err := store.HeadObject(r.Context(), deviceKey); err != nil {
 				if errors.Is(err, ErrNotFound) {
+					slog.Warn("auth: device revoked", "ip", ip, "user_id", userID, "device_id", deviceID)
 					writeError(w, errDeviceRevoked)
 					return
 				}
@@ -104,18 +109,41 @@ func (c *deviceCache) invalidate(key string) {
 	delete(c.entries, key)
 }
 
-// logRequests logs method, path, status, and duration for each request.
+// remoteIP extracts the client IP from X-Forwarded-For (set by Scaleway's proxy) or RemoteAddr.
+func remoteIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.Index(xff, ","); i != -1 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return host
+}
+
+// logRequests logs method, path, status, duration, IP, and user ID for each request.
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(sw, r)
-		slog.Info("request",
+
+		userID, _ := r.Context().Value(ctxUserID).(string)
+		args := []any{
 			"method", r.Method,
 			"path", r.URL.Path,
 			"status", sw.status,
 			"dur_ms", time.Since(start).Milliseconds(),
-		)
+			"ip", remoteIP(r),
+		}
+		if userID != "" {
+			args = append(args, "user_id", userID)
+		}
+		if sw.status >= 500 {
+			slog.Error("request", args...)
+		} else {
+			slog.Info("request", args...)
+		}
 	})
 }
 

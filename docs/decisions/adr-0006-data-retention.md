@@ -80,6 +80,10 @@ The cleanup function can run as:
 - **CLI subcommand** (`server cleanup`) invoked by cron or a scheduled job.
   Better for multi-instance deployments where only one instance should run cleanup.
 
+The external scheduled job is the preferred path: the same job will also handle the daily
+log export and IP anonymization from Cockpit (ADR-0010), making in-process scheduling
+unnecessary. Scheduling mechanism TBD — see future ADR.
+
 Both call the same function. No new infrastructure required.
 
 ### Safeguards

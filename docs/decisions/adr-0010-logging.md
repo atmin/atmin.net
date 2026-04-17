@@ -31,7 +31,7 @@ Cockpit default retention is **7 days**. This is intentional: server logs contai
 (personal data under GDPR). Keeping them for 7 days is sufficient for incident response;
 they expire automatically without manual deletion.
 
-### Daily analytics export (future)
+### Daily analytics export (future, see also ADR-0006)
 
 A scheduled job (mechanism TBD — see future ADR) will query Cockpit's Loki API daily,
 anonymize any PII, and write Parquet files to S3 for long-term analytics. Staging is excluded
@@ -39,6 +39,9 @@ anonymize any PII, and write Parquet files to S3 for long-term analytics. Stagin
 
 The export job will need a Cockpit token with `read_only_logs` scope — separate from any
 container credentials, which don't need Cockpit access at all.
+
+The S3 data retention cleanup (ADR-0006) is a natural fit for the same scheduled job —
+same credentials, same daily cadence, both idempotent.
 
 **Anonymization:** IP addresses are the known PII in current logs. Any other PII fields
 introduced in future must also be anonymized before the Parquet file is written.
