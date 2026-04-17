@@ -94,7 +94,6 @@ scw container container create \
   memory-limit=128 \
   port=8080 \
   environment-variables.S3_REGION=fr-par \
-  environment-variables.APP_ENV=prod \
   secret-environment-variables.0.key=SERVER_SECRET \
   secret-environment-variables.0.value=<run `openssl rand -base64 32` for a good one> \
   secret-environment-variables.1.key=S3_ENDPOINT \
@@ -104,11 +103,7 @@ scw container container create \
   secret-environment-variables.3.key=S3_ACCESS_KEY \
   secret-environment-variables.3.value=<KEY> \
   secret-environment-variables.4.key=S3_SECRET_KEY \
-  secret-environment-variables.4.value=<SECRET> \
-  secret-environment-variables.5.key=COCKPIT_LOKI_URL \
-  secret-environment-variables.5.value=<LOKI_PUSH_URL> \
-  secret-environment-variables.6.key=COCKPIT_TOKEN \
-  secret-environment-variables.6.value=<TOKEN>
+  secret-environment-variables.4.value=<SECRET>
 
 # 6. Custom domain — add CNAME record:
 #    app.atmin.net → <container-endpoint>.scw.cloud
@@ -130,7 +125,6 @@ scw container container create \
   memory-limit=128 \
   port=8080 \
   environment-variables.S3_REGION=fr-par \
-  environment-variables.APP_ENV=staging \
   secret-environment-variables.0.key=SERVER_SECRET \
   secret-environment-variables.0.value=<run `openssl rand -base64 32` — must differ from production> \
   secret-environment-variables.1.key=S3_ENDPOINT \
@@ -140,11 +134,7 @@ scw container container create \
   secret-environment-variables.3.key=S3_ACCESS_KEY \
   secret-environment-variables.3.value=<KEY> \
   secret-environment-variables.4.key=S3_SECRET_KEY \
-  secret-environment-variables.4.value=<SECRET> \
-  secret-environment-variables.5.key=COCKPIT_LOKI_URL \
-  secret-environment-variables.5.value=<LOKI_PUSH_URL> \
-  secret-environment-variables.6.key=COCKPIT_TOKEN \
-  secret-environment-variables.6.value=<TOKEN>
+  secret-environment-variables.4.value=<SECRET>
 
 # 3. Custom domain — add CNAME record:
 #    staging.atmin.net → <staging-container-endpoint>.scw.cloud
@@ -242,28 +232,20 @@ scw container container list
 # Get container details (including error messages)
 scw container container get <CONTAINER_ID>
 
-# View container logs — not available via CLI
-# Logs are in Scaleway Cockpit (Grafana/Loki):
-# Console → Observability → Cockpit → Grafana → Explore → Loki
+# View container logs — not available via CLI; use Cockpit (see Logging section below)
 
 # Redeploy after pushing a new image
 scw container container deploy <CONTAINER_ID>
 
 # Update container config — triggers automatic redeploy
-# Plain env vars (non-secret):
-scw container container update <CONTAINER_ID> environment-variables.APP_ENV=prod
-
-# Full env update — pass ALL secrets together to be safe; unclear if omitted ones are wiped or preserved:
+# Pass ALL secrets together to be safe; unclear if omitted ones are wiped or preserved:
 scw container container update <CONTAINER_ID> \
   environment-variables.S3_REGION=fr-par \
-  environment-variables.APP_ENV=<prod|staging> \
-  secret-environment-variables.0.key=SERVER_SECRET    secret-environment-variables.0.value=<VALUE> \
-  secret-environment-variables.1.key=S3_ENDPOINT      secret-environment-variables.1.value=<VALUE> \
-  secret-environment-variables.2.key=S3_BUCKET        secret-environment-variables.2.value=<VALUE> \
-  secret-environment-variables.3.key=S3_ACCESS_KEY    secret-environment-variables.3.value=<VALUE> \
-  secret-environment-variables.4.key=S3_SECRET_KEY    secret-environment-variables.4.value=<VALUE> \
-  secret-environment-variables.5.key=COCKPIT_LOKI_URL secret-environment-variables.5.value=<VALUE> \
-  secret-environment-variables.6.key=COCKPIT_TOKEN    secret-environment-variables.6.value=<VALUE>
+  secret-environment-variables.0.key=SERVER_SECRET  secret-environment-variables.0.value=<VALUE> \
+  secret-environment-variables.1.key=S3_ENDPOINT    secret-environment-variables.1.value=<VALUE> \
+  secret-environment-variables.2.key=S3_BUCKET      secret-environment-variables.2.value=<VALUE> \
+  secret-environment-variables.3.key=S3_ACCESS_KEY  secret-environment-variables.3.value=<VALUE> \
+  secret-environment-variables.4.key=S3_SECRET_KEY  secret-environment-variables.4.value=<VALUE>
 
 # Add --wait to block until the redeploy completes
 scw container container update <CONTAINER_ID> memory-limit=256 --wait
@@ -281,52 +263,21 @@ scw container namespace list
 scw container container delete <CONTAINER_ID>
 ```
 
-## Logging (Cockpit / Loki)
+## Logging (Cockpit)
 
-Server logs are pushed to Scaleway Cockpit from within the Go process (see ADR-0010).
-Stdout/stderr are **not** automatically forwarded — the push is explicit.
+Scaleway forwards container stdout/stderr to Cockpit automatically — no app changes needed.
+Retention: 7 days (see ADR-0010).
 
 ### One-time setup
 
 ```bash
-# Create Cockpit tokens with write_only_logs scope — SecretKey shown only once, save immediately
-scw cockpit token create name=server-prod token-scopes.0=write_only_logs
-scw cockpit token create name=server-staging token-scopes.0=write_only_logs
-
-# Find your Loki push endpoint
-scw cockpit data-source list
-# Look for the row with TYPE=logs. COCKPIT_LOKI_URL = that URL + /loki/api/v1/push
-# e.g. https://<id>.logs.cockpit.fr-par.scw.cloud/loki/api/v1/push
-
 # Sync datasources to Grafana (required once before logs are queryable)
 scw cockpit grafana sync-data-sources
 ```
 
-### Container env vars
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `COCKPIT_LOKI_URL` | No | — | Full Loki push URL, e.g. `https://logs.cockpit.fr-par.scw.cloud/loki/api/v1/push` |
-| `COCKPIT_TOKEN` | No | — | Cockpit token value |
-| `APP_ENV` | Yes (if Loki set) | — | Loki label — `prod` or `staging`; fatal error if Loki is configured and this is absent |
-
-If either `COCKPIT_LOKI_URL` or `COCKPIT_TOKEN` is absent the server falls back to stderr only.
-
 ### Querying logs
 
-Scaleway console → Observability → Cockpit → Open Grafana → Explore → Loki datasource
-
-```
-# Production logs
-{app="atmin", env="prod"}
-
-# Staging logs
-{app="atmin", env="staging"}
-```
-
-### Retention
-
-Default: **7 days** (intentional — logs contain IP addresses; see ADR-0010).
+Scaleway console → Observability → Cockpit → Open Grafana → Explore → select Loki datasource
 
 ## Future considerations
 
