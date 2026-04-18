@@ -21,6 +21,18 @@ queryable (`scw cockpit grafana sync-data-sources`).
 No application-level changes needed. Write to stderr (existing behaviour) and rely on
 Scaleway's automatic log forwarding to Cockpit. Query via Grafana when needed.
 
+## Log format
+
+The server uses `slog.NewTextHandler` (key=value). `slog.NewJSONHandler` was tried and
+reverted: Scaleway's log collector wraps every stderr line in its own JSON envelope
+(`{"resource_instance":"...","message":"<line>","stream":"stderr"}`), turning Go's JSON
+output into a double-escaped string that is unreadable in Grafana and not field-queryable
+without a fragile LogQL double-parse (`| json | line_format "{{.message}}" | json`).
+
+Structured field querying is only achievable by pushing logs directly to Loki (bypassing
+the collector), which adds application complexity not justified by the current use case.
+Text format is readable as-is in Grafana's log view.
+
 ## Consequences
 
 - No code changes, no new dependencies, no new env vars.
