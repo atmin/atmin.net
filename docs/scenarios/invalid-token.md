@@ -3,7 +3,7 @@
 Alice's token is rejected by the server. Her local message history survives
 and she can re-authenticate to regain access.
 
-## Overview
+## Overview — fetch path
 
 ```mermaid
 sequenceDiagram
@@ -32,6 +32,37 @@ sequenceDiagram
     S-->>A: messages since last cursor
 ```
 
+## Overview — SSE path
+
+The SSE path is more insidious. `EventSource` does not expose the HTTP status
+code in `onerror` — a 401 and a network failure are indistinguishable from the
+event alone. Without explicit handling, a secret rotation on the server causes
+the SSE connection to silently fail, new messages stop arriving, and the app
+shows an offline indicator. On mobile, where there is no console, the user has
+no way to know their session has been invalidated.
+
+```mermaid
+sequenceDiagram
+    participant A as Alice (client)
+    participant S as Server
+
+    note over A,S: SSE connection open. SERVER_SECRET changes.
+
+    A->>S: GET /v1/events (EventSource, tok_a1)
+    S-->>A: 401 (EventSource fires onerror)
+
+    note over A: onerror — status unknown
+    note over A: navigator.onLine === true → not a network failure
+    note over A: Probe with a regular fetch
+
+    A->>S: GET /v1/store/list (tok_a1)
+    S-->>A: 401 unauthorized
+
+    note over A: onUnauthorized fires (via request())
+    note over A: Clear token, navigate to welcome screen
+    note over A: Show "Session expired — sign in again"
+```
+
 ## Cast
 
 - **Alice** — registered device with messages in IndexedDB, token becomes invalid
@@ -57,8 +88,22 @@ explicitly deleted and triggers a full local wipe including IndexedDB (see
 Any authenticated API call can return 401:
 - `GET /v1/store/list` (sync on load or SSE notification)
 - `POST /v1/send` (sending a message)
-- `GET /v1/events` (SSE connection)
+- `GET /v1/events` (SSE connection — but see below)
 - Any other request with an `Authorization` header or `token` query parameter
+
+### SSE 401 detection
+
+`EventSource` fires `onerror` for both network failures and server-side
+rejections (4xx, 5xx). The status code is not accessible from the event.
+When `onerror` fires:
+
+- If `navigator.onLine === false`: treat as a network failure, defer to the
+  offline-mode handling (see [Offline mode](./offline-mode.md)).
+- If `navigator.onLine === true`: the server is reachable but rejected the
+  connection. Issue a probe — a regular `fetch` to any authenticated endpoint
+  (e.g. `GET /v1/store/list`). The probe goes through `request()`, which
+  already calls `onUnauthorized()` on a 401. No special casing needed; the
+  probe result triggers the same handler as any other 401.
 
 ## Client behaviour on 401
 
@@ -113,10 +158,14 @@ entry via `POST /v1/devices/revoke`.
 
 ## What to test
 
-- Any API call returning 401 triggers `onUnauthorized`.
+- Any fetch-based API call returning 401 triggers `onUnauthorized`.
+- SSE `onerror` while `navigator.onLine === true` issues a probe and triggers
+  `onUnauthorized` if the probe returns 401.
+- SSE `onerror` while `navigator.onLine === false` does not probe (deferred
+  to offline-mode handling).
 - `onUnauthorized` does not call `deleteDevice` (no outgoing request).
 - localStorage keys are removed; IndexedDB is not cleared.
-- UI navigates to the welcome screen.
+- UI navigates to the welcome screen, not the offline indicator.
 - After re-authenticating with the mnemonic, the chat view shows messages
   from before the 401 immediately (IndexedDB load, before server sync).
 - Megolm inbound and outbound sessions are intact after re-authenticating.
