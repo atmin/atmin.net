@@ -6,9 +6,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --de
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo install wasm-pack wasm-bindgen-cli@0.2.108
 
-ARG APP_VERSION=dev
-ENV APP_VERSION=$APP_VERSION
-
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -17,6 +14,9 @@ COPY web/crypto ./crypto
 RUN npm run build:wasm
 
 COPY web/ .
+
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
 RUN npm run build
 
 # Stage 2: Build Go binary
