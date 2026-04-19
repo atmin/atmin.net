@@ -212,9 +212,11 @@ test.describe('Media', () => {
 
         if (!capturedKey) throw new Error('did not capture media presign key');
         const key = capturedKey;
+        const ciphertextLen = readFileSync(PHOTO).byteLength + 16;
+
+        // Overwrite the blob in S3 so the server-side object is corrupt.
         const client = s3();
         const bucket = process.env.E2E_BUCKET as string;
-        const ciphertextLen = readFileSync(PHOTO).byteLength + 16;
         await client.send(
             new PutObjectCommand({
                 Bucket: bucket,
@@ -224,10 +226,26 @@ test.describe('Media', () => {
             }),
         );
 
-        // Fresh context has an empty HTTP cache, so the immutable response
-        // for the original ciphertext is not served from disk.
         const bobFreshCtx = await browser.newContext();
         const bobFresh = await bobFreshCtx.newPage();
+
+        // Playwright contexts within the same browser process share Chromium's
+        // disk cache. The server sends Cache-Control: immutable for media
+        // objects, so bobCtx's successful fetch may be served from disk cache
+        // to bobFreshCtx, bypassing the S3 corruption above. Route the specific
+        // key through Playwright instead — intercepted requests skip the cache.
+        await bobFreshCtx.route(
+            (url) =>
+                new URL(url).pathname === '/v1/store/object' &&
+                new URL(url).searchParams.get('key') === key,
+            (route) =>
+                route.fulfill({
+                    status: 200,
+                    contentType: 'application/octet-stream',
+                    body: Buffer.from(randomBytes(ciphertextLen)),
+                }),
+        );
+
         await loginUser(bobFresh, bobHandle, bobMnemonic);
         await openChat(bobFresh, aliceHandle);
 

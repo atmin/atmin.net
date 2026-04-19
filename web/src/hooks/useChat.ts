@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
     conversationId,
     fetchMessages,
@@ -7,6 +7,7 @@ import {
     storeList,
     uploadMedia,
 } from '@/lib/api';
+import type { DecryptedMessage } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
 import {
@@ -127,6 +128,16 @@ export function useChat(
         isSaved ? 'Saved Messages' : (handle ?? ''),
     );
 
+    // Dedup concurrent syncs: if one is already in flight, share its promise.
+    const syncInFlight = useRef<Promise<DecryptedMessage[]> | null>(null);
+    const syncMessages = (tok: string, uid: string, key: CryptoKey, sm?: SessionManager) => {
+        if (syncInFlight.current) return syncInFlight.current;
+        syncInFlight.current = fetchMessages(tok, uid, key, sm).finally(() => {
+            syncInFlight.current = null;
+        });
+        return syncInFlight.current;
+    };
+
     // Resolve conversation ID from handle
     useEffect(() => {
         if (isSaved) {
@@ -172,7 +183,7 @@ export function useChat(
                 }
 
                 // Fetch from server (source of truth)
-                const synced = await fetchMessages(
+                const synced = await syncMessages(
                     session.token,
                     session.userId,
                     session.sharingPrivateKey,
@@ -215,7 +226,7 @@ export function useChat(
 
         events.addEventListener('new_message', async () => {
             try {
-                const synced = await fetchMessages(
+                const synced = await syncMessages(
                     session.token,
                     session.userId,
                     session.sharingPrivateKey,
@@ -294,7 +305,7 @@ export function useChat(
             }
 
             // Refetch messages to show the sent message
-            const synced = await fetchMessages(
+            const synced = await syncMessages(
                 session.token,
                 session.userId,
                 session.sharingPrivateKey,
@@ -365,7 +376,7 @@ export function useChat(
                 sessionManager,
             );
 
-            const synced = await fetchMessages(
+            const synced = await syncMessages(
                 session.token,
                 session.userId,
                 session.sharingPrivateKey,
