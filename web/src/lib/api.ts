@@ -632,6 +632,26 @@ export async function fetchArchiveMessages(
     );
 }
 
+let syncInFlight: Promise<DecryptedMessage[]> | null = null;
+
+export function syncMessages(
+    token: string,
+    userId: string,
+    sharingPrivateKey: CryptoKey,
+    sessionManager?: SessionManager,
+): Promise<DecryptedMessage[]> {
+    if (syncInFlight) return syncInFlight;
+    syncInFlight = fetchMessages(
+        token,
+        userId,
+        sharingPrivateKey,
+        sessionManager,
+    ).finally(() => {
+        syncInFlight = null;
+    });
+    return syncInFlight;
+}
+
 export async function fetchMessages(
     token: string,
     userId: string,

@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import type { DecryptedMessage } from '@/lib/api';
+import { useEffect, useState } from 'react';
 import {
     conversationId,
-    fetchMessages,
     resolve,
     sendTextMessage,
     storeList,
+    syncMessages,
     uploadMedia,
 } from '@/lib/api';
 import type { Session } from '@/lib/auth';
@@ -127,21 +126,6 @@ export function useChat(
     const [chatTitle, setChatTitle] = useState(
         isSaved ? 'Saved Messages' : (handle ?? ''),
     );
-
-    // Dedup concurrent syncs: if one is already in flight, share its promise.
-    const syncInFlight = useRef<Promise<DecryptedMessage[]> | null>(null);
-    const syncMessages = (
-        tok: string,
-        uid: string,
-        key: CryptoKey,
-        sm?: SessionManager,
-    ) => {
-        if (syncInFlight.current) return syncInFlight.current;
-        syncInFlight.current = fetchMessages(tok, uid, key, sm).finally(() => {
-            syncInFlight.current = null;
-        });
-        return syncInFlight.current;
-    };
 
     // Resolve conversation ID from handle
     useEffect(() => {
