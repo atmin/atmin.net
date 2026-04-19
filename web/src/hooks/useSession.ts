@@ -6,6 +6,7 @@ import {
     loadSession,
     type Session,
 } from '@/lib/auth';
+import { restoreContacts } from '@/lib/contact-backup';
 import type { SessionManager } from '@/lib/megolm-session';
 
 export interface SessionState {
@@ -71,7 +72,6 @@ export function useSession(): SessionState {
             setSessionManager(mgr);
 
             // Restore contacts from backup (new device restore)
-            const { restoreContacts } = await import('@/lib/contact-backup');
             if (cancelled) return;
             restoreContacts(token, userId, backupKey).catch((err) =>
                 console.error('Contact restore failed:', err),

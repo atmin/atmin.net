@@ -1,3 +1,13 @@
+import { ulid } from 'ulid';
+import {
+    base64UrlDecode,
+    base64UrlEncode,
+    eciesDecrypt,
+    eciesEncrypt,
+    importSharingPublicKey,
+} from './crypto';
+import { loadSyncCursor, saveSyncCursor } from './db';
+
 export class APIError extends Error {
     constructor(
         public status: number,
@@ -295,7 +305,6 @@ export async function uploadMedia(
     encrypted: EncryptedMedia,
     abort?: AbortSignal,
 ): Promise<{ url: string; mediaUlid: string }> {
-    const { ulid } = await import('ulid');
     const mediaUlid = ulid();
     const key = `media/${userId}/${mediaUlid}`;
 
@@ -375,10 +384,6 @@ export async function sendTextMessage(
     messageText: string,
     sessionManager: SessionManager,
 ): Promise<void> {
-    const { eciesEncrypt, importSharingPublicKey, base64UrlEncode } =
-        await import('./crypto');
-    const { ulid } = await import('ulid');
-
     // Get or create outbound session
     let [session, isNew] = await sessionManager.getOutbound();
 
@@ -516,8 +521,6 @@ async function processEnvelopes(
     sessionManager: SessionManager | undefined,
     seenMsgIds: Set<string>,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
-    const { eciesDecrypt, base64UrlDecode } = await import('./crypto');
-
     // Pass 1: process key shares first (so session keys are available for messages)
     if (sessionManager) {
         for (const { key, envelope } of envelopes) {
@@ -635,8 +638,6 @@ export async function fetchMessages(
     sharingPrivateKey: CryptoKey,
     sessionManager?: SessionManager,
 ): Promise<DecryptedMessage[]> {
-    const { loadSyncCursor, saveSyncCursor } = await import('./db');
-
     // List messages in inbox, resuming from stored cursor if available
     const prefix = `inbox/${userId}/live/`;
     const storedCursor = await loadSyncCursor(prefix);

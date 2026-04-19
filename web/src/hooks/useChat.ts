@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { DecryptedMessage } from '@/lib/api';
 import {
     conversationId,
     fetchMessages,
@@ -7,7 +8,6 @@ import {
     storeList,
     uploadMedia,
 } from '@/lib/api';
-import type { DecryptedMessage } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
 import {
@@ -130,7 +130,12 @@ export function useChat(
 
     // Dedup concurrent syncs: if one is already in flight, share its promise.
     const syncInFlight = useRef<Promise<DecryptedMessage[]> | null>(null);
-    const syncMessages = (tok: string, uid: string, key: CryptoKey, sm?: SessionManager) => {
+    const syncMessages = (
+        tok: string,
+        uid: string,
+        key: CryptoKey,
+        sm?: SessionManager,
+    ) => {
         if (syncInFlight.current) return syncInFlight.current;
         syncInFlight.current = fetchMessages(tok, uid, key, sm).finally(() => {
             syncInFlight.current = null;
@@ -286,7 +291,6 @@ export function useChat(
                 const resolveRes = await resolve(handle);
                 recipientUserId = resolveRes.user_id;
                 const pubKeyB64 = resolveRes.sharing_public_key;
-                const { base64UrlDecode } = await import('@/lib/crypto');
                 recipientPubKeyBytes = base64UrlDecode(pubKeyB64);
             }
 
