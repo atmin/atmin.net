@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { deleteDevice, setOnDeviceRevoked } from '@/lib/api';
-import { clearSession, loadSession, type Session } from '@/lib/auth';
+import { deleteDevice, setOnDeviceRevoked, setOnUnauthorized } from '@/lib/api';
+import {
+    clearSession,
+    clearToken,
+    loadSession,
+    type Session,
+} from '@/lib/auth';
 import type { SessionManager } from '@/lib/megolm-session';
 
 export interface SessionState {
@@ -104,10 +109,25 @@ export function useSession(): SessionState {
         await clearSession();
     }, []);
 
+    const handleUnauthorized = useCallback(async () => {
+        setSessionManager((prev) => {
+            prev?.destroy();
+            return null;
+        });
+        setSession(null);
+        await new Promise((r) => setTimeout(r, 0));
+        clearToken();
+    }, []);
+
     useEffect(() => {
         setOnDeviceRevoked(handleLogout);
         return () => setOnDeviceRevoked(null);
     }, [handleLogout]);
+
+    useEffect(() => {
+        setOnUnauthorized(handleUnauthorized);
+        return () => setOnUnauthorized(null);
+    }, [handleUnauthorized]);
 
     const handleLogin = (s: Session) => setSession(s);
 

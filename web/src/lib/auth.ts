@@ -60,11 +60,15 @@ export async function loadSession(): Promise<Session | null> {
     };
 }
 
-export async function clearSession(): Promise<void> {
+export function clearToken(): void {
     localStorage.removeItem(`${LS_PREFIX}token`);
     localStorage.removeItem(`${LS_PREFIX}userId`);
     localStorage.removeItem(`${LS_PREFIX}deviceId`);
     localStorage.removeItem(`${LS_PREFIX}handle`);
     localStorage.removeItem(`${LS_PREFIX}sharingPublicKeyBytes`);
+}
+
+export async function clearSession(): Promise<void> {
+    clearToken();
     await deleteDatabase();
 }

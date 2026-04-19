@@ -4,6 +4,7 @@ import {
     fetchMessages,
     resolve,
     sendTextMessage,
+    storeList,
     uploadMedia,
 } from '@/lib/api';
 import type { Session } from '@/lib/auth';
@@ -232,8 +233,20 @@ export function useChat(
         });
 
         events.onerror = () => {
-            console.error('SSE connection error');
             events.close();
+            if (navigator.onLine) {
+                // Server is reachable but rejected the connection.
+                // Probe with a regular fetch — if it returns 401, onUnauthorized
+                // fires automatically via request() in api.ts.
+                storeList(session.token, `inbox/${session.userId}/live/`).catch(
+                    () => {
+                        // TypeError → actually offline, handled by useOnlineStatus.
+                        // APIError 401 → onUnauthorized already fired.
+                    },
+                );
+            }
+            // If offline, the useOnlineStatus hook and the `online` dependency on
+            // this effect will handle reconnect when connectivity returns.
         };
 
         return () => events.close();

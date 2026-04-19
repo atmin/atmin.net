@@ -14,6 +14,12 @@ export function setOnDeviceRevoked(cb: (() => void) | null): void {
     onDeviceRevoked = cb;
 }
 
+let onUnauthorized: (() => void) | null = null;
+
+export function setOnUnauthorized(cb: (() => void) | null): void {
+    onUnauthorized = cb;
+}
+
 async function request<T>(
     method: string,
     path: string,
@@ -36,6 +42,7 @@ async function request<T>(
         }));
         if (res.status === 403 && err.error === 'device_revoked')
             onDeviceRevoked?.();
+        if (res.status === 401) onUnauthorized?.();
         throw new APIError(res.status, err.error, err.message);
     }
 
@@ -208,6 +215,7 @@ export async function storeGet(
         }));
         if (res.status === 403 && err.error === 'device_revoked')
             onDeviceRevoked?.();
+        if (res.status === 401) onUnauthorized?.();
         throw new APIError(res.status, err.error, err.message);
     }
     return res.arrayBuffer();

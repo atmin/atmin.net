@@ -11,6 +11,8 @@ import {
     resolve,
     sendTextMessage,
     setOnDeviceRevoked,
+    setOnUnauthorized,
+    storeGet,
     updateProfile,
 } from './api';
 import { base64UrlEncode, deriveKeys, generateBackupSecret } from './crypto';
@@ -1388,5 +1390,96 @@ describe('api - device revocation', () => {
             status: 403,
             code: 'device_revoked',
         });
+    });
+});
+
+describe('api - unauthorized (401)', () => {
+    beforeEach(() => {
+        resetFetchMock();
+    });
+
+    afterEach(() => {
+        setOnUnauthorized(null);
+    });
+
+    it('calls onUnauthorized callback on 401', async () => {
+        const onUnauth = vi.fn();
+        setOnUnauthorized(onUnauth);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'unauthorized',
+                message: 'Token invalid',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(onUnauth).toHaveBeenCalledOnce();
+    });
+
+    it('does not call onUnauthorized on other 4xx errors', async () => {
+        const onUnauth = vi.fn();
+        setOnUnauthorized(onUnauth);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'forbidden',
+                message: 'Not allowed',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 403,
+        });
+
+        expect(onUnauth).not.toHaveBeenCalled();
+    });
+
+    it('does not throw when no callback is registered', async () => {
+        setOnUnauthorized(null);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'unauthorized',
+                message: 'Token invalid',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 401,
+        });
+    });
+
+    it('calls onUnauthorized from storeGet() path', async () => {
+        const onUnauth = vi.fn();
+        setOnUnauthorized(onUnauth);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'unauthorized',
+                message: 'Token invalid',
+            }),
+        } as Response);
+
+        await expect(storeGet('bad-token', 'some/key')).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(onUnauth).toHaveBeenCalledOnce();
     });
 });

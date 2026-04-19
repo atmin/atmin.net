@@ -49,7 +49,7 @@ sequenceDiagram
     note over A,S: SSE connection open. SERVER_SECRET changes.
 
     A->>S: GET /v1/events (EventSource, tok_a1)
-    S-->>A: 401 (EventSource fires onerror)
+    S-->>A: connection rejected (EventSource fires onerror, status unknown)
 
     note over A: onerror — status unknown
     note over A: navigator.onLine === true → not a network failure

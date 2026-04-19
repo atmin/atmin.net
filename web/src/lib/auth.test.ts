@@ -1,6 +1,12 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearSession, loadSession, type Session, saveSession } from './auth';
+import {
+    clearSession,
+    clearToken,
+    loadSession,
+    type Session,
+    saveSession,
+} from './auth';
 import { deriveKeys, generateBackupSecret } from './crypto';
 
 // Mock localStorage
@@ -287,6 +293,42 @@ describe('session - Session management', () => {
         it('can be called when no session exists', async () => {
             // Should not throw
             await expect(clearSession()).resolves.toBeUndefined();
+        });
+    });
+
+    describe('clearToken', () => {
+        it('removes all localStorage keys but leaves IndexedDB intact', async () => {
+            await saveSession(testSession);
+
+            clearToken();
+
+            expect(localStorage.getItem('atmin:token')).toBeNull();
+            expect(localStorage.getItem('atmin:userId')).toBeNull();
+            expect(localStorage.getItem('atmin:deviceId')).toBeNull();
+            expect(localStorage.getItem('atmin:handle')).toBeNull();
+            expect(
+                localStorage.getItem('atmin:sharingPublicKeyBytes'),
+            ).toBeNull();
+
+            // loadSession returns null because token is missing from localStorage...
+            const loaded = await loadSession();
+            expect(loaded).toBeNull();
+
+            // ...but IndexedDB keys still exist
+            const { getKey } = await import('./db');
+            expect(await getKey('sharingPrivateKey')).toBeTruthy();
+            expect(await getKey('backupKey')).toBeTruthy();
+        });
+
+        it('is idempotent', () => {
+            clearToken();
+            clearToken();
+            // should not throw
+        });
+
+        it('can be called when no session exists', () => {
+            // should not throw
+            clearToken();
         });
     });
 
