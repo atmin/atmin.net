@@ -7,6 +7,7 @@ import {
     importSharingPublicKey,
 } from './crypto';
 import { loadSyncCursor, saveSyncCursor } from './db';
+import type { Envelope } from './envelope';
 
 export class APIError extends Error {
     constructor(
@@ -90,17 +91,6 @@ export interface ResolveResponse {
 export interface ProfileUpdateRequest {
     display_name?: string;
     avatar_url?: string;
-}
-
-export interface Envelope {
-    v: number;
-    to_user: string;
-    from_user: string;
-    from_device: string;
-    msg_id: string;
-    content_type: string;
-    sent_at?: string; // ISO 8601 timestamp
-    payload: Record<string, string>;
 }
 
 export interface StoreListResponse {
