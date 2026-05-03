@@ -53,7 +53,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // inside defineConfig plugins array:
 VitePWA({
-    registerType: 'autoUpdate',
+    registerType: 'prompt',   // app controls when to reload — see step 5
     devOptions: { enabled: false },
     manifest: {
         name: 'atmin',
@@ -118,7 +118,71 @@ added manually.
 light. Change to `black-translucent` if the app header is dark and you want
 the status bar to overlay it (requires adjusting safe-area insets).
 
-### 5. Verify colours
+### 5. SW update component
+
+`registerType: 'prompt'` means the new SW installs silently in the background
+but never activates until the app calls `updateSW()`. This prevents an
+automatic page reload from aborting an in-flight message send.
+
+Add a type reference so TypeScript resolves the virtual module:
+
+```ts
+// web/src/vite-env.d.ts  (or tsconfig includes)
+/// <reference types="vite-plugin-pwa/client" />
+```
+
+Create `web/src/components/SWUpdateToast.tsx`:
+
+```tsx
+import { useEffect } from 'react';
+import { useRegisterSW } from 'virtual:pwa-register/react';
+
+interface Props {
+    sending: boolean;
+}
+
+export function SWUpdateToast({ sending }: Props) {
+    const {
+        needRefresh: [needRefresh, setNeedRefresh],
+        updateSW,
+    } = useRegisterSW();
+
+    const hasDraft = Object.keys(localStorage).some((k) =>
+        k.startsWith('atmin:draft:'),
+    );
+
+    // Apply update silently as soon as it is safe to do so.
+    useEffect(() => {
+        if (needRefresh && !sending && !hasDraft) updateSW(true);
+    }, [needRefresh, sending, hasDraft, updateSW]);
+
+    if (!needRefresh) return null;
+
+    return (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-lg border bg-background px-4 py-2 shadow-lg text-sm flex items-center gap-3">
+            <span>Update available</span>
+            <button
+                className="font-medium underline disabled:opacity-40"
+                disabled={sending}
+                onClick={() => updateSW(true)}
+            >
+                {sending ? 'Sending…' : 'Reload'}
+            </button>
+            <button onClick={() => setNeedRefresh(false)} aria-label="Dismiss">✕</button>
+        </div>
+    );
+}
+```
+
+Wire it into `web/src/App.tsx` (or the root layout) alongside the `sending`
+state. `sending` comes from `useChat`, which is called in `web/src/routes/chat.tsx`
+— lift it up or pass it down to wherever `SWUpdateToast` is rendered.
+
+The `hasDraft` check depends on the draft-persist task. Until that task is
+implemented, drafts are not persisted so `hasDraft` will always be `false` —
+the component is safe to ship before draft-persist is done.
+
+### 6. Verify colours
 
 Set `background_color` and `theme_color` in the manifest (and
 `meta name="theme-color"`) to the actual background colour of the app shell.
@@ -130,9 +194,11 @@ value for these fields (they apply at launch before the app renders).
 
 - `cd web && npm run build` — build output includes `sw.js`,
   `manifest.webmanifest`, and icon PNGs.
-- `cd web && npx vite preview` — serve the production build locally over
-  HTTP. Open Chrome DevTools → Application → Manifest: all fields populated,
+- `cd web && npx vite preview --host` — serve the production build on your
+  LAN. Open Chrome DevTools → Application → Manifest: all fields populated,
   no errors. Application → Service Workers: SW registered and active.
+  (`--host` exposes the server on your local network so physical devices can
+  reach it — required for the Android and iOS checks below.)
 - **Android Chrome** (physical device or emulator): open the preview URL,
   wait a moment — Chrome address bar shows an install icon, or
   `⋮ → Add to Home Screen` is available. Installed app opens in standalone
