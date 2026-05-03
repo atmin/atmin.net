@@ -58,3 +58,7 @@ storybook-static/
 
 # IMPORTANT! remove following if you want to continue with tauri-spike
 src-tauri/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
