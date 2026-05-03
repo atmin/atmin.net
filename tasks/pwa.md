@@ -182,6 +182,29 @@ The `hasDraft` check depends on the draft-persist task. Until that task is
 implemented, drafts are not persisted so `hasDraft` will always be `false` —
 the component is safe to ship before draft-persist is done.
 
+Add a Storybook story (`SWUpdateToast.stories.tsx`) covering the three states
+where the conditional logic could regress:
+
+```tsx
+// mock virtual:pwa-register/react at the top of the stories file
+// or via .storybook/vitest.setup.ts
+
+export const UpdateAvailable: Story = {
+    args: { sending: false },
+    // needRefresh = true, sending = false → Reload button enabled
+};
+export const UpdateWhileSending: Story = {
+    args: { sending: true },
+    // needRefresh = true, sending = true → button disabled, label "Sending…"
+};
+export const Dismissed: Story = {
+    // after dismiss click → toast unmounts
+};
+```
+
+The install prompt, standalone launch, and SW update lifecycle are not
+automatable — manual device verification (see Verify section) covers those.
+
 ### 6. Verify colours
 
 Set `background_color` and `theme_color` in the manifest (and
@@ -211,9 +234,12 @@ value for these fields (they apply at launch before the app renders).
   is disabled in dev mode and e2e runs against the dev server, so no
   interference.
 
-## No e2e test
+## Testing
 
-PWA installation is a browser-native gesture that Playwright cannot fully
-automate (Chrome's install prompt and iOS's Share sheet are outside the
-automation surface). The Lighthouse audit and manual device checks are
-the verification path.
+The `SWUpdateToast` button states are covered by the Storybook stories in
+step 5 — run with `cd web && npx vitest run --project=storybook`.
+
+Everything else (install prompt, standalone launch, SW update lifecycle,
+iOS behaviour) is a browser-native gesture outside Playwright's automation
+surface. The Lighthouse audit and manual device checks are the verification
+path for those.
