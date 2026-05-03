@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -93,6 +94,31 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 	}
 }
 
+// errAuthProofInvalid is returned by fetchAndVerifyAuthProof when the key is
+// malformed or the proof signature/timestamp is invalid.
+var errAuthProofInvalid = errors.New("auth proof invalid")
+
+// fetchAndVerifyAuthProof fetches the user's profile to get their auth public key,
+// then verifies the auth proof. Returns ErrNotFound if the profile does not exist.
+func fetchAndVerifyAuthProof(ctx context.Context, store Store, userID string, proof AuthProof) error {
+	profileData, err := store.GetObject(ctx, "users/"+userID+"/profile.json")
+	if err != nil {
+		return err
+	}
+	var profile struct {
+		AuthPublicKey string `json:"auth_public_key"`
+	}
+	json.Unmarshal(profileData, &profile)
+	pubKeyBytes, err := b64url.DecodeString(profile.AuthPublicKey)
+	if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
+		return errAuthProofInvalid
+	}
+	if err := verifyAuthProof(ed25519.PublicKey(pubKeyBytes), proof); err != nil {
+		return errAuthProofInvalid
+	}
+	return nil
+}
+
 // POST /v1/devices
 func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -106,30 +132,15 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 			return
 		}
 
-		// Fetch profile to get auth public key
-		profileData, err := store.GetObject(r.Context(), "users/"+req.UserID+"/profile.json")
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
+		if err := fetchAndVerifyAuthProof(r.Context(), store, req.UserID, req.AuthProof); err != nil {
+			switch {
+			case errors.Is(err, ErrNotFound):
 				writeError(w, errNotFound)
-				return
+			case errors.Is(err, errAuthProofInvalid):
+				writeError(w, errForbidden)
+			default:
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to verify auth proof"})
 			}
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read profile"})
-			return
-		}
-
-		var profile struct {
-			AuthPublicKey string `json:"auth_public_key"`
-		}
-		json.Unmarshal(profileData, &profile)
-
-		pubKeyBytes, err := b64url.DecodeString(profile.AuthPublicKey)
-		if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
-			writeError(w, errBadRequest)
-			return
-		}
-
-		if err := verifyAuthProof(ed25519.PublicKey(pubKeyBytes), req.AuthProof); err != nil {
-			writeError(w, errForbidden)
 			return
 		}
 
@@ -183,26 +194,12 @@ func handleRevokeDevice(store Store, cfg Config, cache *deviceCache) http.Handle
 
 		userID := userIDFrom(r.Context())
 
-		// Fetch profile to get auth public key
-		profileData, err := store.GetObject(r.Context(), "users/"+userID+"/profile.json")
-		if err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read profile"})
-			return
-		}
-
-		var profile struct {
-			AuthPublicKey string `json:"auth_public_key"`
-		}
-		json.Unmarshal(profileData, &profile)
-
-		pubKeyBytes, err := b64url.DecodeString(profile.AuthPublicKey)
-		if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
-			writeError(w, errBadRequest)
-			return
-		}
-
-		if err := verifyAuthProof(ed25519.PublicKey(pubKeyBytes), req.AuthProof); err != nil {
-			writeError(w, errForbidden)
+		if err := fetchAndVerifyAuthProof(r.Context(), store, userID, req.AuthProof); err != nil {
+			if errors.Is(err, errAuthProofInvalid) {
+				writeError(w, errForbidden)
+			} else {
+				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to verify auth proof"})
+			}
 			return
 		}
 
