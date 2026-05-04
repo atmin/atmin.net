@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { SWUpdateToast } from '@/components/SWUpdateToast';
 import { useSession } from '@/hooks/useSession';
+import { useSWUpdate } from '@/hooks/useSWUpdate';
 import Chat from '@/routes/chat';
 import Chats from '@/routes/chats';
 import Landing from '@/routes/landing';
@@ -10,6 +13,8 @@ import Settings from '@/routes/settings';
 export default function App() {
     const { session, sessionManager, loading, handleLogin, handleLogout } =
         useSession();
+    const [chatSending, setChatSending] = useState(false);
+    const swUpdate = useSWUpdate(chatSending);
 
     if (loading) return null;
 
@@ -72,6 +77,7 @@ export default function App() {
                             <Chat
                                 session={session}
                                 sessionManager={sessionManager}
+                                onSendingChange={setChatSending}
                             />
                         ) : (
                             <Navigate to="/login" replace />
@@ -79,6 +85,13 @@ export default function App() {
                     }
                 />
             </Routes>
+            {swUpdate.needRefresh && (
+                <SWUpdateToast
+                    sending={chatSending}
+                    onUpdate={swUpdate.onUpdate}
+                    onDismiss={swUpdate.onDismiss}
+                />
+            )}
         </BrowserRouter>
     );
 }

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
@@ -10,9 +10,14 @@ import type { SessionManager } from '@/lib/megolm-session';
 interface Props {
     session: Session;
     sessionManager: SessionManager | null;
+    onSendingChange?: (sending: boolean) => void;
 }
 
-export default function ChatRoute({ session, sessionManager }: Props) {
+export default function ChatRoute({
+    session,
+    sessionManager,
+    onSendingChange,
+}: Props) {
     const { handle } = useParams<{ handle: string }>();
     const {
         messages,
@@ -23,6 +28,10 @@ export default function ChatRoute({ session, sessionManager }: Props) {
         sendMessage,
         sendMedia,
     } = useChat(handle, session, sessionManager);
+
+    useEffect(() => {
+        onSendingChange?.(sending);
+    }, [sending, onSendingChange]);
 
     const mediaFiles = useMemo<MediaFile[]>(
         () => messages.flatMap((m) => (m.media ? [m.media] : [])),
