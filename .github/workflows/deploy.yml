@@ -95,6 +95,9 @@ jobs:
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd web && pnpm build:wasm
 
+      - name: Stub web dist for go embed
+        run: mkdir -p server/dist && touch server/dist/index.html
+
       - name: Lint
         run: make lint
 
@@ -146,6 +149,9 @@ jobs:
       - name: Build WASM
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd web && pnpm build:wasm
+
+      - name: Stub web dist for go embed
+        run: mkdir -p server/dist && touch server/dist/index.html
 
       - name: Unit tests
         run: make test
