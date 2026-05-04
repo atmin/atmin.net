@@ -1,7 +1,7 @@
 # Stage 1: Build web assets (Node + Rust/wasm-pack)
 FROM node:25-alpine AS web
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN wget -qO /usr/local/bin/pnpm https://github.com/pnpm/pnpm/releases/download/v11.0.4/pnpm-linuxstatic-x64 && chmod +x /usr/local/bin/pnpm
 RUN apk add --no-cache curl bash build-base
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target wasm32-unknown-unknown
 ENV PATH="/root/.cargo/bin:${PATH}"
