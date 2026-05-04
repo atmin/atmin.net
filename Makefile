@@ -1,9 +1,22 @@
 DOCKER ?= docker
 
-.PHONY: all build test lint fmt clean dev run e2e e2e-local
+.PHONY: all build test lint fmt clean dev run e2e e2e-local install
 .PHONY: server server-build server-test server-lint server-fmt
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
 .PHONY: up down
+
+# --- Setup ---
+
+install:
+	@command -v go >/dev/null 2>&1 || (echo "ERROR: go not found — https://golang.org/dl/"; exit 1)
+	@command -v pnpm >/dev/null 2>&1 || (echo "ERROR: pnpm not found — https://pnpm.io/installation"; exit 1)
+	@command -v cargo >/dev/null 2>&1 || (echo "ERROR: cargo not found — https://rustup.rs/"; exit 1)
+	@command -v $(DOCKER) >/dev/null 2>&1 || (echo "ERROR: $(DOCKER) not found — https://docs.docker.com/get-docker/"; exit 1)
+	@command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack
+	cd web && pnpm install
+	@test -f .env || cp .env.example .env
+	cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+	@echo "Done. Run 'make dev' to start."
 
 # --- Aggregates ---
 
@@ -39,28 +52,28 @@ server-fmt:
 # --- Web (TypeScript) ---
 
 web-dev:
-	cd web && npm run dev
+	cd web && pnpm dev
 
 web-wasm:
-	cd web && npm run build:wasm
+	cd web && pnpm build:wasm
 
 web-build: web-wasm
-	cd web && npm run build
+	cd web && pnpm build
 
 web-test:
-	cd web && npm test
+	cd web && pnpm test
 
 web-lint:
-	cd web && npm run lint
+	cd web && pnpm lint
 
 web-lint-arch:
 	web/scripts/lint-architecture.sh
 
 web-storybook:
-	cd web && npm run storybook
+	cd web && pnpm storybook
 
 web-fmt:
-	cd web && npm run lint:fix
+	cd web && pnpm lint:fix
 
 # --- Dev (all-in-one) ---
 
@@ -69,7 +82,7 @@ dev:
 	@set -a; . ./.env; set +a; \
 	trap 'kill 0' EXIT; \
 	(cd server && go run .) & \
-	(cd web && npm run dev) & \
+	(cd web && pnpm dev) & \
 	wait
 
 run:
@@ -99,7 +112,7 @@ e2e: web-build
 		-e S3_ACCESS_KEY=minioadmin \
 		-e S3_SECRET_KEY=minioadmin \
 		atmindotnet:e2e
-	cd web && E2E_BUCKET=atmin-e2e-local npx playwright test; \
+	cd web && E2E_BUCKET=atmin-e2e-local pnpm exec playwright test; \
 		status=$$?; $(DOCKER) rm -f atmin-e2e; exit $$status
 
 # Fast local e2e: runs the server natively (no docker build).
@@ -129,7 +142,7 @@ e2e-local: web-build server-build
 		sleep 0.2; \
 	done; \
 	if [ -z "$$up" ]; then echo "server did not come up on :8080" >&2; kill $$SERVER_PID 2>/dev/null || true; exit 1; fi; \
-	cd web && E2E_BUCKET=$$BUCKET npx playwright test $(SPEC); \
+	cd web && E2E_BUCKET=$$BUCKET pnpm exec playwright test $(SPEC); \
 	status=$$?; \
 	kill $$SERVER_PID 2>/dev/null || true; \
 	exit $$status

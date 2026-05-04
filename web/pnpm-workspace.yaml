@@ -1,0 +1,4 @@
+allowBuilds:
+  cbor-extract: false
+  esbuild: true
+  msw: true

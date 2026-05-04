@@ -137,8 +137,8 @@ Capacitor's official plugin.
 
 **Web artifact** (unchanged regardless of wrapper):
 ```sh
-cd web && npm run build:wasm   # Rust → WASM (only on crypto changes)
-cd web && npm run build        # tsc + vite → web/dist/
+cd web && pnpm build:wasm   # Rust → WASM (only on crypto changes)
+cd web && pnpm build        # tsc + vite → web/dist/
 ```
 
 **macOS** (tested, working):
