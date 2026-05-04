@@ -51,11 +51,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          node-version: 25
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - uses: actions/setup-go@v5
         with:
@@ -76,7 +80,7 @@ jobs:
         run: which wasm-pack || curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Install web dependencies
-        run: cd web && npm ci
+        run: cd web && pnpm install --frozen-lockfile
 
       - name: Cache WASM build
         id: wasm-cache
@@ -89,10 +93,10 @@ jobs:
 
       - name: Build WASM
         if: steps.wasm-cache.outputs.cache-hit != 'true'
-        run: cd web && npm run build:wasm
+        run: cd web && pnpm build:wasm
 
       - name: Build web
-        run: cd web && npm run build
+        run: cd web && pnpm build
 
       - name: Copy web assets for server
         run: cp -r web/dist server/dist
@@ -105,11 +109,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          node-version: 25
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - uses: actions/setup-go@v5
         with:
@@ -130,7 +138,7 @@ jobs:
         run: which wasm-pack || curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Install web dependencies
-        run: cd web && npm ci
+        run: cd web && pnpm install --frozen-lockfile
 
       - name: Cache WASM build
         id: wasm-cache
@@ -143,10 +151,10 @@ jobs:
 
       - name: Build WASM
         if: steps.wasm-cache.outputs.cache-hit != 'true'
-        run: cd web && npm run build:wasm
+        run: cd web && pnpm build:wasm
 
       - name: Build web
-        run: cd web && npm run build
+        run: cd web && pnpm build
 
       - name: Copy web assets for server
         run: cp -r web/dist server/dist
@@ -201,34 +209,38 @@ jobs:
             sleep 1
           done
 
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          node-version: 25
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Install web dependencies
-        run: cd web && npm ci
+        run: cd web && pnpm install --frozen-lockfile
 
       - name: Cache Playwright browsers
         id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ hashFiles('web/package-lock.json') }}
+          key: playwright-${{ hashFiles('web/pnpm-lock.yaml') }}
 
       - name: Install Playwright browsers
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: cd web && npx playwright install --with-deps chromium
+        run: cd web && pnpm exec playwright install --with-deps chromium
 
       - name: Install Playwright system deps
         if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: cd web && npx playwright install-deps chromium
+        run: cd web && pnpm exec playwright install-deps chromium
 
       - name: Run e2e tests
         env:
           E2E_BUCKET: atmin-e2e-${{ github.run_id }}
-        run: cd web && npx playwright test
+        run: cd web && pnpm exec playwright test
 
       - name: App container logs
         if: always()

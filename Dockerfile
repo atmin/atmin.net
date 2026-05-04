@@ -1,23 +1,24 @@
 # Stage 1: Build web assets (Node + Rust/wasm-pack)
-FROM node:22-alpine AS web
+FROM node:25-alpine AS web
 
+RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN apk add --no-cache curl bash build-base
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --target wasm32-unknown-unknown
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo install wasm-pack wasm-bindgen-cli@0.2.108
 
 WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
 COPY web/crypto ./crypto
-RUN npm run build:wasm
+RUN pnpm build:wasm
 
 COPY web/ .
 
 ARG APP_VERSION=dev
 ENV APP_VERSION=$APP_VERSION
-RUN npm run build
+RUN pnpm build
 
 # Stage 2: Build Go binary
 FROM golang:1.26-alpine AS server
