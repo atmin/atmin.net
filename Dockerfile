@@ -9,7 +9,7 @@ RUN cargo install wasm-pack wasm-bindgen-cli@0.2.108
 
 WORKDIR /app/web
 COPY web/package.json web/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm rebuild esbuild msw
 
 COPY web/crypto ./crypto
 RUN pnpm build:wasm
