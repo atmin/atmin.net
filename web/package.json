@@ -43,6 +43,9 @@
         "vite-plugin-pwa": "^1.2.0",
         "vitest": "^3.0.6"
     },
+    "pnpm": {
+        "onlyBuiltDependencies": ["esbuild", "msw"]
+    },
     "dependencies": {
         "@noble/curves": "^2.2.0",
         "@scure/bip39": "^2.0.1",

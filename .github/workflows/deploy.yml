@@ -95,12 +95,6 @@ jobs:
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd web && pnpm build:wasm
 
-      - name: Build web
-        run: cd web && pnpm build
-
-      - name: Copy web assets for server
-        run: cp -r web/dist server/dist
-
       - name: Lint
         run: make lint
 
@@ -152,12 +146,6 @@ jobs:
       - name: Build WASM
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd web && pnpm build:wasm
-
-      - name: Build web
-        run: cd web && pnpm build
-
-      - name: Copy web assets for server
-        run: cp -r web/dist server/dist
 
       - name: Unit tests
         run: make test
