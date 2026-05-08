@@ -111,5 +111,6 @@ export default defineConfig({
             '/v1': apiUrl,
             '/healthz': apiUrl,
         },
+        allowedHosts: ['.sshtun.nl']
     },
 });
