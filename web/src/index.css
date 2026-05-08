@@ -135,6 +135,14 @@
     }
 }
 
+/* Prevent iOS Safari auto-zoom on input focus. font-size must be >= 16px.
+   Placed outside any @layer so it wins over Tailwind utility classes. */
+input,
+textarea,
+select {
+    font-size: max(16px, 1em);
+}
+
 @layer components {
     .bubble-tail-sent {
         &::before {
