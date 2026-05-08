@@ -281,6 +281,37 @@ jobs:
           SCW_DEFAULT_REGION: fr-par
         run: scw container container deploy ${{ secrets.SCW_STAGING_CONTAINER_ID }}
 
+  deploy-storybook:
+    if: github.ref == 'refs/heads/master'
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web dependencies
+        run: cd web && pnpm install --frozen-lockfile
+
+      - name: Build Storybook
+        run: cd web && pnpm build-storybook
+
+      - name: Deploy to storybook.atmin.net
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.STORYBOOK_DEPLOY_TOKEN }}
+          external_repository: atmin/storybook.atmin.net
+          publish_branch: gh-pages
+          publish_dir: web/storybook-static
+
   deploy:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [lint, test, e2e]
