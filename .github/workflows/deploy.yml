@@ -311,6 +311,7 @@ jobs:
           external_repository: atmin/storybook.atmin.net
           publish_branch: gh-pages
           publish_dir: web/storybook-static
+          cname: storybook.atmin.net
 
   deploy:
     if: startsWith(github.ref, 'refs/tags/v')
