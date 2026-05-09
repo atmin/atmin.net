@@ -1190,6 +1190,129 @@ describe('api - Megolm send/receive', () => {
             expect(messages).toHaveLength(0);
             mgr.destroy();
         });
+
+        it('persists archive cursor after fetching archives', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+            const archivePrefix = `inbox/${toUserId}/archive/`;
+            const archiveKey = `${archivePrefix}2026-01-15-01ARCHIVEID1`;
+
+            // No live messages
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+            );
+            // Archive storeList returns one key
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [archiveKey],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Archive storeGet returns empty CBOR array
+            const emptyCbor = new Uint8Array(cborEncode([])).buffer;
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(emptyCbor) as Response,
+            );
+
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            const cursor = await loadSyncCursor(archivePrefix);
+            expect(cursor).toBe(archiveKey);
+
+            mgr.destroy();
+        });
+
+        it('passes stored archive cursor to storeList on subsequent syncs', async () => {
+            const mgr = await createSessionManager(wasm);
+            const archivePrefix = `inbox/${toUserId}/archive/`;
+            const priorArchiveKey = `${archivePrefix}2026-01-14-01ARCHIVEID0`;
+
+            // Pre-seed the archive cursor (simulate a previous sync)
+            await saveSyncCursor(archivePrefix, priorArchiveKey);
+
+            // No live messages
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+            );
+            // Archive storeList: default mock handles it (returns empty, no new archives)
+
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // call 0 = live storeList, call 1 = archive storeList with cursor
+            expect(fetchMock.mock.calls[1][0]).toContain(
+                `cursor=${encodeURIComponent(priorArchiveKey)}`,
+            );
+
+            mgr.destroy();
+        });
+
+        it('falls back to full archive fetch when archive cursor is stale', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+            const archivePrefix = `inbox/${toUserId}/archive/`;
+            const staleKey = `${archivePrefix}2026-01-01-01STALEID`;
+            const freshArchiveKey = `${archivePrefix}2026-01-15-01ARCHIVEID1`;
+
+            // Pre-seed a stale archive cursor
+            await saveSyncCursor(archivePrefix, staleKey);
+
+            // No live messages
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+            );
+            // Archive storeList with stale cursor → server error
+            fetchMock.mockResolvedValueOnce({
+                ok: false,
+                status: 500,
+                statusText: 'Internal Server Error',
+                headers: { get: () => 'application/json' },
+                json: async () => ({
+                    error: 'internal',
+                    message: 'Stale cursor',
+                }),
+            } as unknown as Response);
+            // Fallback archive storeList (no cursor) → success
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [freshArchiveKey],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Archive storeGet → empty CBOR
+            const emptyCbor = new Uint8Array(cborEncode([])).buffer;
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(emptyCbor) as Response,
+            );
+
+            await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            // call 0 = live storeList
+            // call 1 = archive storeList with stale cursor
+            // call 2 = archive storeList fallback (no cursor)
+            expect(fetchMock.mock.calls[1][0]).toContain('cursor=');
+            expect(fetchMock.mock.calls[2][0]).not.toContain('cursor=');
+
+            // Cursor updated to the successfully fetched archive key
+            const cursor = await loadSyncCursor(archivePrefix);
+            expect(cursor).toBe(freshArchiveKey);
+
+            mgr.destroy();
+        });
     });
 
     describe('fetchMessages compaction', () => {

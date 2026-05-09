@@ -579,7 +579,9 @@ async function processEnvelopes(
     return { messages, advancedInbounds };
 }
 
-// Fetch and decrypt messages from CBOR archive blobs
+// Fetch and decrypt messages from CBOR archive blobs.
+// Uses a cursor so only new archive files (added since last sync) are fetched;
+// already-processed archives are already in IndexedDB as decrypted messages.
 export async function fetchArchiveMessages(
     token: string,
     userId: string,
@@ -588,18 +590,25 @@ export async function fetchArchiveMessages(
     seenMsgIds: Set<string>,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
     const archivePrefix = `inbox/${userId}/archive/`;
+    const storedCursor = await loadSyncCursor(archivePrefix);
+
     let listRes: StoreListResponse;
     try {
-        listRes = await storeList(token, archivePrefix);
+        listRes = await storeList(token, archivePrefix, storedCursor);
     } catch {
-        return { messages: [], advancedInbounds: new Set() };
+        // Cursor may be stale; fall back to full fetch
+        try {
+            listRes = await storeList(token, archivePrefix);
+        } catch {
+            return { messages: [], advancedInbounds: new Set() };
+        }
     }
 
     if (listRes.keys.length === 0) {
         return { messages: [], advancedInbounds: new Set() };
     }
 
-    // Fetch and decode all CBOR archive blobs
+    // Fetch and decode only new CBOR archive blobs
     const allEnvelopes: Array<{ key: string; envelope: Envelope }> = [];
     for (const key of listRes.keys) {
         try {
@@ -612,6 +621,10 @@ export async function fetchArchiveMessages(
             console.error(`Failed to fetch/decode archive ${key}:`, error);
         }
     }
+
+    // Persist cursor so next sync skips already-fetched archives
+    const lastKey = listRes.keys[listRes.keys.length - 1];
+    await saveSyncCursor(archivePrefix, lastKey);
 
     return processEnvelopes(
         allEnvelopes,
