@@ -357,9 +357,11 @@ Decrypted attachments live in memory only, held as `ObjectURL`s owned by
 the rendering component. Unmount revokes the URL and aborts any in-flight
 fetch. Decrypted plaintext is never persisted to disk. Encrypted blobs
 under `media/` are served with
-`Cache-Control: private, immutable, max-age=31536000`, so browser HTTP
+`Cache-Control: public, immutable, max-age=31536000`, so browser HTTP
 cache shortcuts the network leg on refresh — decryption still happens per
-mount. Offline media and cross-session caching are deferred (see
+mount. `public` is required because RFC 9111 §3.5 prevents caching
+responses to credentialed requests unless the response explicitly opts in;
+the blobs are GCM-sealed ciphertext so shared caching is safe. Offline media and cross-session caching are deferred (see
 [evolution/large-media.md](../evolution/large-media.md)).
 
 ### Upload reliability
