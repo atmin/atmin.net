@@ -1,8 +1,8 @@
-import { ChevronLeft } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { updateProfile } from '@/lib/api';
+import BackButton from './BackButton';
 import Layout from './Layout';
+import PageContent from './PageContent';
 
 interface Props {
     handle: string;
@@ -47,20 +47,15 @@ export default function ProfileSettings({
     };
 
     const topBar = (
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-1 font-mono">
-            <Link
-                to="/"
-                className="text-muted-foreground hover:text-foreground"
-            >
-                <ChevronLeft className="h-5 w-5" />
-            </Link>
-            <span className="text-sm font-medium">Settings</span>
-        </div>
+        <>
+            <BackButton />
+            <span className="ml-1 font-mono text-sm font-medium">Settings</span>
+        </>
     );
 
     return (
         <Layout topBar={topBar}>
-            <div className="mx-auto max-w-2xl px-8 pb-8 pt-20 font-mono text-sm">
+            <PageContent>
                 <div className="mb-6 rounded bg-muted p-4">
                     <p className="mb-1 text-xs text-muted-foreground">
                         Your handle
@@ -112,7 +107,7 @@ export default function ProfileSettings({
                 </div>
 
                 {children}
-            </div>
+            </PageContent>
         </Layout>
     );
 }

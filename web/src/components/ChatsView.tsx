@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { StoredConversation } from '@/lib/db';
 import Layout from './Layout';
 import Logo from './Logo';
+import PageContent from './PageContent';
 
 function timeAgo(ts: number): string {
     const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -62,12 +63,12 @@ export default function ChatsView({
     const peerLabel = (uid: string) => displayNames.get(uid) || peerHandle(uid);
 
     const topBar = (
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between font-mono">
-            <div className="flex items-center gap-2">
+        <>
+            <div className="flex items-center gap-2 font-mono">
                 <Logo className="h-7 w-7" />
                 <span className="font-bold">atmin</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2">
                 <Link
                     to="/settings"
                     className="text-xs text-muted-foreground hover:text-foreground"
@@ -84,12 +85,12 @@ export default function ChatsView({
                     }`}
                 />
             </div>
-        </div>
+        </>
     );
 
     return (
         <Layout topBar={topBar}>
-            <div className="mx-auto max-w-2xl px-8 pb-8 pt-20 font-mono text-sm">
+            <PageContent>
                 <div className="mb-6 rounded bg-muted p-4">
                     <p className="mb-1 text-xs text-muted-foreground">
                         Your handle
@@ -199,7 +200,7 @@ export default function ChatsView({
                 >
                     Sign out
                 </button>
-            </div>
+            </PageContent>
         </Layout>
     );
 }

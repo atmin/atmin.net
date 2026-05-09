@@ -1,8 +1,7 @@
-import { ChevronLeft } from 'lucide-react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { Message } from '@/hooks/useChat';
 import type { MediaState } from '@/hooks/useMedia';
+import BackButton from './BackButton';
 import ChatMessage from './ChatMessage';
 import Layout from './Layout';
 
@@ -44,15 +43,10 @@ export default function ChatView({
     };
 
     const topBar = (
-        <div className="mx-auto flex w-full max-w-2xl items-center gap-1">
-            <Link
-                to="/"
-                className="text-muted-foreground hover:text-foreground"
-            >
-                <ChevronLeft className="h-5 w-5" />
-            </Link>
-            <h2 className="font-mono text-sm font-medium">{chatTitle}</h2>
-        </div>
+        <>
+            <BackButton />
+            <h2 className="ml-1 font-mono text-sm font-medium">{chatTitle}</h2>
+        </>
     );
 
     return (
