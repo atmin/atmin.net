@@ -1,6 +1,8 @@
+import { ChevronLeft } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { updateProfile } from '@/lib/api';
+import Layout from './Layout';
 
 interface Props {
     handle: string;
@@ -44,18 +46,21 @@ export default function ProfileSettings({
         setTimeout(() => setCopied(false), 2000);
     };
 
+    const topBar = (
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-1 font-mono">
+            <Link
+                to="/"
+                className="text-muted-foreground hover:text-foreground"
+            >
+                <ChevronLeft className="h-5 w-5" />
+            </Link>
+            <span className="text-sm font-medium">Settings</span>
+        </div>
+    );
+
     return (
-        <div className="min-h-screen bg-background p-8 font-mono text-sm">
-            <div className="mx-auto max-w-md">
-                <Link
-                    to="/"
-                    className="mb-6 inline-block text-xs text-muted-foreground hover:text-foreground"
-                >
-                    &larr; Back to chats
-                </Link>
-
-                <h1 className="mb-8 text-2xl font-bold">Settings</h1>
-
+        <Layout topBar={topBar}>
+            <div className="mx-auto max-w-2xl px-8 pb-8 pt-20 font-mono text-sm">
                 <div className="mb-6 rounded bg-muted p-4">
                     <p className="mb-1 text-xs text-muted-foreground">
                         Your handle
@@ -108,6 +113,6 @@ export default function ProfileSettings({
 
                 {children}
             </div>
-        </div>
+        </Layout>
     );
 }

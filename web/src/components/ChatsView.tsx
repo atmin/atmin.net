@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { StoredConversation } from '@/lib/db';
+import Layout from './Layout';
 import Logo from './Logo';
 
 function timeAgo(ts: number): string {
@@ -60,33 +61,35 @@ export default function ChatsView({
     const peerHandle = (uid: string) => contacts.get(uid) ?? uid.slice(0, 8);
     const peerLabel = (uid: string) => displayNames.get(uid) || peerHandle(uid);
 
-    return (
-        <div className="min-h-screen bg-background p-8 font-mono text-sm">
-            <div className="mx-auto max-w-md">
-                <div className="mb-8 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Logo className="h-8 w-8" />
-                        <h1 className="text-2xl font-bold">atmin</h1>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <Link
-                            to="/settings"
-                            className="text-xs text-muted-foreground hover:text-foreground"
-                        >
-                            Settings
-                        </Link>
-                        <span
-                            className={`inline-block h-2 w-2 rounded-full ${
-                                serverOk === true
-                                    ? 'bg-green-500'
-                                    : serverOk === false
-                                      ? 'bg-red-500'
-                                      : 'bg-yellow-500'
-                            }`}
-                        />
-                    </div>
-                </div>
+    const topBar = (
+        <div className="mx-auto flex w-full max-w-2xl items-center justify-between font-mono">
+            <div className="flex items-center gap-2">
+                <Logo className="h-7 w-7" />
+                <span className="font-bold">atmin</span>
+            </div>
+            <div className="flex items-center gap-2">
+                <Link
+                    to="/settings"
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                    Settings
+                </Link>
+                <span
+                    className={`inline-block h-2 w-2 rounded-full ${
+                        serverOk === true
+                            ? 'bg-green-500'
+                            : serverOk === false
+                              ? 'bg-red-500'
+                              : 'bg-yellow-500'
+                    }`}
+                />
+            </div>
+        </div>
+    );
 
+    return (
+        <Layout topBar={topBar}>
+            <div className="mx-auto max-w-2xl px-8 pb-8 pt-20 font-mono text-sm">
                 <div className="mb-6 rounded bg-muted p-4">
                     <p className="mb-1 text-xs text-muted-foreground">
                         Your handle
@@ -197,6 +200,6 @@ export default function ChatsView({
                     Sign out
                 </button>
             </div>
-        </div>
+        </Layout>
     );
 }

@@ -1,8 +1,10 @@
+import { ChevronLeft } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Message } from '@/hooks/useChat';
 import type { MediaState } from '@/hooks/useMedia';
 import ChatMessage from './ChatMessage';
+import Layout from './Layout';
 
 interface Props {
     chatTitle: string;
@@ -41,26 +43,23 @@ export default function ChatView({
         setInputValue('');
     };
 
-    return (
-        <div className="flex min-h-screen flex-col bg-background">
-            {/* Header */}
-            <div className="border-b border-border bg-background px-4 py-3">
-                <div className="mx-auto flex max-w-2xl items-center gap-3">
-                    <Link
-                        to="/"
-                        className="text-muted-foreground hover:text-foreground"
-                    >
-                        ← Back
-                    </Link>
-                    <h2 className="font-mono text-sm font-medium">
-                        {chatTitle}
-                    </h2>
-                </div>
-            </div>
+    const topBar = (
+        <div className="mx-auto flex w-full max-w-2xl items-center gap-1">
+            <Link
+                to="/"
+                className="text-muted-foreground hover:text-foreground"
+            >
+                <ChevronLeft className="h-5 w-5" />
+            </Link>
+            <h2 className="font-mono text-sm font-medium">{chatTitle}</h2>
+        </div>
+    );
 
+    return (
+        <Layout fullHeight topBar={topBar}>
             {/* Messages area */}
             <div className="flex-1 overflow-y-auto">
-                <div className="mx-auto max-w-2xl p-4">
+                <div className="mx-auto max-w-2xl px-4 pb-4 pt-14">
                     {loading ? (
                         <div className="flex h-96 items-center justify-center text-muted-foreground">
                             <div className="text-center">
@@ -148,6 +147,6 @@ export default function ChatView({
                     </button>
                 </form>
             </div>
-        </div>
+        </Layout>
     );
 }
