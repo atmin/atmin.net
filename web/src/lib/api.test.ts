@@ -15,7 +15,12 @@ import {
     storeGet,
     updateProfile,
 } from './api';
-import { base64UrlEncode, deriveKeys, generateBackupSecret } from './crypto';
+import {
+    backupDecrypt,
+    base64UrlEncode,
+    deriveKeys,
+    generateBackupSecret,
+} from './crypto';
 import {
     clearInboundSessions,
     clearKeyShares,
@@ -1604,5 +1609,239 @@ describe('api - unauthorized (401)', () => {
         });
 
         expect(onUnauth).toHaveBeenCalledOnce();
+    });
+});
+
+describe('api - key-share backup', () => {
+    const token = 'test-token';
+    const userId = '01TESTUSER123';
+    const fromUserId = '01TESTUSER456';
+    const fromDeviceId = '01TESTDEVICE789';
+
+    let recipientKeys: Awaited<ReturnType<typeof deriveKeys>>;
+
+    beforeEach(async () => {
+        resetFetchMock();
+        globalThis.indexedDB = new IDBFactory();
+        globalThis.IDBKeyRange = FakeIDBKeyRange;
+
+        recipientKeys = await deriveKeys(generateBackupSecret());
+    });
+
+    afterEach(async () => {
+        await clearOutboundSession();
+        await clearInboundSessions();
+        await clearKeyShares();
+        await clearSyncCursors();
+    });
+
+    it('backs up received session key via storePresign on first key-share arrival', async () => {
+        const mgr = await createSessionManager(wasm);
+        const sender = new MegolmOutbound();
+        const sessionKey = sender.session_key();
+        const { eciesEncrypt } = await import('./crypto');
+        const encryptedKey = await eciesEncrypt(
+            recipientKeys.sharing.publicKey,
+            new TextEncoder().encode(sessionKey),
+        );
+
+        const keyShareEnvelope = {
+            v: 1,
+            to_user: userId,
+            from_user: fromUserId,
+            from_device: fromDeviceId,
+            msg_id: 'msg-ks-backup-01',
+            content_type: 'megolm.key_share',
+            sent_at: new Date().toISOString(),
+            payload: {
+                ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                iv: base64UrlEncode(encryptedKey.iv),
+                ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+            },
+        };
+
+        // backupSessionKey is fire-and-forget so the presign call races with
+        // the archive storeList call. Use URL-based routing to avoid ordering
+        // issues with mockResolvedValueOnce.
+        const presignedUrl = 'https://s3.example.com/presigned-backup';
+        const envelopeBytes = new TextEncoder().encode(
+            JSON.stringify(keyShareEnvelope),
+        ).buffer;
+        fetchMock.mockImplementation(
+            async (url: string | URL | Request, init?: RequestInit) => {
+                const urlStr =
+                    typeof url === 'string'
+                        ? url
+                        : url instanceof URL
+                          ? url.href
+                          : (url as Request).url;
+                if (urlStr === presignedUrl && init?.method === 'PUT') {
+                    return new Response(null, { status: 200 });
+                }
+                if (urlStr === '/v1/store/presign') {
+                    return mockJsonResponse({
+                        presigned_url: presignedUrl,
+                    }) as Response;
+                }
+                if (urlStr.startsWith('/v1/store/object')) {
+                    return mockArrayBufferResponse(envelopeBytes) as Response;
+                }
+                if (urlStr.startsWith('/v1/store/list')) {
+                    const prefix =
+                        new URLSearchParams(urlStr.split('?')[1] ?? '').get(
+                            'prefix',
+                        ) ?? '';
+                    if (prefix === `inbox/${userId}/live/`) {
+                        return mockJsonResponse({
+                            keys: [`inbox/${userId}/live/msg-ks-backup-01`],
+                            next_cursor: '',
+                        }) as Response;
+                    }
+                }
+                return mockJsonResponse({
+                    keys: [],
+                    next_cursor: '',
+                }) as Response;
+            },
+        );
+
+        await fetchMessages(
+            token,
+            userId,
+            recipientKeys.sharing.privateKey,
+            mgr,
+            recipientKeys.backupKey,
+        );
+
+        // backupSessionKey is fire-and-forget; wait for presign call to settle
+        await vi.waitFor(() => {
+            const done = fetchMock.mock.calls.some(
+                (call) => (call[0] as string) === '/v1/store/presign',
+            );
+            if (!done) throw new Error('storePresign not yet called');
+        });
+
+        // Find the storePresign call
+        const presignCall = fetchMock.mock.calls.find(
+            (call) => (call[0] as string) === '/v1/store/presign',
+        );
+        expect(presignCall).toBeDefined();
+        const presignBody = JSON.parse(presignCall![1].body as string);
+        expect(presignBody.key).toBe(
+            `keys/${userId}/live/${sender.session_id}`,
+        );
+
+        // Find the PUT to presigned URL and verify the body decrypts to the session key
+        const putCall = fetchMock.mock.calls.find(
+            (call) => (call[0] as string) === presignedUrl,
+        );
+        expect(putCall).toBeDefined();
+        const putBody = JSON.parse(
+            new TextDecoder().decode(putCall![1].body as Uint8Array),
+        );
+        const ivBytes = Uint8Array.from(atob(putBody.iv), (c) =>
+            c.charCodeAt(0),
+        );
+        const ctBytes = Uint8Array.from(atob(putBody.ciphertext), (c) =>
+            c.charCodeAt(0),
+        );
+        const decrypted = await backupDecrypt(recipientKeys.backupKey, {
+            iv: ivBytes,
+            ciphertext: ctBytes,
+        });
+        expect(new TextDecoder().decode(decrypted)).toBe(sessionKey);
+
+        sender.free();
+        mgr.destroy();
+    });
+
+    it('skips backup on second arrival of the same key share (session already known)', async () => {
+        const mgr = await createSessionManager(wasm);
+        const sender = new MegolmOutbound();
+        const sessionKey = sender.session_key();
+        const { eciesEncrypt } = await import('./crypto');
+        const encryptedKey = await eciesEncrypt(
+            recipientKeys.sharing.publicKey,
+            new TextEncoder().encode(sessionKey),
+        );
+
+        const keyShareEnvelope = {
+            v: 1,
+            to_user: userId,
+            from_user: fromUserId,
+            from_device: fromDeviceId,
+            msg_id: 'msg-ks-backup-02',
+            content_type: 'megolm.key_share',
+            sent_at: new Date().toISOString(),
+            payload: {
+                ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                iv: base64UrlEncode(encryptedKey.iv),
+                ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+            },
+        };
+
+        const mockKeyShareFetch = () => {
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`inbox/${userId}/live/msg-ks-backup-02`],
+                    next_cursor: '',
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(keyShareEnvelope))
+                        .buffer,
+                ) as Response,
+            );
+        };
+
+        // First fetch: key share is new → should trigger backup
+        mockKeyShareFetch();
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({
+                presigned_url: 'https://s3.example.com/backup1',
+            }) as Response,
+        );
+        fetchMock.mockResolvedValueOnce({ ok: true, status: 200 } as Response);
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+        );
+
+        await fetchMessages(
+            token,
+            userId,
+            recipientKeys.sharing.privateKey,
+            mgr,
+            recipientKeys.backupKey,
+        );
+
+        const presignCountAfterFirst = fetchMock.mock.calls.filter(
+            (call) => (call[0] as string) === '/v1/store/presign',
+        ).length;
+        expect(presignCountAfterFirst).toBe(1);
+
+        resetFetchMock();
+
+        // Second fetch: same key share → session already in cache → no backup
+        mockKeyShareFetch();
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+        );
+
+        await fetchMessages(
+            token,
+            userId,
+            recipientKeys.sharing.privateKey,
+            mgr,
+            recipientKeys.backupKey,
+        );
+
+        const presignCountAfterSecond = fetchMock.mock.calls.filter(
+            (call) => (call[0] as string) === '/v1/store/presign',
+        ).length;
+        expect(presignCountAfterSecond).toBe(0);
+
+        sender.free();
+        mgr.destroy();
     });
 });

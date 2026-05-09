@@ -354,6 +354,7 @@ export function storeCompact(
 }
 
 import { decode as cborDecode } from 'cbor-x';
+import { backupSessionKey } from './key-backup';
 import type { SessionManager } from './megolm-session';
 
 // Deterministic conversation ID
@@ -510,6 +511,8 @@ async function processEnvelopes(
     sharingPrivateKey: CryptoKey,
     sessionManager: SessionManager | undefined,
     seenMsgIds: Set<string>,
+    token?: string,
+    backupKey?: CryptoKey,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
     // Pass 1: process key shares first (so session keys are available for messages)
     if (sessionManager) {
@@ -529,11 +532,20 @@ async function processEnvelopes(
                     encryptedPayload,
                 );
                 const sessionKeyB64 = new TextDecoder().decode(sessionKeyBytes);
-                await sessionManager.addInbound(
+                const [inbound, isNew] = await sessionManager.addInbound(
                     envelope.from_user,
                     envelope.from_device,
                     sessionKeyB64,
                 );
+                if (isNew && token && backupKey) {
+                    backupSessionKey(
+                        token,
+                        userId,
+                        inbound.session_id,
+                        sessionKeyB64,
+                        backupKey,
+                    ).catch((err) => console.error('Key backup failed:', err));
+                }
             } catch (error) {
                 console.error(`Failed to process key share ${key}:`, error);
             }
@@ -588,6 +600,7 @@ export async function fetchArchiveMessages(
     sharingPrivateKey: CryptoKey,
     sessionManager: SessionManager | undefined,
     seenMsgIds: Set<string>,
+    backupKey?: CryptoKey,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
     const archivePrefix = `inbox/${userId}/archive/`;
     const storedCursor = await loadSyncCursor(archivePrefix);
@@ -632,6 +645,8 @@ export async function fetchArchiveMessages(
         sharingPrivateKey,
         sessionManager,
         seenMsgIds,
+        token,
+        backupKey,
     );
 }
 
@@ -642,6 +657,7 @@ export function syncMessages(
     userId: string,
     sharingPrivateKey: CryptoKey,
     sessionManager?: SessionManager,
+    backupKey?: CryptoKey,
 ): Promise<DecryptedMessage[]> {
     if (syncInFlight) return syncInFlight;
     syncInFlight = fetchMessages(
@@ -649,6 +665,7 @@ export function syncMessages(
         userId,
         sharingPrivateKey,
         sessionManager,
+        backupKey,
     ).finally(() => {
         syncInFlight = null;
     });
@@ -660,6 +677,7 @@ export async function fetchMessages(
     userId: string,
     sharingPrivateKey: CryptoKey,
     sessionManager?: SessionManager,
+    backupKey?: CryptoKey,
 ): Promise<DecryptedMessage[]> {
     // List messages in inbox, resuming from stored cursor if available
     const prefix = `inbox/${userId}/live/`;
@@ -699,6 +717,8 @@ export async function fetchMessages(
         sharingPrivateKey,
         sessionManager,
         new Set(), // no dedup needed for live pass
+        token,
+        backupKey,
     );
 
     // Process archive envelopes (dedup against live msg_ids)
@@ -708,6 +728,7 @@ export async function fetchMessages(
         sharingPrivateKey,
         sessionManager,
         seenMsgIds,
+        backupKey,
     );
 
     // Persist inbound sessions whose ratchets advanced during decryption

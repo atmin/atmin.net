@@ -7,6 +7,7 @@ import {
     type Session,
 } from '@/lib/auth';
 import { restoreContacts } from '@/lib/contact-backup';
+import { restoreSessionKeys } from '@/lib/key-backup';
 import type { SessionManager } from '@/lib/megolm-session';
 
 export interface SessionState {
@@ -69,6 +70,15 @@ export function useSession(): SessionState {
                     ).catch((err) => console.error('Key backup failed:', err)),
             );
             if (cancelled) return;
+
+            // Restore inbound session keys before first sync (see docs/scenarios/account-recovery.md)
+            try {
+                await restoreSessionKeys(token, userId, backupKey, mgr);
+            } catch (err) {
+                console.error('Session key restore failed:', err);
+            }
+            if (cancelled) return;
+
             setSessionManager(mgr);
 
             // Restore contacts from backup (new device restore)

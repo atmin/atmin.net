@@ -127,11 +127,13 @@ async function restoreEntry(
     });
     const sessionKeyB64 = new TextDecoder().decode(sessionKeyBytes);
 
-    await sessionManager.importInbound(
-        sessionId,
+    // addInbound uses from_session_key, which is correct for session keys stored
+    // in key backup. importInbound uses from_export (ratchet-forward format) and
+    // would reject a raw session key.
+    const [, isNew] = await sessionManager.addInbound(
         'unknown',
         'unknown',
         sessionKeyB64,
     );
-    return 1;
+    return isNew ? 1 : 0;
 }

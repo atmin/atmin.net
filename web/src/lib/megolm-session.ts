@@ -32,7 +32,7 @@ export interface SessionManager {
         fromUser: string,
         fromDevice: string,
         sessionKeyB64: string,
-    ): Promise<MegolmInbound>;
+    ): Promise<[MegolmInbound, boolean]>;
     importInbound(
         sessionId: string,
         fromUser: string,
@@ -141,7 +141,7 @@ export async function createSessionManager(
             fromUser: string,
             fromDevice: string,
             sessionKeyB64: string,
-        ): Promise<MegolmInbound> {
+        ): Promise<[MegolmInbound, boolean]> {
             const session = wasm.MegolmInbound.from_session_key(sessionKeyB64);
             const sessionId = session.session_id;
 
@@ -149,7 +149,7 @@ export async function createSessionManager(
             const cached = inboundCache.get(sessionId);
             if (cached) {
                 session.free();
-                return cached;
+                return [cached, false];
             }
 
             // Check IndexedDB — keep earlier index if it exists
@@ -164,7 +164,7 @@ export async function createSessionManager(
                     fromUser: stored.fromUser,
                     fromDevice: stored.fromDevice,
                 });
-                return fromDB;
+                return [fromDB, false];
             }
 
             inboundCache.set(sessionId, session);
@@ -175,7 +175,7 @@ export async function createSessionManager(
                 fromDevice,
                 session.pickle(),
             );
-            return session;
+            return [session, true];
         },
 
         async importInbound(

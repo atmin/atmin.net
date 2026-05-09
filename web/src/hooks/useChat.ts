@@ -177,6 +177,7 @@ export function useChat(
                     session.userId,
                     session.sharingPrivateKey,
                     sessionManager ?? undefined,
+                    session.backupKey,
                 );
 
                 // Filter to this conversation
@@ -203,6 +204,7 @@ export function useChat(
         session.token,
         session.userId,
         session.sharingPrivateKey,
+        session.backupKey,
         sessionManager,
     ]);
 
@@ -220,6 +222,7 @@ export function useChat(
                     session.userId,
                     session.sharingPrivateKey,
                     sessionManager ?? undefined,
+                    session.backupKey,
                 );
                 const convMessages = toMessages(
                     synced.filter((m) => m.conversationId === convId),
@@ -255,6 +258,7 @@ export function useChat(
         session.token,
         session.userId,
         session.sharingPrivateKey,
+        session.backupKey,
         sessionManager,
     ]);
 

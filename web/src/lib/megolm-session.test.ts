@@ -117,8 +117,13 @@ describe('SessionManager', () => {
             const sender = new MegolmOutbound();
             const sessionKey = sender.session_key();
 
-            const inbound = await mgr.addInbound('bob01', 'bdev01', sessionKey);
+            const [inbound, isNew] = await mgr.addInbound(
+                'bob01',
+                'bdev01',
+                sessionKey,
+            );
 
+            expect(isNew).toBe(true);
             expect(inbound.session_id).toBe(sender.session_id);
 
             // Retrieve by sessionId
@@ -164,9 +169,19 @@ describe('SessionManager', () => {
             const sender = new MegolmOutbound();
             const sessionKey = sender.session_key();
 
-            const s1 = await mgr.addInbound('bob01', 'bdev01', sessionKey);
-            const s2 = await mgr.addInbound('bob01', 'bdev01', sessionKey);
+            const [s1, isNew1] = await mgr.addInbound(
+                'bob01',
+                'bdev01',
+                sessionKey,
+            );
+            const [s2, isNew2] = await mgr.addInbound(
+                'bob01',
+                'bdev01',
+                sessionKey,
+            );
 
+            expect(isNew1).toBe(true);
+            expect(isNew2).toBe(false);
             // Should return same cached instance
             expect(s1).toBe(s2);
 

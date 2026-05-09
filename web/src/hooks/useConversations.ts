@@ -117,6 +117,7 @@ export function useConversations(
                     session.userId,
                     session.sharingPrivateKey,
                     sessionManager,
+                    session.backupKey,
                 );
                 if (synced.length > 0) {
                     await saveMessages(session.userId, synced);
