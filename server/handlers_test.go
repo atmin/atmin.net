@@ -1373,6 +1373,95 @@ func TestStorePresignMissingFields(t *testing.T) {
 	}
 }
 
+// --- DeleteDevice tests ---
+
+func TestDeleteDevice_Self(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE", "/v1/devices", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete device status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	// Device file must be gone
+	deviceKey := "users/" + alice.UserID + "/devices/" + alice.DeviceID + ".json"
+	if err := store.HeadObject(context.Background(), deviceKey); err == nil {
+		t.Fatal("device file should be gone after DELETE /v1/devices")
+	}
+
+	// Same token, same mux: cache was invalidated inside handler, so next request hits
+	// HeadObject which returns ErrNotFound → 403 device_revoked.
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET",
+		"/v1/store/list?prefix=inbox/"+alice.UserID+"/live/", alice.Token, ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("after self-delete: status = %d, want 403", w.Code)
+	}
+	var errResp struct {
+		Error string `json:"error"`
+	}
+	json.NewDecoder(w.Body).Decode(&errResp)
+	if errResp.Error != "device_revoked" {
+		t.Fatalf("error = %q, want %q", errResp.Error, "device_revoked")
+	}
+}
+
+// --- Send idempotency ---
+
+func TestSendIdempotent_SameMsgID(t *testing.T) {
+	store := NewMemStore()
+	cfg := Config{ServerSecret: []byte("test-secret")}
+	hub := NewEventHub()
+	mux := newMux(store, cfg, hub)
+
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Register a buffered listener so Notify calls are counted without blocking.
+	notifyCh := make(chan string, 10)
+	hub.Register(alice.UserID, notifyCh)
+	defer hub.Unregister(alice.UserID, notifyCh)
+
+	msgID := "IDEMPOTENT_MSG_01"
+	envelope := map[string]any{
+		"v": 1, "to_user": alice.UserID,
+		"from_user": alice.UserID, "from_device": alice.DeviceID,
+		"msg_id": msgID, "content_type": "megolm.message",
+		"payload": map[string]string{"session_id": "S1", "ciphertext": "dGVzdA"},
+	}
+	body, _ := json.Marshal(map[string]any{"envelopes": []any{envelope}})
+
+	// First send
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/send", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("first send: status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	// Second send with identical msg_id — overwrite is allowed by spec
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/send", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second send: status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	// Exactly one inbox key must exist (same key overwritten, not duplicated)
+	keys, _, _ := store.ListObjects(context.Background(), "inbox/"+alice.UserID+"/live/", 100, "")
+	if len(keys) != 1 {
+		t.Fatalf("inbox has %d objects, want exactly 1", len(keys))
+	}
+	wantKey := "inbox/" + alice.UserID + "/live/" + msgID
+	if keys[0] != wantKey {
+		t.Fatalf("inbox key = %q, want %q", keys[0], wantKey)
+	}
+
+	// Notify must have fired twice — spec does not promise dedup of notifications
+	if got := len(notifyCh); got != 2 {
+		t.Fatalf("notify count = %d, want 2", got)
+	}
+}
+
 // --- StoreCompact error paths ---
 
 func TestCompactInvalidJSON(t *testing.T) {
