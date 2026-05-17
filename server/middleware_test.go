@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -237,5 +240,37 @@ func TestRemoteIP_XFFParsing(t *testing.T) {
 				t.Fatalf("remoteIP = %q, want %q", got, tc.wantIP)
 			}
 		})
+	}
+}
+
+func TestLogRequests_StatusAndUserID(t *testing.T) {
+	const uid = "01USERAAAAAAAAAAAAAAA0"
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	old := slog.Default()
+	slog.SetDefault(logger)
+	defer slog.SetDefault(old)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "1.2.3.4:5678"
+	req = req.WithContext(context.WithValue(req.Context(), ctxUserID, uid))
+
+	w := httptest.NewRecorder()
+	logRequests(inner).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	line := buf.String()
+	for _, want := range []string{"status=200", "dur_ms=", "user_id=" + uid} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log line missing %q; got: %s", want, line)
+		}
 	}
 }

@@ -1080,6 +1080,69 @@ func TestCompactSameDayDedup(t *testing.T) {
 	}
 }
 
+func TestCompactKeepsNoMsgIDObjects(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	prefix := "keys/" + alice.UserID + "/live/"
+
+	// Plant two key-backup objects (no msg_id) and one envelope (with msg_id).
+	// ULIDs are monotonically increasing so kb1Key < kb2Key < envKey.
+	kb1Key := ulid.Make().String()
+	kb2Key := ulid.Make().String()
+	envKey := ulid.Make().String()
+
+	kb1Data, _ := json.Marshal(map[string]any{"iv": "aaaaaa", "ciphertext": "bbbbbb"})
+	kb2Data, _ := json.Marshal(map[string]any{"iv": "cccccc", "ciphertext": "dddddd"})
+	envData, _ := json.Marshal(map[string]any{"msg_id": "MSG001", "v": 1, "content_type": "megolm.message"})
+
+	store.PutObject(context.Background(), prefix+kb1Key, kb1Data, "application/json")
+	store.PutObject(context.Background(), prefix+kb2Key, kb2Data, "application/json")
+	store.PutObject(context.Background(), prefix+envKey, envData, "application/json")
+
+	body, _ := json.Marshal(map[string]any{"prefix": prefix, "up_to": envKey})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/compact", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("compact status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Archived   int    `json:"archived"`
+		ArchiveKey string `json:"archive_key"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Archived != 3 {
+		t.Fatalf("archived = %d, want 3", resp.Archived)
+	}
+
+	archiveData, err := store.GetObject(context.Background(), resp.ArchiveKey)
+	if err != nil {
+		t.Fatalf("archive not found: %v", err)
+	}
+	var decoded []map[string]any
+	if err := cbor.Unmarshal(archiveData, &decoded); err != nil {
+		t.Fatalf("CBOR decode failed: %v", err)
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("archive has %d objects, want 3 (2 key backups + 1 envelope)", len(decoded))
+	}
+
+	var withMsgID, withoutMsgID int
+	for _, obj := range decoded {
+		if _, ok := obj["msg_id"]; ok {
+			withMsgID++
+		} else {
+			withoutMsgID++
+		}
+	}
+	if withMsgID != 1 {
+		t.Fatalf("objects with msg_id = %d, want 1", withMsgID)
+	}
+	if withoutMsgID != 2 {
+		t.Fatalf("objects without msg_id = %d, want 2", withoutMsgID)
+	}
+}
+
 func TestCompactMultipleStaleArchives(t *testing.T) {
 	store, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice")
