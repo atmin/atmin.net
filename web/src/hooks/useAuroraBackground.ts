@@ -1,3 +1,4 @@
+// covered by Storybook
 import { useEffect, useRef } from 'react';
 
 const VERT = `
