@@ -4,7 +4,7 @@ Properties that must hold **under adverse conditions** — network faults,
 retries, concurrent sync, partial failures, restores. Each invariant
 corresponds to one Playwright spec under `web/e2e/invariants/*.spec.ts`.
 
-> **Status:** starter document. When the list grows past ~6 invariants or
+> **Status:** starter document. When the list grows past ~8 invariants or
 > a single section needs more than one mermaid diagram, split this file
 > into `docs/scenarios/invariants/<name>.md` (one per invariant), mirroring
 > the existing scenario layout. Update [README.md](./README.md) at the
@@ -36,12 +36,12 @@ must be stated explicitly.
 | **Local** | IndexedDB, session, device, message store | `page.evaluate()` against the IDB API |
 | **Remote** | S3 object state | List/get against MinIO (test fixture) |
 
-Helpers (to be added under `web/e2e/invariants/helpers.ts`):
+Helpers live in `web/e2e/invariants/helpers.ts`:
 
 ```ts
-expectUI(page, { messages: [...] })        // DOM-level
-expectLocal(page, { idbMessages: [...] }) // IDB-level
-expectRemote(s3, uid, { inboxLive: [...] }) // S3-level
+expectUI(page, { messageCount, messageTexts })
+expectLocal(page, conversationId, { uniqueMsgIdCount, ordered })
+expectRemote(s3, uid, { inboxLiveCount, inboxLiveMsgIds, archiveCount })
 ```
 
 ### Permitted divergence
@@ -58,59 +58,86 @@ named in the invariant statement, e.g.:
 If a test discovers divergence that the invariant did not permit, it
 fails — even if the UI "looks right".
 
+## Test determinism
+
+All invariant tests must be deterministic by default.
+
+Deterministic fault construction — route interception, fixed delays,
+explicit navigation sequences — is preferred. Randomized fault injection
+is opt-in and must:
+
+1. Print the seed before the test body (`console.log('CHAOS_SEED', seed)`).
+2. Accept `CHAOS_SEED=<n>` from the environment to replay a specific run.
+3. Be documented in the invariant's **Fault construction** section.
+
+No current test uses randomized injection; this section is forward-looking
+guidance for when chaos-style tests are added.
+
 ## Prioritisation
 
 Ordered by blast radius if the invariant breaks in production.
 
 | # | Invariant | Priority | Notes |
 |---|---|---|---|
-| I1 | No duplicate visible messages | **P0** | Class of bug we already hit (see `useInboxSync`) |
+| I1 | Message identity is unique across layers | **P0** | Class of bug we already hit (see `useInboxSync`) |
 | I2 | No lost messages under fault | **P0** | Silent data loss is the worst failure mode |
 | I3 | Archive/live boundary is consistent | **P0** | Boundary correctness we cross every compaction |
 | I4 | Restore-equivalence across devices | **P1** | Rarely exercised path, high stakes |
 | I5 | Send outcomes are unambiguous | **P1** | No "ghost sent" states |
 | I6 | Bad backup secret fails cleanly | **P1** | Distinguish from corrupted ciphertext |
 | I7 | Account deletion races terminate cleanly | **P2** | Low probability, contained blast radius |
+| I8 | Sync is idempotent | **P2** | Guard against accumulating side-effects on re-sync |
 
 ---
 
-## I1 — No duplicate visible messages
+## I1 — Message identity is unique across layers
 
-**Statement.** For any `msg_id`, every device shows at most one bubble,
-holds at most one IDB row, and (within retention) the recipient inbox
-holds at most one S3 object — under any combination of:
+**Statement.** For any `msg_id`, every device shows at most one bubble and
+holds at most one IDB row — under any combination of:
 
 - SSE `new_message` events delivered while a sync is in flight
 - explicit refetch after `POST /v1/send`
 - archive/live overlap during compaction (see I3)
 - client-side retry of an idempotent `POST /v1/store/compact`
 
+Remote uniqueness is strict **within** the live prefix and **within** each
+archive object. Across live and archive, temporary duplication is permitted
+only during the compaction window covered by I3. UI and Local deduplication
+remain strict regardless.
+
 **Fault construction.**
 
 1. Register Alice and Bob.
-2. Bob sends a 100-message burst to Alice.
-3. Throttle Alice's `GET /v1/store/list` to 2× the SSE arrival rate to
-   force concurrent sync + SSE handling.
-4. Refresh Alice mid-burst.
+2. Bob sends a burst to Alice while Alice's `GET /v1/store/list` is
+   delayed (delay must outlast all burst sends so the list fires only
+   after all messages are in S3 — see `LIST_DELAY_MS` in the spec).
+3. Refresh Alice mid-burst.
 
 **Assertions.**
 
-- `expectUI(alicePage, { messageCount: 100 })`
-- `expectLocal(alicePage, { uniqueMsgIds: 100 })`
-- `expectRemote(s3, aliceUid, { inboxLive: 100 })` *(pre-compaction)*
-- Order: monotonic by `msg_id` (ULID lexicographic) at every layer.
+- `expectUI(alicePage, { messageCount: BURST })`
+- `expectLocal(alicePage, convId, { uniqueMsgIdCount: BURST, ordered: true })`
+- `expectRemote`: no duplicate keys within `inbox/{uid}/live/`
+- Order: monotonic by `msg_id` (ULID lexicographic) at UI and Local layers.
 
-**Permitted divergence.** None.
+**Permitted divergence.** None at UI or Local. At Remote: temporary
+live+archive overlap only during the compaction window (I3).
 
 ---
 
 ## I2 — No lost messages under fault
 
-**Statement.** Every successful `POST /v1/send` is eventually reflected in
-the recipient's UI, Local, and Remote layers, even if:
+**Statement.**
 
-- the recipient's SSE connection was down at send time
-- the recipient's next `GET /v1/store/list` first attempt times out
+- A send that reaches committed remote state (server returns 200 on
+  `POST /v1/send`) must eventually be visible in the recipient's UI,
+  Local, and Remote layers, exactly once.
+- A send that is rejected must not appear as sent at any layer.
+
+Faults in scope:
+
+- recipient's SSE connection was down at send time
+- recipient's next `GET /v1/store/list` first attempt times out
 - a `PUT` to a presigned URL failed *after* the object was written
   server-side (ambiguous-success case)
 
@@ -124,9 +151,10 @@ the recipient's UI, Local, and Remote layers, even if:
 
 **Assertions.**
 
-- For every `msg_id` Bob sent: present in `expectUI`, `expectLocal`,
-  `expectRemote` for Alice.
+- For every `msg_id` from a committed send: present in `expectUI`,
+  `expectLocal`, `expectRemote` for Alice.
 - No `msg_id` appears more than once at any layer.
+- For every rejected send: absent from all three layers.
 
 **Permitted divergence.** Remote may lead Local during the reconcile
 window (bounded by the sync interval). UI never leads Local.
@@ -137,33 +165,40 @@ window (bounded by the sync interval). UI never leads Local.
 
 **Statement.** During and after compaction, every message is reachable
 through exactly one path. No message is double-counted (live + archive),
-no message is dropped at the boundary.
+no message is dropped at the boundary. Re-running sync after compaction
+is idempotent: it produces no additional writes and does not change
+message count or order.
 
 **Fault construction.**
 
 1. Generate enough messages to trigger one compaction.
 2. Interleave a fresh device sync with an in-progress compaction.
 3. Assert the new device sees every message exactly once.
+4. Trigger sync again on the new device (no new messages sent); assert
+   no change.
 
 **Assertions.**
 
 - `expectRemote(s3, uid, { liveCount: N, archiveCount: M })` where
   `N + M` equals total messages sent.
-- `expectLocal(newDevice, { uniqueMsgIds: N + M })`
+- `expectLocal(newDevice, convId, { uniqueMsgIdCount: N + M })`
 - No `msg_id` appears in both `inbox/{uid}/live/` and any
-  `inbox/{uid}/archive/` object.
+  `inbox/{uid}/archive/` object (post-compaction).
+- After a second sync pass: counts and order unchanged at all layers.
 
 **Permitted divergence.** Mid-compaction, Remote may briefly hold a
 message in both live and archive (until the live object is deleted).
-Client-side dedup must absorb this; UI/Local must not.
+Client-side dedup must absorb this; UI and Local must not reflect the
+duplicate.
 
 ---
 
 ## I4 — Restore-equivalence across devices
 
 **Statement.** Given the same handle and backup mnemonic, a second device
-that comes online later converges to the same decrypted state as the
-first device. Convergence is reached without manual intervention.
+that comes online later converges to the same ordered message set and the
+same decryptability status per `msg_id` as the first device. Convergence
+is reached without manual intervention.
 
 **Fault construction.**
 
@@ -174,8 +209,10 @@ first device. Convergence is reached without manual intervention.
 
 **Assertions.**
 
-- `expectLocal(device1, …) === expectLocal(device2, …)` for chat list,
-  per-chat message lists, and contact list.
+- Both devices hold the same ordered `msg_id` list per conversation
+  (`expectLocal` on both pages).
+- Both devices can decrypt every message (decryptability status matches
+  per `msg_id`).
 - `expectUI(device1) === expectUI(device2)` on the same route.
 - Both devices receive the post-restore live message; `expectRemote`
   shows one live object addressed to Alice's inbox.
@@ -190,7 +227,12 @@ no divergence permitted.
 
 **Statement.** Every send attempt resolves into exactly one of:
 `{ sent, rejected }`. There is no UI state that implies "in flight" or
-"sent" without a corresponding Local row and Remote object.
+"sent" without a corresponding Local row and Remote object reachable by
+normal inbox sync.
+
+A rejected send must not produce Remote objects reachable by a normal
+inbox sync. Unreachable orphans (e.g. from a partial server-side write
+that was never indexed) are out of scope for this invariant.
 
 (`queued` is intentionally absent — see
 [Offline mode § Sending while offline](./offline-mode.md#sending-while-offline)
@@ -206,8 +248,8 @@ and ADR-0002 for the Megolm ratchet rationale.)
 
 **Assertions.**
 
-- For every rejected send: no Local row, no Remote object, UI shows
-  error.
+- For every rejected send: no Local row, no Remote object reachable via
+  `inbox/{uid}/live/` or `inbox/{uid}/archive/`, UI shows error.
 - For every accepted send: Local row present, Remote object present,
   UI shows "sent".
 - No state where UI says "sent" but Local/Remote disagree.
@@ -274,6 +316,37 @@ device 2's next request.
 
 ---
 
+## I8 — Sync is idempotent
+
+**Statement.** Re-running sync any number of times when the cursor is
+unchanged (no new remote objects since the last successful sync) does not
+alter UI, Local message count, message ordering, conversation summaries,
+contact list, or per-`msg_id` decryptability status.
+
+Carve-outs: background processes that legitimately run on sync
+(session-key rotation, quota recalculation) may update their own state
+without violating this invariant. Only the message and conversation layers
+are in scope.
+
+**Fault construction.**
+
+1. Alice and Bob exchange N messages; all syncs settle.
+2. Trigger sync on Alice's page K additional times (navigate away and
+   back, or call the sync hook directly via `page.evaluate`).
+3. Assert no change after each additional sync.
+
+**Assertions.**
+
+- `expectUI` count and order unchanged after each additional sync.
+- `expectLocal` `uniqueMsgIdCount` and `orderedMonotonically` unchanged.
+- `expectRemote` live and archive key sets unchanged (no new compaction
+  triggered, no objects written).
+- Conversation summary (last message, count) unchanged.
+
+**Permitted divergence.** None.
+
+---
+
 ## Adding a new invariant
 
 1. Add a row to the prioritisation table above.
@@ -283,6 +356,6 @@ device 2's next request.
    fault and asserts at the named layers.
 4. If the invariant introduces a new helper or fault-injection mechanism,
    document it in `web/e2e/invariants/helpers.ts`.
-5. When this file passes ~6 invariants or any section grows beyond one
+5. When this file passes ~8 invariants or any section grows beyond one
    diagram, split into `docs/scenarios/invariants/<name>.md` and turn
    this file into an index.
