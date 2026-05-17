@@ -283,6 +283,42 @@ describe('db - Conversations', () => {
         );
     });
 
+    it('accumulates messageCount across successive saveMessages calls', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-a1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: 'first',
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+            {
+                id: 'msg-a2',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: 'second',
+                timestamp: new Date('2024-01-01T10:01:00Z'),
+            },
+        ]);
+
+        await saveMessages(userId, [
+            {
+                id: 'msg-b1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: 'third',
+                timestamp: new Date('2024-01-01T10:02:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        expect(convs[0].messageCount).toBe(3);
+    });
+
     it('returns empty array when no conversations exist', async () => {
         const convs = await loadConversations();
         expect(convs).toEqual([]);

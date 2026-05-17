@@ -245,14 +245,8 @@ export async function saveMessages(
     if (messages.length === 0) return;
 
     const database = await openDB();
-    const tx = database.transaction(
-        [MESSAGES_STORE, CONVERSATIONS_STORE],
-        'readwrite',
-    );
-    const msgStore = tx.objectStore(MESSAGES_STORE);
-    const convStore = tx.objectStore(CONVERSATIONS_STORE);
 
-    // Group messages by conversationId to build summaries
+    // Group messages by conversationId to build per-conversation summaries.
     const convUpdates = new Map<
         string,
         { text: string; ts: number; count: number }
@@ -260,17 +254,6 @@ export async function saveMessages(
 
     for (const msg of messages) {
         const ts = msg.timestamp.getTime();
-        const stored: StoredMessage = {
-            id: msg.id,
-            userId,
-            conversationId: msg.conversationId,
-            fromUser: msg.fromUser,
-            fromDevice: msg.fromDevice,
-            text: msg.text,
-            timestamp: ts,
-        };
-        msgStore.put(stored);
-
         const prev = convUpdates.get(msg.conversationId);
         if (!prev || ts > prev.ts) {
             convUpdates.set(msg.conversationId, {
@@ -283,33 +266,56 @@ export async function saveMessages(
         }
     }
 
-    // Upsert conversation summaries (read-modify-write inside an open tx).
-    // IDB autocommits when the microtask queue drains, so queuing a put()
-    // inside getReq.onsuccess keeps everything on the same transaction.
-    for (const [convId, update] of convUpdates) {
-        const getReq = convStore.get(convId);
-        getReq.onsuccess = () => {
-            const existing = getReq.result as StoredConversation | undefined;
-            const conv: StoredConversation = {
-                conversationId: convId,
-                lastMessageText:
-                    existing && existing.lastMessageTimestamp > update.ts
-                        ? existing.lastMessageText
-                        : update.text,
-                lastMessageTimestamp: Math.max(
-                    existing?.lastMessageTimestamp ?? 0,
-                    update.ts,
-                ),
-                messageCount: Math.max(
-                    existing?.messageCount ?? 0,
-                    update.count,
-                ),
-            };
-            convStore.put(conv);
-        };
+    // Phase 1: read existing conversation summaries into memory.
+    const tx1 = database.transaction(CONVERSATIONS_STORE, 'readonly');
+    const existingByID = new Map<string, StoredConversation>();
+    for (const convId of convUpdates.keys()) {
+        const existing = await awaitReq<StoredConversation | undefined>(
+            tx1.objectStore(CONVERSATIONS_STORE).get(convId),
+        );
+        if (existing) existingByID.set(convId, existing);
+    }
+    await awaitTx(tx1);
+
+    // Phase 2: write messages and updated summaries in a single synchronous
+    // transaction — no callbacks or awaits between requests, so the tx stays
+    // open until awaitTx resolves.
+    const tx2 = database.transaction(
+        [MESSAGES_STORE, CONVERSATIONS_STORE],
+        'readwrite',
+    );
+    const msgStore = tx2.objectStore(MESSAGES_STORE);
+    const convStore = tx2.objectStore(CONVERSATIONS_STORE);
+
+    for (const msg of messages) {
+        msgStore.put({
+            id: msg.id,
+            userId,
+            conversationId: msg.conversationId,
+            fromUser: msg.fromUser,
+            fromDevice: msg.fromDevice,
+            text: msg.text,
+            timestamp: msg.timestamp.getTime(),
+        } satisfies StoredMessage);
     }
 
-    return awaitTx(tx);
+    for (const [convId, update] of convUpdates) {
+        const existing = existingByID.get(convId);
+        convStore.put({
+            conversationId: convId,
+            lastMessageText:
+                existing && existing.lastMessageTimestamp > update.ts
+                    ? existing.lastMessageText
+                    : update.text,
+            lastMessageTimestamp: Math.max(
+                existing?.lastMessageTimestamp ?? 0,
+                update.ts,
+            ),
+            messageCount: (existing?.messageCount ?? 0) + update.count,
+        } satisfies StoredConversation);
+    }
+
+    return awaitTx(tx2);
 }
 
 export async function loadMessages(userId: string): Promise<StoredMessage[]> {
