@@ -1,18 +1,14 @@
 import { useEffect, useState } from 'react';
-import {
-    conversationId,
-    resolve,
-    sendTextMessage,
-    uploadMedia,
-} from '@/lib/api';
+import { resolve } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
-import { base64UrlDecode, base64UrlEncode } from '@/lib/crypto';
+import { base64UrlDecode } from '@/lib/crypto';
 import { loadMessages as loadFromDB, saveContact } from '@/lib/db';
-import { onInboxUpdated, syncAndPublish } from '@/lib/inbox-sync';
+import { onInboxUpdated } from '@/lib/inbox-sync';
 import type { MediaFile } from '@/lib/media';
-import { encryptMedia } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
+import { conversationId } from '@/lib/messaging';
+import { useChatSend } from './useChatSend';
 
 export interface Message {
     id: string;
@@ -103,11 +99,17 @@ export function useChat(
     const isSaved = handle === 'saved';
 
     const [messages, setMessages] = useState<Message[]>([]);
-    const [sending, setSending] = useState(false);
     const [loading, setLoading] = useState(true);
     const [convId, setConvId] = useState<string | null>(null);
     const [chatTitle, setChatTitle] = useState(
         isSaved ? 'Saved Messages' : (handle ?? ''),
+    );
+
+    const { sending, sendText, sendMedia } = useChatSend(
+        handle,
+        isSaved,
+        session,
+        sessionManager,
     );
 
     // Resolve conversation ID from handle
@@ -150,111 +152,9 @@ export function useChat(
             }
         };
 
-        // Initial read — picks up cached data and any sync that already landed.
         refresh();
         return onInboxUpdated(refresh);
     }, [convId, session.userId]);
-
-    const sendMessage = async (text: string) => {
-        if (!text || sending || !sessionManager) return;
-
-        setSending(true);
-        try {
-            let recipientUserId: string;
-            let recipientPubKeyBytes: Uint8Array;
-
-            if (isSaved) {
-                recipientUserId = session.userId;
-                recipientPubKeyBytes = session.sharingPublicKeyBytes;
-            } else {
-                if (!handle) throw new Error('No recipient handle');
-                const resolveRes = await resolve(handle);
-                recipientUserId = resolveRes.user_id;
-                recipientPubKeyBytes = base64UrlDecode(
-                    resolveRes.sharing_public_key,
-                );
-            }
-
-            await sendTextMessage(
-                session.token,
-                session.userId,
-                session.deviceId,
-                recipientUserId,
-                recipientPubKeyBytes,
-                session.sharingPublicKeyBytes,
-                text,
-                sessionManager,
-            );
-
-            // Sync so the sent echo lands in IDB, then notify all subscribers
-            // (including this hook's own onInboxUpdated listener).
-            await syncAndPublish(session, sessionManager);
-        } catch (error) {
-            console.error('Failed to send message:', error);
-            alert('Failed to send message. Please try again.');
-        } finally {
-            setSending(false);
-        }
-    };
-
-    const sendMedia = async (file: File) => {
-        if (sending || !sessionManager) return;
-
-        setSending(true);
-        try {
-            let recipientUserId: string;
-            let recipientPubKeyBytes: Uint8Array;
-
-            if (isSaved) {
-                recipientUserId = session.userId;
-                recipientPubKeyBytes = session.sharingPublicKeyBytes;
-            } else {
-                if (!handle) throw new Error('No recipient handle');
-                const resolveRes = await resolve(handle);
-                recipientUserId = resolveRes.user_id;
-                recipientPubKeyBytes = base64UrlDecode(
-                    resolveRes.sharing_public_key,
-                );
-            }
-
-            const enc = await encryptMedia(file);
-            const { url } = await uploadMedia(
-                session.token,
-                session.userId,
-                enc,
-            );
-
-            const envelope = JSON.stringify({
-                type: 'media',
-                body: file.name,
-                file: {
-                    url,
-                    key: base64UrlEncode(enc.key),
-                    iv: base64UrlEncode(enc.iv),
-                    name: file.name,
-                    size: file.size,
-                },
-            });
-
-            await sendTextMessage(
-                session.token,
-                session.userId,
-                session.deviceId,
-                recipientUserId,
-                recipientPubKeyBytes,
-                session.sharingPublicKeyBytes,
-                envelope,
-                sessionManager,
-            );
-
-            await syncAndPublish(session, sessionManager);
-        } catch (error) {
-            console.error('Failed to send media:', error);
-            alert('Failed to send attachment. Please try again.');
-        } finally {
-            setSending(false);
-        }
-    };
 
     return {
         messages,
@@ -262,7 +162,7 @@ export function useChat(
         sending,
         encryptionReady: !!sessionManager,
         chatTitle,
-        sendMessage,
+        sendMessage: sendText,
         sendMedia,
     };
 }

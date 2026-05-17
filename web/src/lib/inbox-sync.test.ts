@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./api', () => ({
+vi.mock('./messaging', () => ({
     syncMessages: vi.fn(),
 }));
 vi.mock('./db', () => ({
     saveMessages: vi.fn(),
 }));
 
-import { syncMessages } from './api';
 import { saveMessages } from './db';
 import {
     _resetInboxListeners,
     onInboxUpdated,
     syncAndPublish,
 } from './inbox-sync';
+import { syncMessages } from './messaging';
 
 const syncMessagesMock = vi.mocked(syncMessages);
 const saveMessagesMock = vi.mocked(saveMessages);

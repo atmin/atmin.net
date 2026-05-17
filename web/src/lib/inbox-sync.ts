@@ -12,10 +12,11 @@
 // only place that triggers a sync (on mount + SSE + after send), and
 // useConversations/useChat are passive consumers that re-read IndexedDB when
 // notified.
-import { syncMessages } from './api';
+
 import type { Session } from './auth';
 import { saveMessages } from './db';
 import type { SessionManager } from './megolm-session';
+import { syncMessages } from './messaging';
 
 const listeners = new Set<() => void>();
 

@@ -8,13 +8,15 @@
 `web/src/lib/` has thorough unit-test coverage (10 source files, all with colocated `*.test.ts`). `web/src/hooks/` has **none**:
 
 - `useAuroraBackground.ts` (277 lines) — visual, plausibly out of scope; tested via Storybook.
-- `useChat.ts` (396 lines) — orchestrator for chat state, send, sync, SSE.
-- `useConversations.ts` (142 lines) — orchestrator for the chats list.
+- `useChat.ts` (168 lines) — loads IDB messages, subscribes to inbox updates; delegates send to `useChatSend`.
+- `useChatSend.ts` (117 lines) — resolves recipient, calls `sendTextMessage`, triggers post-send sync. Introduced in task 06.
+- `useConversations.ts` (115 lines) — orchestrator for the chats list.
 - `useDevices.ts` (101 lines) — fetch/list/revoke devices.
+- `useInboxSync.ts` (35 lines) — owns the SSE connection, triggers `syncAndPublish` on mount and on `new_message` events.
 - `useLogin.ts` (88 lines) — derive keys, add device, save session.
 - `useMedia.ts` (138 lines) — concurrent media fetch/decrypt with abort.
-- `useRegister.ts` (77 lines) — generate mnemonic, register, save session.
-- `useSession.ts` (135 lines) — session boot, WASM/megolm init, logout, auth events.
+- `useRegister.ts` (72 lines) — generate mnemonic, register, save session.
+- `useSession.ts` (144 lines) — session boot, WASM/megolm init, logout, auth events.
 - `useSWUpdate.ts` (23 lines) — service-worker update toast (small, but uncovered).
 
 Several hooks are pure orchestrators around well-tested `lib/` functions; their tests should focus on **the orchestration**, not re-test the underlying primitives.
@@ -39,10 +41,18 @@ Add `*.test.ts` colocated with each hook. Use `@testing-library/react`'s `render
 - `useDevices.test.ts`:
   - On mount, fetches devices via `listDevices`.
   - `handleRevoke` with valid mnemonic input calls `revokeDevice` and refreshes; with bad mnemonic, sets `revokeError` and does not call `revokeDevice`.
+- `useChatSend.test.ts`:
+  - `resolveRecipient`: Saved Messages path returns own userId + sharingPublicKeyBytes without calling `resolve`; DM path calls `resolve(handle)` and decodes the returned key.
+  - Sending while `sending=true` is a no-op (guard fires before `resolveRecipient`).
+  - No sessionManager → `sendText` and `sendMedia` return immediately without calling `sendTextMessage`.
+  - Happy path: `sendText` calls `sendTextMessage` then `syncAndPublish`; `sendMedia` additionally calls `encryptMedia` + `uploadMedia` before the same pair.
 - `useChat.test.ts`:
-  - Loads cached IDB messages first, then merges synced messages on top.
-  - `parseMediaEnvelope` returns null for plain text, parses well-formed media JSON, returns null for malformed JSON. (This is not exported — either export it, or test indirectly via `toMessages`.)
-  - Sending while `sending=true` is a no-op.
+  - Loads cached IDB messages first, then re-renders on inbox update notification.
+  - `parseMediaEnvelope` returns null for plain text, parses well-formed media JSON, returns null for malformed JSON. (Not exported — test indirectly via `toMessages`.)
+- `useInboxSync.test.ts`:
+  - On mount with a valid session + sessionManager, calls `syncAndPublish` once immediately.
+  - A `new_message` SSE event triggers a second `syncAndPublish` call.
+  - On unmount, the EventSource is closed (no further calls after cleanup).
 - `useMedia.test.ts`:
   - Fetches and decrypts each file in `files`; aborts in-flight requests when files prop changes; revokes ObjectURLs on unmount.
   - `retry(url)` re-fetches a previously failed URL.
