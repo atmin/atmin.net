@@ -33,6 +33,8 @@ type quotaEntry struct {
 	expiresAt  time.Time
 }
 
+// inProcessMediaQuota is the v0.1 single-instance store.
+// See docs/specs/mvp-v0.1.md "Per-user quota" and ADR-0004 for the multi-instance migration plan.
 type inProcessMediaQuota struct {
 	store   Store
 	entries sync.Map // userID -> *quotaEntry
@@ -43,6 +45,18 @@ func NewMediaQuota(store Store) *inProcessMediaQuota {
 	return &inProcessMediaQuota{store: store, now: time.Now}
 }
 
+func s3UsageProbe(ctx context.Context, store Store, userID string) (totalBytes int64, count int, err error) {
+	prefix := prefixMedia(userID)
+	total, n, truncated, err := store.ListObjectSizes(ctx, prefix, USER_MEDIA_BLOB_CAP)
+	if err != nil {
+		return 0, 0, err
+	}
+	if truncated {
+		log.Printf("media_quota.list_truncated user=%s count=%d", userID, n)
+	}
+	return total, n, nil
+}
+
 func (q *inProcessMediaQuota) ReserveUpload(ctx context.Context, userID string, bytes int64) (bool, string, error) {
 	v, _ := q.entries.LoadOrStore(userID, &quotaEntry{})
 	e := v.(*quotaEntry)
@@ -50,14 +64,9 @@ func (q *inProcessMediaQuota) ReserveUpload(ctx context.Context, userID string, 
 	defer e.mu.Unlock()
 
 	if q.now().After(e.expiresAt) {
-		prefix := prefixMedia(userID)
-		total, count, truncated, err := q.store.ListObjectSizes(ctx, prefix, USER_MEDIA_BLOB_CAP)
+		total, count, err := s3UsageProbe(ctx, q.store, userID)
 		if err != nil {
 			return false, "", err
-		}
-		if truncated {
-			// Cap enforcement should prevent this from ever happening.
-			log.Printf("media_quota.list_truncated user=%s count=%d", userID, count)
 		}
 		e.usageBytes = total
 		e.blobCount = count

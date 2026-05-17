@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -262,5 +263,46 @@ func TestMediaQuota_ConcurrentReserveNoLostUpdates(t *testing.T) {
 	}
 	if entry.blobCount != N {
 		t.Fatalf("blobCount = %d, want %d", entry.blobCount, N)
+	}
+}
+
+// slowStore wraps MemStore and adds latency to ListObjectSizes to surface
+// serialisation: if a global lock were used, N * delay would dominate.
+type slowStore struct {
+	*MemStore
+	delay time.Duration
+}
+
+func (s *slowStore) ListObjectSizes(ctx context.Context, prefix string, limit int) (int64, int, bool, error) {
+	time.Sleep(s.delay)
+	return s.MemStore.ListObjectSizes(ctx, prefix, limit)
+}
+
+func TestMediaQuota_CrossUserNoSerialisation(t *testing.T) {
+	const (
+		N     = 10
+		delay = 50 * time.Millisecond
+	)
+	store := &slowStore{MemStore: NewMemStore(), delay: delay}
+	q := NewMediaQuota(store)
+	ctx := context.Background()
+
+	start := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		userID := fmt.Sprintf("user%d", i)
+		go func() {
+			defer wg.Done()
+			q.ReserveUpload(ctx, userID, 1000) //nolint:errcheck
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// With per-user locks all N probes run concurrently; wall time ≈ 1×delay.
+	// A global lock would serialise them: wall time ≥ N×delay.
+	if elapsed >= time.Duration(N)*delay {
+		t.Fatalf("elapsed %v ≥ %v: looks like a global lock is serialising cross-user reservations", elapsed, time.Duration(N)*delay)
 	}
 }
