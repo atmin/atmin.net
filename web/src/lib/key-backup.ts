@@ -11,7 +11,13 @@
  */
 
 import { decode as cborDecode } from 'cbor-x';
-import { storeCompact, storeGet, storeList, storePresign } from './api';
+import {
+    putWithRetry,
+    storeCompact,
+    storeGet,
+    storeList,
+    storePresign,
+} from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import type { SessionManager } from './megolm-session';
 import { path } from './paths';
@@ -43,10 +49,7 @@ export async function backupSessionKey(
     const key = path.keyBackup(userId, sessionId);
     const { presigned_url } = await storePresign(token, key, blobBytes.length);
 
-    await fetch(presigned_url, {
-        method: 'PUT',
-        body: blobBytes,
-    });
+    await putWithRetry(presigned_url, blobBytes);
 }
 
 export async function restoreSessionKeys(

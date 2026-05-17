@@ -20,8 +20,11 @@ import { vi } from 'vitest';
 // Shared in-memory S3 store — cleared in beforeEach of each consuming test.
 export const stored = new Map<string, Uint8Array>();
 
-export function makeApiMock() {
+export async function makeApiMock() {
+    const { putWithRetry } =
+        await vi.importActual<typeof import('./api')>('./api');
     return {
+        putWithRetry,
         storePresign: vi.fn(
             async (_token: string, key: string, _bytes: number) => ({
                 presigned_url: `https://s3.example.com/${key}`,

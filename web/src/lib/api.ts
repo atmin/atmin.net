@@ -257,7 +257,7 @@ export class NetworkError extends Error {
 
 export const MEDIA_FETCH_TIMEOUT_MS = 60_000;
 
-async function putWithRetry(
+export async function putWithRetry(
     url: string,
     body: Uint8Array,
     abort?: AbortSignal,

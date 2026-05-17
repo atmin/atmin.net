@@ -6,7 +6,7 @@
  * Last-write-wins. All devices read the same file.
  */
 
-import { storeGet, storePresign } from './api';
+import { putWithRetry, storeGet, storePresign } from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import { loadAllContacts, saveContact } from './db';
 import { path } from './paths';
@@ -45,10 +45,7 @@ export async function uploadContacts(
     const key = path.contacts(userId);
     const { presigned_url } = await storePresign(token, key, blobBytes.length);
 
-    await fetch(presigned_url, {
-        method: 'PUT',
-        body: blobBytes,
-    });
+    await putWithRetry(presigned_url, blobBytes);
 }
 
 export async function restoreContacts(

@@ -46,6 +46,58 @@ async function makeBackupKey(): Promise<CryptoKey> {
     return (await deriveKeys(generateBackupSecret())).backupKey;
 }
 
+describe('backupSessionKey retry', () => {
+    it('retries PUT once on 503 then resolves', async () => {
+        const { backupSessionKey } = await import('./key-backup');
+        const backupKey = await makeBackupKey();
+        const sender = new MegolmOutbound();
+
+        let putCalls = 0;
+        globalThis.fetch = vi.fn(async (_url, init) => {
+            if ((init as RequestInit)?.method === 'PUT') {
+                putCalls++;
+                return new Response(null, {
+                    status: putCalls < 2 ? 503 : 200,
+                });
+            }
+            return new Response(null, { status: 200 });
+        }) as typeof fetch;
+
+        await backupSessionKey(
+            token,
+            userId,
+            sender.session_id,
+            sender.session_key(),
+            backupKey,
+        );
+        expect(putCalls).toBe(2);
+
+        sender.free();
+    });
+
+    it('rejects when PUT returns 503 twice', async () => {
+        const { backupSessionKey } = await import('./key-backup');
+        const backupKey = await makeBackupKey();
+        const sender = new MegolmOutbound();
+
+        globalThis.fetch = vi.fn(
+            async () => new Response(null, { status: 503 }),
+        ) as typeof fetch;
+
+        await expect(
+            backupSessionKey(
+                token,
+                userId,
+                sender.session_id,
+                sender.session_key(),
+                backupKey,
+            ),
+        ).rejects.toThrow();
+
+        sender.free();
+    });
+});
+
 describe('backupSessionKey', () => {
     it('uploads encrypted key to keys/{userId}/live/{sessionId}', async () => {
         const { backupSessionKey } = await import('./key-backup');

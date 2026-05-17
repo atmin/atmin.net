@@ -21,6 +21,47 @@ afterEach(async () => {
     uninstallFetchMock();
 });
 
+describe('uploadContacts retry', () => {
+    const token = 'test-token';
+    const userId = 'U_ALICE';
+
+    async function makeBackupKey() {
+        return (await deriveKeys(generateBackupSecret())).backupKey;
+    }
+
+    it('retries PUT once on 503 then resolves', async () => {
+        const backupKey = await makeBackupKey();
+        const { uploadContacts } = await import('./contact-backup');
+
+        let putCalls = 0;
+        globalThis.fetch = vi.fn(async (_url, init) => {
+            if ((init as RequestInit)?.method === 'PUT') {
+                putCalls++;
+                return new Response(null, {
+                    status: putCalls < 2 ? 503 : 200,
+                });
+            }
+            return new Response(null, { status: 200 });
+        }) as typeof fetch;
+
+        await uploadContacts(token, userId, backupKey);
+        expect(putCalls).toBe(2);
+    });
+
+    it('rejects when PUT returns 503 twice', async () => {
+        const backupKey = await makeBackupKey();
+        const { uploadContacts } = await import('./contact-backup');
+
+        globalThis.fetch = vi.fn(
+            async () => new Response(null, { status: 503 }),
+        ) as typeof fetch;
+
+        await expect(
+            uploadContacts(token, userId, backupKey),
+        ).rejects.toThrow();
+    });
+});
+
 describe('contact-backup', () => {
     const token = 'test-token';
     const userId = 'U_ALICE';
