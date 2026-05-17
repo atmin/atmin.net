@@ -27,6 +27,9 @@ Add `*.test.ts` colocated with each hook. Use `@testing-library/react`'s `render
   - On `handleLogin`, sets the session.
   - On `handleLogout`, clears local state and calls `deleteDevice` once (best-effort) followed by `clearSession`.
   - StrictMode double-mount does not spawn two concurrent `createSessionManager` calls (regression for the existing `cancelled` flag).
+  - Emitting `onAuthEvent('device_revoked')` triggers the same teardown as `handleLogout`.
+  - Emitting `onAuthEvent('unauthorized')` clears session state and calls `clearToken`.
+  - After unmount the `onAuthEvent` listeners are removed (no stale callback fires).
 - `useLogin.test.ts`:
   - Happy path: resolves handle, derives keys, calls `addDevice`, saves session, navigates to `/`.
   - Failure: `addDevice` rejects → `error` is set, `loading` stays false.

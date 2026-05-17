@@ -6,12 +6,11 @@ import {
 } from '../../crypto/pkg-node/atmin_crypto.js';
 import {
     fetchMessages,
+    onAuthEvent,
     type RegisterRequest,
     register,
     resolve,
     sendTextMessage,
-    setOnDeviceRevoked,
-    setOnUnauthorized,
     storeGet,
     updateProfile,
 } from './api';
@@ -1449,17 +1448,20 @@ describe('api - Megolm send/receive', () => {
 });
 
 describe('api - device revocation', () => {
+    let unsub: (() => void) | undefined;
+
     beforeEach(() => {
         resetFetchMock();
     });
 
     afterEach(() => {
-        setOnDeviceRevoked(null);
+        unsub?.();
+        unsub = undefined;
     });
 
-    it('calls onDeviceRevoked callback on 403 device_revoked', async () => {
+    it('calls device_revoked listeners on 403 device_revoked', async () => {
         const onRevoked = vi.fn();
-        setOnDeviceRevoked(onRevoked);
+        unsub = onAuthEvent('device_revoked', onRevoked);
 
         fetchMock.mockResolvedValueOnce({
             ok: false,
@@ -1479,9 +1481,62 @@ describe('api - device revocation', () => {
         expect(onRevoked).toHaveBeenCalledOnce();
     });
 
-    it('does not call onDeviceRevoked on other 403 errors', async () => {
+    it('notifies two device_revoked listeners independently', async () => {
+        const cb1 = vi.fn();
+        const cb2 = vi.fn();
+        const u1 = onAuthEvent('device_revoked', cb1);
+        const u2 = onAuthEvent('device_revoked', cb2);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'device_revoked',
+                message: 'Device has been revoked',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 403,
+            code: 'device_revoked',
+        });
+
+        expect(cb1).toHaveBeenCalledOnce();
+        expect(cb2).toHaveBeenCalledOnce();
+        u1();
+        u2();
+    });
+
+    it('unsubscribe stops only its own callback', async () => {
+        const cb1 = vi.fn();
+        const cb2 = vi.fn();
+        const u1 = onAuthEvent('device_revoked', cb1);
+        unsub = onAuthEvent('device_revoked', cb2);
+        u1(); // unsubscribe cb1 immediately
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'device_revoked',
+                message: 'Device has been revoked',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 403,
+            code: 'device_revoked',
+        });
+
+        expect(cb1).not.toHaveBeenCalled();
+        expect(cb2).toHaveBeenCalledOnce();
+    });
+
+    it('does not call device_revoked listener on other 403 errors', async () => {
         const onRevoked = vi.fn();
-        setOnDeviceRevoked(onRevoked);
+        unsub = onAuthEvent('device_revoked', onRevoked);
 
         fetchMock.mockResolvedValueOnce({
             ok: false,
@@ -1501,9 +1556,7 @@ describe('api - device revocation', () => {
         expect(onRevoked).not.toHaveBeenCalled();
     });
 
-    it('does not throw when no callback is registered', async () => {
-        setOnDeviceRevoked(null);
-
+    it('does not throw when no listener is registered', async () => {
         fetchMock.mockResolvedValueOnce({
             ok: false,
             status: 403,
@@ -1522,17 +1575,20 @@ describe('api - device revocation', () => {
 });
 
 describe('api - unauthorized (401)', () => {
+    let unsub: (() => void) | undefined;
+
     beforeEach(() => {
         resetFetchMock();
     });
 
     afterEach(() => {
-        setOnUnauthorized(null);
+        unsub?.();
+        unsub = undefined;
     });
 
-    it('calls onUnauthorized callback on 401', async () => {
+    it('calls unauthorized listeners on 401', async () => {
         const onUnauth = vi.fn();
-        setOnUnauthorized(onUnauth);
+        unsub = onAuthEvent('unauthorized', onUnauth);
 
         fetchMock.mockResolvedValueOnce({
             ok: false,
@@ -1551,9 +1607,9 @@ describe('api - unauthorized (401)', () => {
         expect(onUnauth).toHaveBeenCalledOnce();
     });
 
-    it('does not call onUnauthorized on other 4xx errors', async () => {
+    it('does not call unauthorized listener on other 4xx errors', async () => {
         const onUnauth = vi.fn();
-        setOnUnauthorized(onUnauth);
+        unsub = onAuthEvent('unauthorized', onUnauth);
 
         fetchMock.mockResolvedValueOnce({
             ok: false,
@@ -1572,9 +1628,7 @@ describe('api - unauthorized (401)', () => {
         expect(onUnauth).not.toHaveBeenCalled();
     });
 
-    it('does not throw when no callback is registered', async () => {
-        setOnUnauthorized(null);
-
+    it('does not throw when no listener is registered', async () => {
         fetchMock.mockResolvedValueOnce({
             ok: false,
             status: 401,
@@ -1590,9 +1644,9 @@ describe('api - unauthorized (401)', () => {
         });
     });
 
-    it('calls onUnauthorized from storeGet() path', async () => {
+    it('calls unauthorized listener from storeGet() path', async () => {
         const onUnauth = vi.fn();
-        setOnUnauthorized(onUnauth);
+        unsub = onAuthEvent('unauthorized', onUnauth);
 
         fetchMock.mockResolvedValueOnce({
             ok: false,

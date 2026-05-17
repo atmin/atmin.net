@@ -19,16 +19,17 @@ export class APIError extends Error {
     }
 }
 
-let onDeviceRevoked: (() => void) | null = null;
+type AuthEvent = 'device_revoked' | 'unauthorized';
+const authEvents = new EventTarget();
 
-export function setOnDeviceRevoked(cb: (() => void) | null): void {
-    onDeviceRevoked = cb;
+export function onAuthEvent(type: AuthEvent, cb: () => void): () => void {
+    const handler = () => cb();
+    authEvents.addEventListener(type, handler);
+    return () => authEvents.removeEventListener(type, handler);
 }
 
-let onUnauthorized: (() => void) | null = null;
-
-export function setOnUnauthorized(cb: (() => void) | null): void {
-    onUnauthorized = cb;
+function emitAuth(type: AuthEvent): void {
+    authEvents.dispatchEvent(new Event(type));
 }
 
 async function request<T>(
@@ -52,8 +53,8 @@ async function request<T>(
             message: res.statusText,
         }));
         if (res.status === 403 && err.error === 'device_revoked')
-            onDeviceRevoked?.();
-        if (res.status === 401) onUnauthorized?.();
+            emitAuth('device_revoked');
+        if (res.status === 401) emitAuth('unauthorized');
         throw new APIError(res.status, err.error, err.message);
     }
 
@@ -214,8 +215,8 @@ export async function storeGet(
             message: res.statusText,
         }));
         if (res.status === 403 && err.error === 'device_revoked')
-            onDeviceRevoked?.();
-        if (res.status === 401) onUnauthorized?.();
+            emitAuth('device_revoked');
+        if (res.status === 401) emitAuth('unauthorized');
         throw new APIError(res.status, err.error, err.message);
     }
     return res.arrayBuffer();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { deleteDevice, setOnDeviceRevoked, setOnUnauthorized } from '@/lib/api';
+import { deleteDevice, onAuthEvent } from '@/lib/api';
 import {
     clearSession,
     clearToken,
@@ -130,14 +130,13 @@ export function useSession(): SessionState {
     }, []);
 
     useEffect(() => {
-        setOnDeviceRevoked(handleLogout);
-        return () => setOnDeviceRevoked(null);
-    }, [handleLogout]);
-
-    useEffect(() => {
-        setOnUnauthorized(handleUnauthorized);
-        return () => setOnUnauthorized(null);
-    }, [handleUnauthorized]);
+        const u1 = onAuthEvent('device_revoked', handleLogout);
+        const u2 = onAuthEvent('unauthorized', handleUnauthorized);
+        return () => {
+            u1();
+            u2();
+        };
+    }, [handleLogout, handleUnauthorized]);
 
     const handleLogin = (s: Session) => setSession(s);
 
