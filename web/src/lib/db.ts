@@ -68,6 +68,21 @@ export interface StoredSyncCursor {
     cursor: string;
 }
 
+function awaitTx(tx: IDBTransaction): Promise<void> {
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error ?? new Error('tx aborted'));
+    });
+}
+
+function awaitReq<T>(req: IDBRequest<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
 let db: IDBDatabase | null = null;
 
 async function openDB(): Promise<IDBDatabase> {
@@ -178,34 +193,22 @@ export async function putKey(name: string, key: CryptoKey): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(KEYS_STORE, 'readwrite');
     tx.objectStore(KEYS_STORE).put(key, name);
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function getKey(name: string): Promise<CryptoKey | undefined> {
     const database = await openDB();
     const tx = database.transaction(KEYS_STORE, 'readonly');
-    const request = tx.objectStore(KEYS_STORE).get(name);
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () =>
-            resolve(request.result as CryptoKey | undefined);
-        request.onerror = () => reject(request.error);
-    });
+    return awaitReq<CryptoKey | undefined>(
+        tx.objectStore(KEYS_STORE).get(name),
+    );
 }
 
 export async function clearKeys(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(KEYS_STORE, 'readwrite');
     tx.objectStore(KEYS_STORE).clear();
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export function deleteDatabase(): Promise<void> {
@@ -213,20 +216,17 @@ export function deleteDatabase(): Promise<void> {
         db.close();
         db = null;
     }
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.deleteDatabase(DB_NAME);
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-        // Fires when another connection (another tab, or a React component
-        // that reopened via getDB() before fully unmounting) is still open.
-        // The deletion will proceed once that connection closes, but without
-        // this handler the promise can hang silently. Log and keep waiting.
-        request.onblocked = () => {
-            console.warn(
-                'deleteDatabase: blocked by another open connection; waiting',
-            );
-        };
-    });
+    const request = indexedDB.deleteDatabase(DB_NAME);
+    // Fires when another connection (another tab, or a React component
+    // that reopened via getDB() before fully unmounting) is still open.
+    // The deletion will proceed once that connection closes, but without
+    // this handler the promise can hang silently. Log and keep waiting.
+    request.onblocked = () => {
+        console.warn(
+            'deleteDatabase: blocked by another open connection; waiting',
+        );
+    };
+    return awaitReq(request as unknown as IDBRequest<void>);
 }
 
 // ── Message storage ─────────────────────────────────────────────────
@@ -283,7 +283,9 @@ export async function saveMessages(
         }
     }
 
-    // Upsert conversation summaries (read-modify-write)
+    // Upsert conversation summaries (read-modify-write inside an open tx).
+    // IDB autocommits when the microtask queue drains, so queuing a put()
+    // inside getReq.onsuccess keeps everything on the same transaction.
     for (const [convId, update] of convUpdates) {
         const getReq = convStore.get(convId);
         getReq.onsuccess = () => {
@@ -307,55 +309,32 @@ export async function saveMessages(
         };
     }
 
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function loadMessages(userId: string): Promise<StoredMessage[]> {
     const database = await openDB();
     const tx = database.transaction(MESSAGES_STORE, 'readonly');
-    const store = tx.objectStore(MESSAGES_STORE);
-    const index = store.index('userId_timestamp');
-
-    // Get all messages for this user, sorted by timestamp
+    const index = tx.objectStore(MESSAGES_STORE).index('userId_timestamp');
     const range = IDBKeyRange.bound(
         [userId, 0],
         [userId, Number.MAX_SAFE_INTEGER],
     );
-
-    return new Promise((resolve, reject) => {
-        const request = index.getAll(range);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
+    return awaitReq<StoredMessage[]>(index.getAll(range));
 }
 
 export async function getLatestTimestamp(userId: string): Promise<number> {
     const database = await openDB();
     const tx = database.transaction(MESSAGES_STORE, 'readonly');
-    const store = tx.objectStore(MESSAGES_STORE);
-    const index = store.index('userId_timestamp');
-
-    // Get messages in reverse order (latest first)
+    const index = tx.objectStore(MESSAGES_STORE).index('userId_timestamp');
     const range = IDBKeyRange.bound(
         [userId, 0],
         [userId, Number.MAX_SAFE_INTEGER],
     );
-
-    return new Promise((resolve, reject) => {
-        const request = index.openCursor(range, 'prev');
-        request.onsuccess = () => {
-            const cursor = request.result;
-            if (cursor) {
-                resolve((cursor.value as StoredMessage).timestamp);
-            } else {
-                resolve(0); // No messages yet
-            }
-        };
-        request.onerror = () => reject(request.error);
-    });
+    const cursor = await awaitReq<IDBCursorWithValue | null>(
+        index.openCursor(range, 'prev'),
+    );
+    return cursor ? (cursor.value as StoredMessage).timestamp : 0;
 }
 
 export async function clearMessages(userId?: string): Promise<void> {
@@ -381,10 +360,7 @@ export async function clearMessages(userId?: string): Promise<void> {
         store.clear();
     }
 
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 // ── Conversations ────────────────────────────────────────────────
@@ -395,15 +371,9 @@ export async function loadConversations(): Promise<StoredConversation[]> {
     const index = tx
         .objectStore(CONVERSATIONS_STORE)
         .index('lastMessageTimestamp');
-
-    return new Promise((resolve, reject) => {
-        const request = index.getAll();
-        request.onsuccess = () => {
-            // Index returns ascending; reverse for most-recent-first
-            resolve((request.result as StoredConversation[]).reverse());
-        };
-        request.onerror = () => reject(request.error);
-    });
+    const result = await awaitReq<StoredConversation[]>(index.getAll());
+    // Index returns ascending; reverse for most-recent-first
+    return result.reverse();
 }
 
 // ── Contacts ─────────────────────────────────────────────────────
@@ -415,42 +385,27 @@ export async function saveContact(
     const database = await openDB();
     const tx = database.transaction(CONTACTS_STORE, 'readwrite');
     tx.objectStore(CONTACTS_STORE).put({ userId, handle } as StoredContact);
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function getContact(userId: string): Promise<string | null> {
     const database = await openDB();
     const tx = database.transaction(CONTACTS_STORE, 'readonly');
-    const request = tx.objectStore(CONTACTS_STORE).get(userId);
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => {
-            const result = request.result as StoredContact | undefined;
-            resolve(result?.handle ?? null);
-        };
-        request.onerror = () => reject(request.error);
-    });
+    const result = await awaitReq<StoredContact | undefined>(
+        tx.objectStore(CONTACTS_STORE).get(userId),
+    );
+    return result?.handle ?? null;
 }
 
 export async function loadAllContacts(): Promise<Map<string, string>> {
     const database = await openDB();
     const tx = database.transaction(CONTACTS_STORE, 'readonly');
-    const request = tx.objectStore(CONTACTS_STORE).getAll();
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => {
-            const map = new Map<string, string>();
-            for (const c of request.result as StoredContact[]) {
-                map.set(c.userId, c.handle);
-            }
-            resolve(map);
-        };
-        request.onerror = () => reject(request.error);
-    });
+    const contacts = await awaitReq<StoredContact[]>(
+        tx.objectStore(CONTACTS_STORE).getAll(),
+    );
+    const map = new Map<string, string>();
+    for (const c of contacts) map.set(c.userId, c.handle);
+    return map;
 }
 
 // ── Megolm outbound session ────────────────────────────────────────
@@ -469,11 +424,7 @@ export async function saveOutboundSession(
         messageIndex,
     };
     tx.objectStore(MEGOLM_OUTBOUND_STORE).put(record);
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function loadOutboundSession(): Promise<
@@ -481,24 +432,16 @@ export async function loadOutboundSession(): Promise<
 > {
     const database = await openDB();
     const tx = database.transaction(MEGOLM_OUTBOUND_STORE, 'readonly');
-    const request = tx.objectStore(MEGOLM_OUTBOUND_STORE).get('current');
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () =>
-            resolve(request.result as StoredOutboundSession | undefined);
-        request.onerror = () => reject(request.error);
-    });
+    return awaitReq<StoredOutboundSession | undefined>(
+        tx.objectStore(MEGOLM_OUTBOUND_STORE).get('current'),
+    );
 }
 
 export async function clearOutboundSession(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(MEGOLM_OUTBOUND_STORE, 'readwrite');
     tx.objectStore(MEGOLM_OUTBOUND_STORE).clear();
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 // ── Megolm inbound sessions ───────────────────────────────────────
@@ -518,11 +461,7 @@ export async function saveInboundSession(
         pickleJson,
     };
     tx.objectStore(MEGOLM_INBOUND_STORE).put(record);
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function loadInboundSession(
@@ -530,24 +469,16 @@ export async function loadInboundSession(
 ): Promise<StoredInboundSession | undefined> {
     const database = await openDB();
     const tx = database.transaction(MEGOLM_INBOUND_STORE, 'readonly');
-    const request = tx.objectStore(MEGOLM_INBOUND_STORE).get(sessionId);
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () =>
-            resolve(request.result as StoredInboundSession | undefined);
-        request.onerror = () => reject(request.error);
-    });
+    return awaitReq<StoredInboundSession | undefined>(
+        tx.objectStore(MEGOLM_INBOUND_STORE).get(sessionId),
+    );
 }
 
 export async function clearInboundSessions(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(MEGOLM_INBOUND_STORE, 'readwrite');
     tx.objectStore(MEGOLM_INBOUND_STORE).clear();
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 // ── Megolm key shares ─────────────────────────────────────────────
@@ -564,11 +495,7 @@ export async function recordKeyShare(
         sharedAt: Date.now(),
     };
     tx.objectStore(MEGOLM_KEY_SHARES_STORE).put(record);
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function hasKeyShare(
@@ -577,14 +504,12 @@ export async function hasKeyShare(
 ): Promise<boolean> {
     const database = await openDB();
     const tx = database.transaction(MEGOLM_KEY_SHARES_STORE, 'readonly');
-    const request = tx
-        .objectStore(MEGOLM_KEY_SHARES_STORE)
-        .get([sessionId, recipientUserId]);
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => resolve(request.result !== undefined);
-        request.onerror = () => reject(request.error);
-    });
+    const result = await awaitReq(
+        tx
+            .objectStore(MEGOLM_KEY_SHARES_STORE)
+            .get([sessionId, recipientUserId]),
+    );
+    return result !== undefined;
 }
 
 export async function clearKeyShares(sessionId?: string): Promise<void> {
@@ -609,10 +534,7 @@ export async function clearKeyShares(sessionId?: string): Promise<void> {
         store.clear();
     }
 
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 // ── Sync cursors ──────────────────────────────────────────────────
@@ -627,11 +549,7 @@ export async function saveSyncCursor(
         prefix,
         cursor,
     } as StoredSyncCursor);
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
 
 export async function loadSyncCursor(
@@ -639,24 +557,15 @@ export async function loadSyncCursor(
 ): Promise<string | undefined> {
     const database = await openDB();
     const tx = database.transaction(SYNC_CURSORS_STORE, 'readonly');
-    const request = tx.objectStore(SYNC_CURSORS_STORE).get(prefix);
-
-    return new Promise((resolve, reject) => {
-        request.onsuccess = () => {
-            const result = request.result as StoredSyncCursor | undefined;
-            resolve(result?.cursor);
-        };
-        request.onerror = () => reject(request.error);
-    });
+    const result = await awaitReq<StoredSyncCursor | undefined>(
+        tx.objectStore(SYNC_CURSORS_STORE).get(prefix),
+    );
+    return result?.cursor;
 }
 
 export async function clearSyncCursors(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(SYNC_CURSORS_STORE, 'readwrite');
     tx.objectStore(SYNC_CURSORS_STORE).clear();
-
-    return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-    });
+    return awaitTx(tx);
 }
