@@ -14,3 +14,7 @@ the resulting S3 state, and is used to generate end-to-end tests.
 - [Offline mode](./offline-mode.md) — network unavailability, cached view, reconnect
 - [Account recovery](./account-recovery.md) — restoring from backup secret
 - [Account deletion](./account-deletion.md) — full account and data removal
+
+## Invariants
+
+- [Invariants](./invariants.md) — properties that must hold under adverse conditions (network faults, retries, restores). Sibling to user-flow scenarios; split into `invariants/` directory when the list grows.
