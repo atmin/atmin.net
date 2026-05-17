@@ -61,7 +61,7 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCa
 		}
 
 		// Revocation check: device file must exist
-		deviceKey := "users/" + userID + "/devices/" + deviceID + ".json"
+		deviceKey := keyDevice(userID, deviceID)
 		if !cache.valid(deviceKey) {
 			if err := store.HeadObject(r.Context(), deviceKey); err != nil {
 				if errors.Is(err, ErrNotFound) {

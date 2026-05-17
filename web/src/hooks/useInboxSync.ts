@@ -3,6 +3,7 @@ import { storeList } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { syncAndPublish } from '@/lib/inbox-sync';
 import type { SessionManager } from '@/lib/megolm-session';
+import { path } from '@/lib/paths';
 
 export function useInboxSync(
     session: Session | null,
@@ -26,7 +27,7 @@ export function useInboxSync(
         events.onerror = () => {
             events.close();
             if (navigator.onLine) {
-                storeList(s.token, `inbox/${s.userId}/live/`).catch(() => {});
+                storeList(s.token, path.inboxLive(s.userId)).catch(() => {});
             }
         };
 

@@ -9,6 +9,7 @@
 import { storeGet, storePresign } from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import { loadAllContacts, saveContact } from './db';
+import { path } from './paths';
 
 interface ContactEntry {
     user_id: string;
@@ -41,7 +42,7 @@ export async function uploadContacts(
     });
     const blobBytes = new TextEncoder().encode(encryptedBlob);
 
-    const key = `users/${userId}/contacts.json`;
+    const key = path.contacts(userId);
     const { presigned_url } = await storePresign(token, key, blobBytes.length);
 
     await fetch(presigned_url, {
@@ -57,7 +58,7 @@ export async function restoreContacts(
 ): Promise<number> {
     let blob: ArrayBuffer;
     try {
-        blob = await storeGet(token, `users/${userId}/contacts.json`);
+        blob = await storeGet(token, path.contacts(userId));
     } catch {
         // File doesn't exist (new account, first device)
         return 0;

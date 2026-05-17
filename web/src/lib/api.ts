@@ -1,5 +1,6 @@
 import { ulid } from 'ulid';
 import type { Envelope } from './envelope';
+import { path } from './paths';
 
 export class APIError extends Error {
     constructor(
@@ -146,7 +147,7 @@ export async function listDevices(
     token: string,
     userId: string,
 ): Promise<DeviceInfo[]> {
-    const prefix = `users/${userId}/devices/`;
+    const prefix = path.devices(userId);
     const listRes = await storeList(token, prefix);
     const devices: DeviceInfo[] = [];
     for (const key of listRes.keys) {
@@ -299,7 +300,7 @@ export async function uploadMedia(
     abort?: AbortSignal,
 ): Promise<{ url: string; mediaUlid: string }> {
     const mediaUlid = ulid();
-    const key = `media/${userId}/${mediaUlid}`;
+    const key = path.media(userId, mediaUlid);
 
     const { presigned_url } = await storePresign(
         token,

@@ -43,7 +43,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 		var handle string
 		for i := 0; i < 10; i++ {
 			candidate := generateHandle()
-			handleKey := "handles/" + candidate + ".json"
+			handleKey := keyHandle(candidate)
 			if err := store.HeadObject(r.Context(), handleKey); errors.Is(err, ErrNotFound) {
 				handle = candidate
 				break
@@ -62,7 +62,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			"sharing_public_key": req.SharingPublicKey,
 			"created_at":         time.Now().UTC().Format(time.RFC3339),
 		})
-		if err := store.PutObject(r.Context(), "users/"+userID+"/profile.json", profile, "application/json"); err != nil {
+		if err := store.PutObject(r.Context(), keyProfile(userID), profile, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write profile"})
 			return
 		}
@@ -73,14 +73,14 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			"device_label": req.DeviceLabel,
 			"created_at":   time.Now().UTC().Format(time.RFC3339),
 		})
-		if err := store.PutObject(r.Context(), "users/"+userID+"/devices/"+deviceID+".json", device, "application/json"); err != nil {
+		if err := store.PutObject(r.Context(), keyDevice(userID, deviceID), device, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write device"})
 			return
 		}
 
 		// Write handle file
 		handleData, _ := json.Marshal(map[string]string{"user_id": userID, "sharing_public_key": req.SharingPublicKey})
-		if err := store.PutObject(r.Context(), "handles/"+handle+".json", handleData, "application/json"); err != nil {
+		if err := store.PutObject(r.Context(), keyHandle(handle), handleData, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write handle"})
 			return
 		}
@@ -101,7 +101,7 @@ var errAuthProofInvalid = errors.New("auth proof invalid")
 // fetchAndVerifyAuthProof fetches the user's profile to get their auth public key,
 // then verifies the auth proof. Returns ErrNotFound if the profile does not exist.
 func fetchAndVerifyAuthProof(ctx context.Context, store Store, userID string, proof AuthProof) error {
-	profileData, err := store.GetObject(ctx, "users/"+userID+"/profile.json")
+	profileData, err := store.GetObject(ctx, keyProfile(userID))
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 			"device_label": req.DeviceLabel,
 			"created_at":   time.Now().UTC().Format(time.RFC3339),
 		})
-		if err := store.PutObject(r.Context(), "users/"+req.UserID+"/devices/"+deviceID+".json", device, "application/json"); err != nil {
+		if err := store.PutObject(r.Context(), keyDevice(req.UserID, deviceID), device, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write device"})
 			return
 		}
@@ -170,7 +170,7 @@ func handleDeleteDevice(store Store, cache *deviceCache) http.HandlerFunc {
 		userID := userIDFrom(r.Context())
 		deviceID := deviceIDFrom(r.Context())
 
-		deviceKey := "users/" + userID + "/devices/" + deviceID + ".json"
+		deviceKey := keyDevice(userID, deviceID)
 		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete device"})
 			return
@@ -203,7 +203,7 @@ func handleRevokeDevice(store Store, cfg Config, cache *deviceCache) http.Handle
 			return
 		}
 
-		deviceKey := "users/" + userID + "/devices/" + req.DeviceID + ".json"
+		deviceKey := keyDevice(userID, req.DeviceID)
 		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete device"})
 			return
@@ -225,7 +225,7 @@ func handleResolve(store Store) http.HandlerFunc {
 			return
 		}
 
-		handleData, err := store.GetObject(r.Context(), "handles/"+handle+".json")
+		handleData, err := store.GetObject(r.Context(), keyHandle(handle))
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
@@ -251,7 +251,7 @@ func handleResolve(store Store) http.HandlerFunc {
 
 		// Fallback: if handle file lacks sharing_public_key, read from profile
 		if resp["sharing_public_key"] == "" {
-			profileData, err := store.GetObject(r.Context(), "users/"+handleObj["user_id"]+"/profile.json")
+			profileData, err := store.GetObject(r.Context(), keyProfile(handleObj["user_id"]))
 			if err == nil {
 				var profile map[string]string
 				json.Unmarshal(profileData, &profile)
@@ -282,7 +282,7 @@ func handleProfile(store Store) http.HandlerFunc {
 		}
 
 		// Read-merge-write profile.json
-		profileData, err := store.GetObject(r.Context(), "users/"+userID+"/profile.json")
+		profileData, err := store.GetObject(r.Context(), keyProfile(userID))
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
@@ -303,7 +303,7 @@ func handleProfile(store Store) http.HandlerFunc {
 		}
 
 		updated, _ := json.Marshal(profile)
-		if err := store.PutObject(r.Context(), "users/"+userID+"/profile.json", updated, "application/json"); err != nil {
+		if err := store.PutObject(r.Context(), keyProfile(userID), updated, "application/json"); err != nil {
 			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write profile"})
 			return
 		}
@@ -317,7 +317,7 @@ func handleProfile(store Store) http.HandlerFunc {
 				"display_name":       profile["display_name"],
 				"avatar_url":         profile["avatar_url"],
 			})
-			store.PutObject(r.Context(), "handles/"+handle+".json", handleData, "application/json")
+			store.PutObject(r.Context(), keyHandle(handle), handleData, "application/json")
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -330,7 +330,7 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 		userID := userIDFrom(r.Context())
 
 		// Read profile to get handle
-		profileData, err := store.GetObject(r.Context(), "users/"+userID+"/profile.json")
+		profileData, err := store.GetObject(r.Context(), keyProfile(userID))
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
@@ -345,10 +345,10 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 
 		// Delete all objects under each prefix
 		for _, prefix := range []string{
-			"users/" + userID + "/",
-			"inbox/" + userID + "/",
-			"keys/" + userID + "/",
-			"media/" + userID + "/",
+			prefixUser(userID),
+			prefixInbox(userID),
+			prefixKeys(userID),
+			prefixMedia(userID),
 		} {
 			keys, _, err := store.ListObjects(r.Context(), prefix, 1000, "")
 			if err != nil {
@@ -365,7 +365,7 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 
 		// Delete handle file
 		if handle := profile["handle"]; handle != "" {
-			store.DeleteObject(r.Context(), "handles/"+handle+".json")
+			store.DeleteObject(r.Context(), keyHandle(handle))
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -407,7 +407,7 @@ func handleSend(store Store, hub *EventHub) http.HandlerFunc {
 				return
 			}
 
-			key := "inbox/" + env.ToUser + "/live/" + env.MsgID
+			key := keyInboxLive(env.ToUser, env.MsgID)
 			if err := store.PutObject(r.Context(), key, raw, "application/json"); err != nil {
 				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write envelope"})
 				return
@@ -426,28 +426,26 @@ func handleSend(store Store, hub *EventHub) http.HandlerFunc {
 }
 
 // Prefix authorization: users can only access their own prefixes.
-var allowedPrefixes = []string{"inbox/", "keys/", "media/"}
-
 func authorizePrefix(userID, prefix string) bool {
-	for _, p := range allowedPrefixes {
+	for _, p := range dataPrefixes {
 		if strings.HasPrefix(prefix, p+userID+"/") {
 			return true
 		}
 	}
 	// Also allow reading other users' profiles (for resolve/key fetch)
-	if strings.HasPrefix(prefix, "users/") {
+	if strings.HasPrefix(prefix, usersRoot) {
 		return true
 	}
 	return false
 }
 
 func authorizeKey(userID, key string) bool {
-	for _, p := range allowedPrefixes {
+	for _, p := range dataPrefixes {
 		if strings.HasPrefix(key, p+userID+"/") {
 			return true
 		}
 	}
-	if strings.HasPrefix(key, "users/") {
+	if strings.HasPrefix(key, usersRoot) {
 		return true
 	}
 	// Media blobs are capability-protected: any authenticated user who
@@ -461,12 +459,12 @@ func authorizeKey(userID, key string) bool {
 
 // authorizeKeyWrite is like authorizeKey but restricts users/ to own uid only.
 func authorizeKeyWrite(userID, key string) bool {
-	for _, p := range allowedPrefixes {
+	for _, p := range dataPrefixes {
 		if strings.HasPrefix(key, p+userID+"/") {
 			return true
 		}
 	}
-	if strings.HasPrefix(key, "users/"+userID+"/") {
+	if strings.HasPrefix(key, prefixUser(userID)) {
 		return true
 	}
 	return false

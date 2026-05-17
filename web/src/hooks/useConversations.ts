@@ -10,6 +10,7 @@ import {
 } from '@/lib/db';
 import { onInboxUpdated } from '@/lib/inbox-sync';
 import type { SessionManager } from '@/lib/megolm-session';
+import { path } from '@/lib/paths';
 
 export interface ConversationsState {
     conversations: StoredConversation[];
@@ -69,7 +70,7 @@ export function useConversations(
                         try {
                             const buf = await storeGet(
                                 session.token,
-                                `users/${uid}/profile.json`,
+                                path.profile(uid),
                             );
                             const profile = JSON.parse(
                                 new TextDecoder().decode(buf),

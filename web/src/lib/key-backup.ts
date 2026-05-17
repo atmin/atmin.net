@@ -14,6 +14,7 @@ import { decode as cborDecode } from 'cbor-x';
 import { storeCompact, storeGet, storeList, storePresign } from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import type { SessionManager } from './megolm-session';
+import { path } from './paths';
 
 interface KeyBackupEntry {
     msg_id: string;
@@ -39,7 +40,7 @@ export async function backupSessionKey(
     });
     const blobBytes = new TextEncoder().encode(blob);
 
-    const key = `keys/${userId}/live/${sessionId}`;
+    const key = path.keyBackup(userId, sessionId);
     const { presigned_url } = await storePresign(token, key, blobBytes.length);
 
     await fetch(presigned_url, {
@@ -57,7 +58,7 @@ export async function restoreSessionKeys(
     let restored = 0;
 
     // Restore from live keys
-    const livePrefix = `keys/${userId}/live/`;
+    const livePrefix = path.keysLive(userId);
     let hadLiveKeys = false;
     try {
         const liveRes = await storeList(token, livePrefix);
@@ -82,7 +83,7 @@ export async function restoreSessionKeys(
     }
 
     // Restore from archived keys
-    const archivePrefix = `keys/${userId}/archive/`;
+    const archivePrefix = path.keysArchive(userId);
     try {
         const archiveRes = await storeList(token, archivePrefix);
         for (const key of archiveRes.keys) {

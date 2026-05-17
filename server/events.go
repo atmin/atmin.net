@@ -116,7 +116,7 @@ func updateLastActive(store Store, userID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	key := "users/" + userID + "/profile.json"
+	key := keyProfile(userID)
 	data, err := store.GetObject(ctx, key)
 	if err != nil {
 		return

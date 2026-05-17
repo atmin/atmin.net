@@ -18,6 +18,7 @@ import { loadSyncCursor, saveSyncCursor } from './db';
 import type { Envelope } from './envelope';
 import { backupSessionKey } from './key-backup';
 import type { SessionManager } from './megolm-session';
+import { path } from './paths';
 
 export function conversationId(userA: string, userB: string): string {
     if (userA === userB) return `self:${userA}`;
@@ -246,7 +247,7 @@ export async function syncLive(
     lastKey: string | undefined;
     prefix: string;
 }> {
-    const prefix = `inbox/${userId}/live/`;
+    const prefix = path.inboxLive(userId);
     const storedCursor = await loadSyncCursor(prefix);
 
     let listRes: StoreListResponse;
@@ -296,7 +297,7 @@ export async function syncArchive(
     seenMsgIds: Set<string>,
     backupKey?: CryptoKey,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
-    const archivePrefix = `inbox/${userId}/archive/`;
+    const archivePrefix = path.inboxArchive(userId);
     const storedCursor = await loadSyncCursor(archivePrefix);
 
     let listRes: StoreListResponse;
@@ -358,7 +359,7 @@ function triggerCompaction(
 ): void {
     const upTo = lastKey.slice(prefix.length);
     storeCompact(token, prefix, upTo).catch(console.error);
-    storeCompact(token, `keys/${userId}/live/`, '~').catch(console.error);
+    storeCompact(token, path.keysLive(userId), '~').catch(console.error);
 }
 
 let syncInFlight: Promise<DecryptedMessage[]> | null = null;

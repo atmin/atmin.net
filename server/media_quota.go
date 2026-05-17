@@ -50,7 +50,7 @@ func (q *inProcessMediaQuota) ReserveUpload(ctx context.Context, userID string, 
 	defer e.mu.Unlock()
 
 	if q.now().After(e.expiresAt) {
-		prefix := "media/" + userID + "/"
+		prefix := prefixMedia(userID)
 		total, count, truncated, err := q.store.ListObjectSizes(ctx, prefix, USER_MEDIA_BLOB_CAP)
 		if err != nil {
 			return false, "", err
