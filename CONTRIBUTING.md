@@ -49,7 +49,7 @@ multi-part changes.
 - Imperative mood ("add", "fix", "remove" — not "added" or "fixes")
 - Em dash for a subtitle when a bare type isn't enough context: `feat: AuroraBackground — scroll-driven WebGL blob animation`
 
-**Body:** optional, separated by a blank line. Explain *why* the change is needed or summarise non-obvious consequences. Omit when the subject says it all.
+**Body:** optional, separated by a blank line. Explain *why* the change is needed or summarise non-obvious consequences. Omit when the subject says it all. Keep it short — one to three sentences maximum.
 
 ## Setup
 
