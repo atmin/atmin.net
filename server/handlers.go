@@ -50,20 +50,19 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			}
 		}
 		if handle == "" {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to generate handle"})
+			internalError(w, "Failed to generate handle")
 			return
 		}
 
-		// Write profile
-		profile, _ := json.Marshal(map[string]string{
-			"user_id":            userID,
-			"handle":             handle,
-			"auth_public_key":    req.AuthPublicKey,
-			"sharing_public_key": req.SharingPublicKey,
-			"created_at":         time.Now().UTC().Format(time.RFC3339),
-		})
-		if err := store.PutObject(r.Context(), keyProfile(userID), profile, "application/json"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write profile"})
+		p := &Profile{
+			UserID:           userID,
+			Handle:           handle,
+			AuthPublicKey:    req.AuthPublicKey,
+			SharingPublicKey: req.SharingPublicKey,
+			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
+		}
+		if err := putProfile(r.Context(), store, p); err != nil {
+			internalError(w, "Failed to write profile")
 			return
 		}
 
@@ -74,14 +73,12 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			"created_at":   time.Now().UTC().Format(time.RFC3339),
 		})
 		if err := store.PutObject(r.Context(), keyDevice(userID, deviceID), device, "application/json"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write device"})
+			internalError(w, "Failed to write device")
 			return
 		}
 
-		// Write handle file
-		handleData, _ := json.Marshal(map[string]string{"user_id": userID, "sharing_public_key": req.SharingPublicKey})
-		if err := store.PutObject(r.Context(), keyHandle(handle), handleData, "application/json"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write handle"})
+		if err := putHandleProjection(r.Context(), store, p); err != nil {
+			internalError(w, "Failed to write handle")
 			return
 		}
 
@@ -101,15 +98,11 @@ var errAuthProofInvalid = errors.New("auth proof invalid")
 // fetchAndVerifyAuthProof fetches the user's profile to get their auth public key,
 // then verifies the auth proof. Returns ErrNotFound if the profile does not exist.
 func fetchAndVerifyAuthProof(ctx context.Context, store Store, userID string, proof AuthProof) error {
-	profileData, err := store.GetObject(ctx, keyProfile(userID))
+	p, err := getProfile(ctx, store, userID)
 	if err != nil {
 		return err
 	}
-	var profile struct {
-		AuthPublicKey string `json:"auth_public_key"`
-	}
-	json.Unmarshal(profileData, &profile)
-	pubKeyBytes, err := b64url.DecodeString(profile.AuthPublicKey)
+	pubKeyBytes, err := b64url.DecodeString(p.AuthPublicKey)
 	if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
 		return errAuthProofInvalid
 	}
@@ -139,7 +132,7 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 			case errors.Is(err, errAuthProofInvalid):
 				writeError(w, errForbidden)
 			default:
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to verify auth proof"})
+				internalError(w, "Failed to verify auth proof")
 			}
 			return
 		}
@@ -153,7 +146,7 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 			"created_at":   time.Now().UTC().Format(time.RFC3339),
 		})
 		if err := store.PutObject(r.Context(), keyDevice(req.UserID, deviceID), device, "application/json"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write device"})
+			internalError(w, "Failed to write device")
 			return
 		}
 
@@ -172,7 +165,7 @@ func handleDeleteDevice(store Store, cache *deviceCache) http.HandlerFunc {
 
 		deviceKey := keyDevice(userID, deviceID)
 		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete device"})
+			internalError(w, "Failed to delete device")
 			return
 		}
 		cache.invalidate(deviceKey)
@@ -198,14 +191,14 @@ func handleRevokeDevice(store Store, cfg Config, cache *deviceCache) http.Handle
 			if errors.Is(err, errAuthProofInvalid) {
 				writeError(w, errForbidden)
 			} else {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to verify auth proof"})
+				internalError(w, "Failed to verify auth proof")
 			}
 			return
 		}
 
 		deviceKey := keyDevice(userID, req.DeviceID)
 		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete device"})
+			internalError(w, "Failed to delete device")
 			return
 		}
 
@@ -231,35 +224,21 @@ func handleResolve(store Store) http.HandlerFunc {
 				writeError(w, errNotFound)
 				return
 			}
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read handle"})
+			internalError(w, "Failed to read handle")
 			return
 		}
 
-		var handleObj map[string]string
-		json.Unmarshal(handleData, &handleObj)
-
-		resp := map[string]string{
-			"user_id":            handleObj["user_id"],
-			"sharing_public_key": handleObj["sharing_public_key"],
-		}
-		if v := handleObj["display_name"]; v != "" {
-			resp["display_name"] = v
-		}
-		if v := handleObj["avatar_url"]; v != "" {
-			resp["avatar_url"] = v
-		}
+		var h publicHandleData
+		json.Unmarshal(handleData, &h)
 
 		// Fallback: if handle file lacks sharing_public_key, read from profile
-		if resp["sharing_public_key"] == "" {
-			profileData, err := store.GetObject(r.Context(), keyProfile(handleObj["user_id"]))
-			if err == nil {
-				var profile map[string]string
-				json.Unmarshal(profileData, &profile)
-				resp["sharing_public_key"] = profile["sharing_public_key"]
+		if h.SharingPublicKey == "" {
+			if p, err := getProfile(r.Context(), store, h.UserID); err == nil {
+				h.SharingPublicKey = p.SharingPublicKey
 			}
 		}
 
-		writeJSON(w, http.StatusOK, resp)
+		writeJSON(w, http.StatusOK, h)
 	}
 }
 
@@ -282,43 +261,30 @@ func handleProfile(store Store) http.HandlerFunc {
 		}
 
 		// Read-merge-write profile.json
-		profileData, err := store.GetObject(r.Context(), keyProfile(userID))
+		p, err := getProfile(r.Context(), store, userID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
 				return
 			}
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read profile"})
+			internalError(w, "Failed to read profile")
 			return
 		}
 
-		var profile map[string]string
-		json.Unmarshal(profileData, &profile)
-
 		if req.DisplayName != nil {
-			profile["display_name"] = *req.DisplayName
+			p.DisplayName = *req.DisplayName
 		}
 		if req.AvatarURL != nil {
-			profile["avatar_url"] = *req.AvatarURL
+			p.AvatarURL = *req.AvatarURL
 		}
 
-		updated, _ := json.Marshal(profile)
-		if err := store.PutObject(r.Context(), keyProfile(userID), updated, "application/json"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write profile"})
+		if err := putProfile(r.Context(), store, p); err != nil {
+			internalError(w, "Failed to write profile")
 			return
 		}
 
 		// Project public fields to handle file
-		handle := profile["handle"]
-		if handle != "" {
-			handleData, _ := json.Marshal(map[string]string{
-				"user_id":            userID,
-				"sharing_public_key": profile["sharing_public_key"],
-				"display_name":       profile["display_name"],
-				"avatar_url":         profile["avatar_url"],
-			})
-			store.PutObject(r.Context(), keyHandle(handle), handleData, "application/json")
-		}
+		putHandleProjection(r.Context(), store, p)
 
 		w.WriteHeader(http.StatusOK)
 	}
@@ -330,18 +296,15 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 		userID := userIDFrom(r.Context())
 
 		// Read profile to get handle
-		profileData, err := store.GetObject(r.Context(), keyProfile(userID))
+		p, err := getProfile(r.Context(), store, userID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				writeError(w, errNotFound)
 				return
 			}
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to read profile"})
+			internalError(w, "Failed to read profile")
 			return
 		}
-
-		var profile map[string]string
-		json.Unmarshal(profileData, &profile)
 
 		// Delete all objects under each prefix
 		for _, prefix := range []string{
@@ -352,20 +315,20 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 		} {
 			keys, _, err := store.ListObjects(r.Context(), prefix, 1000, "")
 			if err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to list objects"})
+				internalError(w, "Failed to list objects")
 				return
 			}
 			if len(keys) > 0 {
 				if err := store.DeleteObjects(r.Context(), keys); err != nil {
-					writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to delete objects"})
+					internalError(w, "Failed to delete objects")
 					return
 				}
 			}
 		}
 
 		// Delete handle file
-		if handle := profile["handle"]; handle != "" {
-			store.DeleteObject(r.Context(), keyHandle(handle))
+		if p.Handle != "" {
+			store.DeleteObject(r.Context(), keyHandle(p.Handle))
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -409,7 +372,7 @@ func handleSend(store Store, hub *EventHub) http.HandlerFunc {
 
 			key := keyInboxLive(env.ToUser, env.MsgID)
 			if err := store.PutObject(r.Context(), key, raw, "application/json"); err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Failed to write envelope"})
+				internalError(w, "Failed to write envelope")
 				return
 			}
 
@@ -488,7 +451,7 @@ func handleStoreList(store Store) http.HandlerFunc {
 		limit := 50 // default
 		keys, nextCursor, err := store.ListObjects(r.Context(), prefix, limit, cursor)
 		if err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "List failed"})
+			internalError(w, "List failed")
 			return
 		}
 
@@ -519,7 +482,7 @@ func handleStoreObject(store Store) http.HandlerFunc {
 				writeError(w, errNotFound)
 				return
 			}
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Get failed"})
+			internalError(w, "Get failed")
 			return
 		}
 
@@ -562,7 +525,7 @@ func handleStorePresign(store Store, quota MediaQuotaStore) http.HandlerFunc {
 			}
 			ok, _, err := quota.ReserveUpload(r.Context(), userID, req.Bytes)
 			if err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Quota check failed"})
+				internalError(w, "Quota check failed")
 				return
 			}
 			if !ok {
@@ -573,7 +536,7 @@ func handleStorePresign(store Store, quota MediaQuotaStore) http.HandlerFunc {
 
 		url, err := store.PresignPut(r.Context(), req.Key, req.Bytes, 15*time.Minute)
 		if err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Presign failed"})
+			internalError(w, "Presign failed")
 			return
 		}
 
@@ -612,7 +575,7 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 		for {
 			keys, nextCursor, err := store.ListObjects(r.Context(), req.Prefix, 100, cursor)
 			if err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "List failed"})
+				internalError(w, "List failed")
 				return
 			}
 			for _, k := range keys {
@@ -642,12 +605,12 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 				if errors.Is(err, ErrNotFound) {
 					continue // deleted between list and get, skip
 				}
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Read failed"})
+				internalError(w, "Read failed")
 				return
 			}
 			var obj any
 			if err := json.Unmarshal(data, &obj); err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Decode failed"})
+				internalError(w, "Decode failed")
 				return
 			}
 			newObjects = append(newObjects, obj)
@@ -663,7 +626,7 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 		for {
 			keys, nextCursor, err := store.ListObjects(r.Context(), archivePrefix, 100, cursor)
 			if err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "List archives failed"})
+				internalError(w, "List archives failed")
 				return
 			}
 			existingArchiveKeys = append(existingArchiveKeys, keys...)
@@ -681,12 +644,12 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 				if errors.Is(err, ErrNotFound) {
 					continue
 				}
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "Read archive failed"})
+				internalError(w, "Read archive failed")
 				return
 			}
 			var objs []any
 			if err := cbor.Unmarshal(data, &objs); err != nil {
-				writeError(w, APIError{http.StatusInternalServerError, "internal", "CBOR decode failed"})
+				internalError(w, "CBOR decode failed")
 				return
 			}
 			existingObjects = append(existingObjects, objs...)
@@ -699,7 +662,7 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 		// Encode as CBOR array.
 		archive, err := cbor.Marshal(merged)
 		if err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "CBOR encode failed"})
+			internalError(w, "CBOR encode failed")
 			return
 		}
 
@@ -707,14 +670,14 @@ func handleStoreCompact(store Store) http.HandlerFunc {
 		// No object is deleted before the new archive is durably written.
 		archiveKey := archivePrefixBase + today + "-" + ulid.Make().String()
 		if err := store.PutObject(r.Context(), archiveKey, archive, "application/cbor"); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Write archive failed"})
+			internalError(w, "Write archive failed")
 			return
 		}
 
 		// Delete compacted live objects and old archives.
 		toDelete := append(toCompact, existingArchiveKeys...)
 		if err := store.DeleteObjects(r.Context(), toDelete); err != nil {
-			writeError(w, APIError{http.StatusInternalServerError, "internal", "Delete failed"})
+			internalError(w, "Delete failed")
 			return
 		}
 

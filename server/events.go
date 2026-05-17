@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -116,27 +115,20 @@ func updateLastActive(store Store, userID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	key := keyProfile(userID)
-	data, err := store.GetObject(ctx, key)
+	p, err := getProfile(ctx, store, userID)
 	if err != nil {
 		return
 	}
 
-	var profile map[string]string
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return
-	}
-
 	// Skip if last_active is less than 1 hour old
-	if la, ok := profile["last_active"]; ok {
-		if t, err := time.Parse(time.RFC3339, la); err == nil {
+	if p.LastActive != "" {
+		if t, err := time.Parse(time.RFC3339, p.LastActive); err == nil {
 			if time.Since(t) < time.Hour {
 				return
 			}
 		}
 	}
 
-	profile["last_active"] = time.Now().UTC().Format(time.RFC3339)
-	updated, _ := json.Marshal(profile)
-	store.PutObject(ctx, key, updated, "application/json")
+	p.LastActive = time.Now().UTC().Format(time.RFC3339)
+	putProfile(ctx, store, p)
 }

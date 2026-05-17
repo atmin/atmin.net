@@ -25,6 +25,10 @@ var (
 	errTooLarge      = APIError{http.StatusRequestEntityTooLarge, "too_large", "Payload exceeds size limit"}
 )
 
+func internalError(w http.ResponseWriter, msg string) {
+	writeError(w, APIError{http.StatusInternalServerError, "internal", msg})
+}
+
 func writeError(w http.ResponseWriter, err APIError) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(err.HTTPStatus)
