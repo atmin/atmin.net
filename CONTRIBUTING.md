@@ -11,13 +11,14 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 ├── web/              React 19 + TypeScript PWA (Vite)
 │   ├── src/          App source (see "Architecture" below)
 │   ├── crypto/       Rust crate → WASM (vodozemac Megolm)
-│   ├── e2e/          Playwright specs, one per docs/scenarios/*.md
+│   ├── e2e/          Playwright specs — scenario tests (one per docs/scenarios/*.md)
+│   │                 and fault-injection invariant tests (invariants/, docs/scenarios/invariants.md)
 │   └── .storybook/   Visual spec for components/
 ├── docs/
 │   ├── vision.md         Goals, non-goals, threat model
 │   ├── specs/mvp-v0.1.md Source of truth for protocol/API/storage layout
 │   ├── decisions/        ADRs — *why* a decision was made (immutable, append-only)
-│   ├── scenarios/        Step-by-step user flows; e2e tests are generated from these
+│   ├── scenarios/        Step-by-step user flows (e2e specs) and system invariants (invariants.md)
 │   └── evolution/        Speculative future work, not commitments
 ├── tasks/            Active TODOs with spec ↔ current ↔ change ↔ verify sections
 ├── src-tauri/        Native desktop wrapper (ADR-0009)
@@ -104,6 +105,7 @@ routes/    → hooks/      → lib/
 | `hooks/` (lifecycle/state) | Vitest unit tests with `@testing-library/react` | `*.test.ts` colocated |
 | `components/` (visual) | Storybook stories | `*.stories.tsx` colocated |
 | End-to-end flows | Playwright, one spec per `docs/scenarios/*.md` | `web/e2e/` |
+| Invariants (fault-injection) | Playwright with deliberate faults; asserts UI + IDB + S3 layers | `web/e2e/invariants/` |
 
 `make e2e-local` runs Playwright against a native Go server + Vite + MinIO; pass `SPEC=...` to scope (e.g. `make e2e-local SPEC=media`). `make e2e` runs the full Docker image (used by CI on tags).
 
@@ -184,8 +186,9 @@ Full schema and lifecycle: `docs/specs/mvp-v0.1.md`.
 - **Specs** describe *what* and *how* the system behaves. Update the spec in the same PR as the implementation. If a spec section becomes wrong, fix the spec — never leave it as historical record.
 - **ADRs** describe *why* — they are append-only and immutable. Create a new ADR (next sequential number) to supersede an old one; do not edit accepted ADRs except to mark them superseded with a link.
 - **Scenarios** double as e2e specs. New user-facing flow → new scenario file → matching `web/e2e/*.spec.ts`.
+- **Invariants** describe what must hold under adverse conditions (faults, retries, concurrency). Defined in `docs/scenarios/invariants.md`. New invariant → row in the prioritisation table → section using the Statement / Fault construction / Assertions / Permitted divergence template → `web/e2e/invariants/<name>.spec.ts`. See the "Adding a new invariant" checklist at the bottom of that file.
 - **Evolution notes** are deliberately speculative; nothing in `docs/evolution/` is a commitment. Don't reference an evolution note as if it were a spec.
-- **Tasks** in `tasks/` are intent-to-implement docs. They get deleted once landed. Use the `Spec → Current → Change → Verify` template the existing files use.
+- **Tasks** in `tasks/` are intent-to-implement docs. They get deleted once landed. Use the `Spec → Current → Change → Verify` template the existing files use. Keep `tasks/README.md` in sync: update it when adding a task, deleting a landed one, or changing priority order.
 
 Reference style:
 - Mermaid diagrams for sequence flows in scenarios.

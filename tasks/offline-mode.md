@@ -12,8 +12,10 @@
   reconnects.
 - `sendMessage` / `sendMedia` attempt the send regardless of connectivity.
 
-There is no online/offline state anywhere in the app. No offline indicator
-exists in the UI.
+`web/src/hooks/useInboxSync.ts` line 29 guards its backup-sync path with a
+`navigator.onLine` check, but this is a one-off guard, not reactive state.
+
+No `useOnlineStatus` hook exists. No offline indicator exists in the UI.
 
 ## Change
 
