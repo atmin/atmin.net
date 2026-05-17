@@ -617,7 +617,7 @@ export async function fetchArchiveMessages(
         }
     }
 
-    if (listRes.keys.length === 0) {
+    if (!listRes?.keys?.length) {
         return { messages: [], advancedInbounds: new Set() };
     }
 
