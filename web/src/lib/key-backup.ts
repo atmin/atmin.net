@@ -11,7 +11,7 @@
  */
 
 import { decode as cborDecode } from 'cbor-x';
-import { storeGet, storeList, storePresign } from './api';
+import { storeCompact, storeGet, storeList, storePresign } from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import type { SessionManager } from './megolm-session';
 
@@ -58,6 +58,7 @@ export async function restoreSessionKeys(
 
     // Restore from live keys
     const livePrefix = `keys/${userId}/live/`;
+    let hadLiveKeys = false;
     try {
         const liveRes = await storeList(token, livePrefix);
         for (const key of liveRes.keys) {
@@ -75,6 +76,7 @@ export async function restoreSessionKeys(
                 console.error(`Failed to restore key ${key}:`, error);
             }
         }
+        hadLiveKeys = liveRes.keys.length > 0;
     } catch (error) {
         console.error('Failed to list live keys:', error);
     }
@@ -102,6 +104,13 @@ export async function restoreSessionKeys(
         }
     } catch (error) {
         console.error('Failed to list archive keys:', error);
+    }
+
+    // Compact live keys after the full restore so compact's deletions don't
+    // race with the archive reads above (compact merges old today-archives into
+    // a new one and deletes the originals).
+    if (hadLiveKeys) {
+        storeCompact(token, livePrefix, '~').catch(console.error);
     }
 
     return restored;

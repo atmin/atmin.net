@@ -5,6 +5,8 @@ import {
     MegolmInbound,
     MegolmOutbound,
 } from '../../crypto/pkg-node/atmin_crypto.js';
+import { storeCompact } from './api';
+import { installFetchMock, stored, uninstallFetchMock } from './api.mock';
 import {
     backupDecrypt,
     backupEncrypt,
@@ -15,29 +17,10 @@ import { deleteDatabase } from './db';
 import { createSessionManager } from './megolm-session';
 import type { WasmModule } from './wasm';
 
-// In-memory store: captures presigned PUT bodies, serves them via storeGet,
-// and lists them via storeList.
-const stored = new Map<string, Uint8Array>();
-
-vi.mock('./api', () => ({
-    storePresign: vi.fn(
-        async (_token: string, key: string, _bytes: number) => ({
-            presigned_url: `https://s3.example.com/${key}`,
-        }),
-    ),
-    storeGet: vi.fn(async (_token: string, key: string) => {
-        const data = stored.get(key);
-        if (!data) throw new Error(`key not found: ${key}`);
-        return data.buffer.slice(
-            data.byteOffset,
-            data.byteOffset + data.byteLength,
-        );
-    }),
-    storeList: vi.fn(async (_token: string, prefix: string) => ({
-        keys: [...stored.keys()].filter((k) => k.startsWith(prefix)),
-        next_cursor: '',
-    })),
-}));
+vi.mock('./api', async () => {
+    const { makeApiMock } = await import('./api.mock');
+    return makeApiMock();
+});
 
 const wasm: WasmModule = {
     MegolmOutbound: MegolmOutbound as unknown as WasmModule['MegolmOutbound'],
@@ -47,37 +30,16 @@ const wasm: WasmModule = {
 const token = 'test-token';
 const userId = 'U_ALICE';
 
-const originalFetch = globalThis.fetch;
-
 beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
     globalThis.IDBKeyRange = FakeIDBKeyRange;
     stored.clear();
-
-    globalThis.fetch = vi.fn(
-        async (url: string | URL | Request, init?: RequestInit) => {
-            const urlStr =
-                typeof url === 'string'
-                    ? url
-                    : url instanceof URL
-                      ? url.href
-                      : (url as Request).url;
-            if (init?.method === 'PUT' && init.body) {
-                const path = new URL(urlStr).pathname.slice(1);
-                const bytes =
-                    init.body instanceof Uint8Array
-                        ? init.body
-                        : new TextEncoder().encode(init.body as string);
-                stored.set(path, new Uint8Array(bytes));
-            }
-            return new Response(null, { status: 200 });
-        },
-    ) as typeof fetch;
+    installFetchMock();
 });
 
 afterEach(async () => {
     await deleteDatabase();
-    globalThis.fetch = originalFetch;
+    uninstallFetchMock();
 });
 
 async function makeBackupKey(): Promise<CryptoKey> {
@@ -281,6 +243,109 @@ describe('restoreSessionKeys', () => {
             mgr,
         );
         expect(restored).toBe(0);
+
+        mgr.destroy();
+    });
+
+    it('restores sessions from a same-day archive even when live keys trigger compaction', async () => {
+        const { backupSessionKey, restoreSessionKeys } = await import(
+            './key-backup'
+        );
+        const backupKey = await makeBackupKey();
+
+        // Session A: in live — its presence sets hadLiveKeys and triggers compact
+        const senderA = new MegolmOutbound();
+        await backupSessionKey(
+            token,
+            userId,
+            senderA.session_id,
+            senderA.session_key(),
+            backupKey,
+        );
+
+        // Session B: only in a same-day archive — exactly what compact deletes.
+        // If compact fires before the archive loop, B is silently lost.
+        const senderB = new MegolmOutbound();
+        const { iv, ciphertext: encCt } = await backupEncrypt(
+            backupKey,
+            new TextEncoder().encode(senderB.session_key()),
+        );
+        const today = new Date().toISOString().slice(0, 10);
+        stored.set(
+            `keys/${userId}/archive/${today}-PRIOR`,
+            new Uint8Array(
+                cborEncode([
+                    {
+                        msg_id: senderB.session_id,
+                        session_id: senderB.session_id,
+                        iv: btoa(String.fromCharCode(...iv)),
+                        ciphertext: btoa(String.fromCharCode(...encCt)),
+                    },
+                ]),
+            ),
+        );
+
+        globalThis.indexedDB = new IDBFactory();
+        const freshMgr = await createSessionManager(wasm);
+        const restored = await restoreSessionKeys(
+            token,
+            userId,
+            backupKey,
+            freshMgr,
+        );
+
+        expect(restored).toBe(2);
+        expect(await freshMgr.getInbound(senderA.session_id)).not.toBeNull();
+        expect(await freshMgr.getInbound(senderB.session_id)).not.toBeNull();
+
+        senderA.free();
+        senderB.free();
+        freshMgr.destroy();
+    });
+
+    it('fires compaction after restoring live keys', async () => {
+        const { backupSessionKey, restoreSessionKeys } = await import(
+            './key-backup'
+        );
+        const backupKey = await makeBackupKey();
+
+        const sender = new MegolmOutbound();
+        await backupSessionKey(
+            token,
+            userId,
+            sender.session_id,
+            sender.session_key(),
+            backupKey,
+        );
+
+        const mgr = await createSessionManager(wasm);
+        vi.mocked(storeCompact).mockClear();
+        await restoreSessionKeys(token, userId, backupKey, mgr);
+
+        expect(vi.mocked(storeCompact)).toHaveBeenCalledOnce();
+        expect(vi.mocked(storeCompact)).toHaveBeenCalledWith(
+            token,
+            `keys/${userId}/live/`,
+            '~',
+        );
+
+        sender.free();
+        mgr.destroy();
+    });
+
+    it('skips compaction when there are no live keys', async () => {
+        // Real-world: new account (getOutbound never called yet) or new-device
+        // restore. createSessionManager's eager rotation only fires when an
+        // existing outbound session is in IDB, so neither case produces a live
+        // key. Compact must not fire — it would be a pointless server round-trip.
+        const { restoreSessionKeys } = await import('./key-backup');
+        const backupKey = await makeBackupKey();
+
+        const mgr = await createSessionManager(wasm);
+        vi.mocked(storeCompact).mockClear();
+        await restoreSessionKeys(token, userId, backupKey, mgr);
+
+        expect(vi.mocked(storeCompact)).not.toHaveBeenCalled();
 
         mgr.destroy();
     });

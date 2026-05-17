@@ -1,54 +1,24 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { installFetchMock, stored, uninstallFetchMock } from './api.mock';
 import { deriveKeys, generateBackupSecret } from './crypto';
 import { deleteDatabase, getContact, loadAllContacts, saveContact } from './db';
 
-// Mock api.ts — capture presigned uploads and serve stored blobs
-const stored = new Map<string, Uint8Array>();
-vi.mock('./api', () => ({
-    storePresign: vi.fn(
-        async (_token: string, key: string, _bytes: number) => ({
-            presigned_url: `https://s3.example.com/${key}`,
-        }),
-    ),
-    storeGet: vi.fn(async (_token: string, key: string) => {
-        const data = stored.get(key);
-        if (!data) throw new Error('not found');
-        return data.buffer;
-    }),
-}));
+vi.mock('./api', async () => {
+    const { makeApiMock } = await import('./api.mock');
+    return makeApiMock();
+});
 
-// Mock fetch — capture PUT body into stored map
-const originalFetch = globalThis.fetch;
 beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
     globalThis.IDBKeyRange = FakeIDBKeyRange;
     stored.clear();
-
-    globalThis.fetch = vi.fn(
-        async (url: string | URL | Request, init?: RequestInit) => {
-            const urlStr =
-                typeof url === 'string'
-                    ? url
-                    : url instanceof URL
-                      ? url.href
-                      : url.url;
-            if (init?.method === 'PUT' && init.body) {
-                const key = new URL(urlStr).pathname.slice(1);
-                const bytes =
-                    init.body instanceof Uint8Array
-                        ? init.body
-                        : new TextEncoder().encode(init.body as string);
-                stored.set(key, bytes);
-            }
-            return new Response(null, { status: 200 });
-        },
-    ) as typeof fetch;
+    installFetchMock();
 });
 
 afterEach(async () => {
     await deleteDatabase();
-    globalThis.fetch = originalFetch;
+    uninstallFetchMock();
 });
 
 describe('contact-backup', () => {
