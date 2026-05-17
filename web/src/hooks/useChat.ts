@@ -3,17 +3,13 @@ import {
     conversationId,
     resolve,
     sendTextMessage,
-    storeList,
-    syncMessages,
     uploadMedia,
 } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
-import {
-    loadMessages as loadFromDB,
-    saveContact,
-    saveMessages,
-} from '@/lib/db';
+import { base64UrlDecode, base64UrlEncode } from '@/lib/crypto';
+import { loadMessages as loadFromDB, saveContact } from '@/lib/db';
+import { onInboxUpdated, syncAndPublish } from '@/lib/inbox-sync';
 import type { MediaFile } from '@/lib/media';
 import { encryptMedia } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
@@ -59,9 +55,6 @@ function parseMediaEnvelope(text: string): MediaEnvelope | null {
     return null;
 }
 
-// Merge newly synced messages into existing state.
-// Keeps previously-decrypted messages that may fail re-decryption
-// (Megolm ratchet only goes forward), adds new ones.
 function toMessages(
     msgs: { id: string; text: string; timestamp: Date; fromUser: string }[],
     userId: string,
@@ -90,16 +83,6 @@ function toMessages(
             sent: m.fromUser === userId,
         };
     });
-}
-
-import { base64UrlDecode, base64UrlEncode } from '@/lib/crypto';
-
-function mergeMessages(existing: Message[], synced: Message[]): Message[] {
-    const byId = new Map(existing.map((m) => [m.id, m]));
-    for (const m of synced) byId.set(m.id, m);
-    return [...byId.values()].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
-    );
 }
 
 export interface ChatState {
@@ -147,127 +130,36 @@ export function useChat(
         });
     }, [handle, isSaved, session]);
 
-    // Load messages on mount: IndexedDB first (instant), then sync from server
+    // Read from IndexedDB immediately on convId change, then subscribe to
+    // inbox updates. useInboxSync (in app.tsx) owns the SSE connection and
+    // calls syncAndPublish; we just re-read IDB whenever it notifies us.
     useEffect(() => {
         if (!convId) return;
 
-        const loadAndSync = async () => {
+        const refresh = async () => {
             try {
-                // Load from IndexedDB first (instant)
-                const cached = await loadFromDB(session.userId);
-                const filtered = cached.filter(
-                    (m) => m.conversationId === convId,
-                );
-                if (filtered.length > 0) {
-                    setMessages(
-                        toMessages(
-                            filtered.map((m) => ({
-                                ...m,
-                                timestamp: new Date(m.timestamp),
-                            })),
-                            session.userId,
-                        ),
-                    );
-                    setLoading(false);
-                }
-
-                // Fetch from server (source of truth)
-                const synced = await syncMessages(
-                    session.token,
-                    session.userId,
-                    session.sharingPrivateKey,
-                    sessionManager ?? undefined,
-                    session.backupKey,
-                );
-
-                // Filter to this conversation
-                const convMessages = toMessages(
-                    synced.filter((m) => m.conversationId === convId),
-                    session.userId,
-                );
-
-                // Merge with existing (Megolm ratchet may skip already-decrypted)
-                setMessages((prev) => mergeMessages(prev, convMessages));
-
-                // Save ALL messages to IndexedDB (not just this conversation)
-                await saveMessages(session.userId, synced);
-            } catch (error) {
-                console.error('Failed to load messages:', error);
+                const all = await loadFromDB(session.userId);
+                const filtered = all
+                    .filter((m) => m.conversationId === convId)
+                    .map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
+                setMessages(toMessages(filtered, session.userId));
+            } catch (err) {
+                console.error('Failed to load messages from IDB:', err);
             } finally {
                 setLoading(false);
             }
         };
 
-        loadAndSync();
-    }, [
-        convId,
-        session.token,
-        session.userId,
-        session.sharingPrivateKey,
-        session.backupKey,
-        sessionManager,
-    ]);
-
-    // Real-time sync via Server-Sent Events
-    useEffect(() => {
-        if (!convId) return;
-
-        const url = `/v1/events?token=${encodeURIComponent(session.token)}`;
-        const events = new EventSource(url);
-
-        events.addEventListener('new_message', async () => {
-            try {
-                const synced = await syncMessages(
-                    session.token,
-                    session.userId,
-                    session.sharingPrivateKey,
-                    sessionManager ?? undefined,
-                    session.backupKey,
-                );
-                const convMessages = toMessages(
-                    synced.filter((m) => m.conversationId === convId),
-                    session.userId,
-                );
-                setMessages((prev) => mergeMessages(prev, convMessages));
-                await saveMessages(session.userId, synced);
-            } catch (error) {
-                console.error('Failed to sync on SSE notification:', error);
-            }
-        });
-
-        events.onerror = () => {
-            events.close();
-            if (navigator.onLine) {
-                // Server is reachable but rejected the connection.
-                // Probe with a regular fetch — if it returns 401, onUnauthorized
-                // fires automatically via request() in api.ts.
-                storeList(session.token, `inbox/${session.userId}/live/`).catch(
-                    () => {
-                        // TypeError → actually offline, handled by useOnlineStatus.
-                        // APIError 401 → onUnauthorized already fired.
-                    },
-                );
-            }
-            // If offline, the useOnlineStatus hook and the `online` dependency on
-            // this effect will handle reconnect when connectivity returns.
-        };
-
-        return () => events.close();
-    }, [
-        convId,
-        session.token,
-        session.userId,
-        session.sharingPrivateKey,
-        session.backupKey,
-        sessionManager,
-    ]);
+        // Initial read — picks up cached data and any sync that already landed.
+        refresh();
+        return onInboxUpdated(refresh);
+    }, [convId, session.userId]);
 
     const sendMessage = async (text: string) => {
         if (!text || sending || !sessionManager) return;
 
         setSending(true);
         try {
-            // Determine recipient
             let recipientUserId: string;
             let recipientPubKeyBytes: Uint8Array;
 
@@ -278,38 +170,25 @@ export function useChat(
                 if (!handle) throw new Error('No recipient handle');
                 const resolveRes = await resolve(handle);
                 recipientUserId = resolveRes.user_id;
-                const pubKeyB64 = resolveRes.sharing_public_key;
-                recipientPubKeyBytes = base64UrlDecode(pubKeyB64);
-            }
-
-            // Send encrypted message
-            if (sessionManager) {
-                await sendTextMessage(
-                    session.token,
-                    session.userId,
-                    session.deviceId,
-                    recipientUserId,
-                    recipientPubKeyBytes,
-                    session.sharingPublicKeyBytes,
-                    text,
-                    sessionManager,
+                recipientPubKeyBytes = base64UrlDecode(
+                    resolveRes.sharing_public_key,
                 );
             }
 
-            // Refetch messages to show the sent message
-            const synced = await syncMessages(
+            await sendTextMessage(
                 session.token,
                 session.userId,
-                session.sharingPrivateKey,
-                sessionManager ?? undefined,
+                session.deviceId,
+                recipientUserId,
+                recipientPubKeyBytes,
+                session.sharingPublicKeyBytes,
+                text,
+                sessionManager,
             );
 
-            const convMessages = toMessages(
-                synced.filter((m) => m.conversationId === convId),
-                session.userId,
-            );
-            setMessages((prev) => mergeMessages(prev, convMessages));
-            await saveMessages(session.userId, synced);
+            // Sync so the sent echo lands in IDB, then notify all subscribers
+            // (including this hook's own onInboxUpdated listener).
+            await syncAndPublish(session, sessionManager);
         } catch (error) {
             console.error('Failed to send message:', error);
             alert('Failed to send message. Please try again.');
@@ -368,18 +247,7 @@ export function useChat(
                 sessionManager,
             );
 
-            const synced = await syncMessages(
-                session.token,
-                session.userId,
-                session.sharingPrivateKey,
-                sessionManager ?? undefined,
-            );
-            const convMessages = toMessages(
-                synced.filter((m) => m.conversationId === convId),
-                session.userId,
-            );
-            setMessages((prev) => mergeMessages(prev, convMessages));
-            await saveMessages(session.userId, synced);
+            await syncAndPublish(session, sessionManager);
         } catch (error) {
             console.error('Failed to send media:', error);
             alert('Failed to send attachment. Please try again.');

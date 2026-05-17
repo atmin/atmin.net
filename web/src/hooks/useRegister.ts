@@ -1,7 +1,6 @@
 import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { register } from '@/lib/api';
 import { type Session, saveSession } from '@/lib/auth';
 import {
@@ -23,7 +22,6 @@ export interface RegisterState {
 export function useRegister(
     onSuccess: (session: Session) => void,
 ): RegisterState {
-    const navigate = useNavigate();
     const [step, setStep] = useState<RegisterStep>('generate');
     const [mnemonic, setMnemonic] = useState('');
     const [error, setError] = useState('');
@@ -64,9 +62,6 @@ export function useRegister(
             await saveSession(session);
             onSuccess(session);
             setStep('done');
-
-            // Redirect to home after short delay
-            setTimeout(() => navigate('/'), 1000);
         } catch (e) {
             setError(`Registration failed: ${e}`);
             setStep('generate');

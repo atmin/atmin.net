@@ -98,7 +98,7 @@ describe('backupSessionKey', () => {
         expect(stored.has(expectedPath)).toBe(true);
 
         const raw = JSON.parse(
-            new TextDecoder().decode(stored.get(expectedPath)!),
+            new TextDecoder().decode(stored.get(expectedPath)),
         );
         expect(raw.session_id).toBe(sessionId);
 
@@ -143,7 +143,7 @@ describe('restoreSessionKeys', () => {
         expect(restored).toBe(1);
         const session = await freshMgr.getInbound(sessionId);
         expect(session).not.toBeNull();
-        expect(session!.decrypt(ciphertext)).toBe('secret message');
+        expect(session?.decrypt(ciphertext)).toBe('secret message');
 
         sender.free();
         freshMgr.destroy();
@@ -183,7 +183,7 @@ describe('restoreSessionKeys', () => {
         expect(restored).toBe(1);
         const session = await freshMgr.getInbound(sessionId);
         expect(session).not.toBeNull();
-        expect(session!.decrypt(ciphertext)).toBe('archived message');
+        expect(session?.decrypt(ciphertext)).toBe('archived message');
 
         sender.free();
         freshMgr.destroy();

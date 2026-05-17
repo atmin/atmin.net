@@ -1726,7 +1726,7 @@ describe('api - key-share backup', () => {
             (call) => (call[0] as string) === '/v1/store/presign',
         );
         expect(presignCall).toBeDefined();
-        const presignBody = JSON.parse(presignCall![1].body as string);
+        const presignBody = JSON.parse(presignCall?.[1].body as string);
         expect(presignBody.key).toBe(
             `keys/${userId}/live/${sender.session_id}`,
         );
@@ -1737,7 +1737,7 @@ describe('api - key-share backup', () => {
         );
         expect(putCall).toBeDefined();
         const putBody = JSON.parse(
-            new TextDecoder().decode(putCall![1].body as Uint8Array),
+            new TextDecoder().decode(putCall?.[1].body as Uint8Array),
         );
         const ivBytes = Uint8Array.from(atob(putBody.iv), (c) =>
             c.charCodeAt(0),
