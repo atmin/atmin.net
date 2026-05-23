@@ -5,21 +5,32 @@
 
 ## Current state
 
-`web/src/hooks/useChat.ts`:
-- `loadAndSync` has a single `catch` block that logs and swallows all errors.
-  It does not distinguish network failure from API errors.
-- The SSE `useEffect` calls `events.close()` on `onerror` and never
-  reconnects.
-- `sendMessage` / `sendMedia` attempt the send regardless of connectivity.
+`web/src/hooks/useChat.ts` no longer owns sync or SSE. It reads messages
+from IndexedDB and subscribes to `onInboxUpdated` notifications. No
+connectivity awareness, no change needed for reads.
 
-`web/src/hooks/useInboxSync.ts` line 29 guards its backup-sync path with a
-`navigator.onLine` check, but this is a one-off guard, not reactive state.
+`web/src/hooks/useInboxSync.ts` owns the SSE connection. The effect:
+- Calls `syncAndPublish` once on mount.
+- Opens an `EventSource` and re-syncs on each `new_message` event.
+- On `onerror`: closes the connection, then performs a one-shot
+  `storeList` fallback gated by `navigator.onLine` (lines 27-32).
+- Never reconnects when connectivity returns. `navigator.onLine` is read
+  once per error, not subscribed to.
+
+`web/src/hooks/useChatSend.ts` (`sendText`, `sendMedia`) attempts the
+send regardless of connectivity. Failures surface as `alert('Failed to
+send …')`.
+
+`web/src/components/ChatView.tsx` disables the Send button only on
+`!inputValue.trim() || sending || !encryptionReady`. The attach button
+uses the same gate. The text input placeholder is hardcoded
+`"Type a message..."`.
 
 No `useOnlineStatus` hook exists. No offline indicator exists in the UI.
 
 ## Change
 
-### 1. `web/src/hooks/useOnlineStatus.ts` (new file)
+### 1. `web/src/hooks/useOnlineStatus.ts` (new)
 
 ```ts
 import { useEffect, useState } from 'react';
@@ -40,117 +51,144 @@ export function useOnlineStatus(): boolean {
 }
 ```
 
-### 2. `web/src/hooks/useChat.ts`
+Colocated Vitest unit test covers: initial value from `navigator.onLine`,
+transitions on `window` `online` / `offline` events, listener cleanup.
 
-**Import and use online status:**
+### 2. `web/src/hooks/useInboxSync.ts`
 
-```ts
-import { useOnlineStatus } from './useOnlineStatus';
-// inside useChat:
-const online = useOnlineStatus();
-```
+- Call `useOnlineStatus()` and add `online` to the effect's dependency
+  array.
+- Early-return from the effect when `!online`: do not call
+  `syncAndPublish`, do not open `EventSource`. When `online` flips true,
+  the effect re-runs from the top — `syncAndPublish` catches any missed
+  messages and a fresh `EventSource` is opened.
+- Remove the one-shot `storeList` fallback in `onerror` (lines 29-31).
+  It is now redundant: the next `syncAndPublish` will run automatically
+  when the effect re-runs on reconnect. Keep `events.close()` in
+  `onerror`.
 
-**Add `online` to `ChatState`** and return it.
+### 3. `web/src/hooks/useChatSend.ts`
 
-**`loadAndSync` — distinguish network failure:**
+- Call `useOnlineStatus()`.
+- Return `online` alongside `sending`, `sendText`, `sendMedia`.
+- Guard both `sendText` and `sendMedia` with `if (!online) return;` at
+  the top, after the existing `sending` / `sessionManager` guards. No
+  toast or alert — the UI disables the Send button while offline, so a
+  triggered send is a belt-and-suspenders path (e.g. Enter key races a
+  connectivity flip). Silent return is correct here.
 
-Split the catch block:
+### 4. `web/src/hooks/useChat.ts`
 
-```ts
-} catch (error) {
-    if (error instanceof TypeError) {
-        // Network unavailable — cached view is sufficient, no toast needed
-    } else {
-        console.error('Failed to load messages:', error);
-    }
+- Add `online: boolean` to `ChatState` and return it (forwarded from
+  `useChatSend`).
+
+### 5. `web/src/routes/chat.tsx`
+
+- Destructure `online` from `useChat(...)` and pass it as a prop to
+  `<ChatView />`.
+
+### 6. `web/src/components/ChatView.tsx`
+
+- Add `online: boolean` to `Props`.
+- Add `|| !online` to the Send button's `disabled` condition (line 135).
+- Add `|| !online` to the attach button's disabled gating (line 106-117).
+- When `!online`, change the text input's `placeholder` to
+  `"You are offline"`. (The input itself stays editable so users can
+  draft while offline; only the send is blocked.)
+- Update the `ChatView.stories.tsx` to include an `online: false` story.
+
+### 7. `web/src/components/OfflineIndicator.tsx` (new)
+
+A presentational component with no props beyond standard React. Mirrors
+`SWUpdateToast`'s positioning and styling so the visual language is
+consistent:
+
+```tsx
+export function OfflineIndicator() {
+    return (
+        <div
+            data-testid="offline-indicator"
+            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border bg-background px-4 py-2 shadow-lg text-sm"
+        >
+            <span>You are offline</span>
+        </div>
+    );
 }
 ```
 
-The `APIError` 401 path is handled globally by `onUnauthorized` in `api.ts`
-and does not need special casing here.
+Add `OfflineIndicator.stories.tsx` with a single default story.
 
-**SSE effect — add `online` as a dependency:**
+### 8. `web/src/routes/app.tsx`
 
-```ts
-useEffect(() => {
-    if (!convId || !online) return;   // don't open SSE while offline
+- Call `useOnlineStatus()`.
+- Render `<OfflineIndicator />` conditionally next to `<SWUpdateToast>`
+  (after `<Routes>`, before the closing `</BrowserRouter>`):
 
-    const url = `/v1/events?token=${encodeURIComponent(session.token)}`;
-    const events = new EventSource(url);
-
-    events.addEventListener('new_message', async () => { /* existing sync */ });
-
-    events.onerror = () => {
-        events.close();
-        // No manual reconnect needed: when `online` flips true, this
-        // effect re-runs because `online` is in the dependency array.
-    };
-
-    // Sync immediately on (re)connect to catch messages missed while offline
-    syncMessages();   // extract the fetchMessages + setMessages logic into a
-                      // named function reused by both the SSE handler and here
-
-    return () => events.close();
-}, [convId, online, session.token, session.userId, session.sharingPrivateKey, sessionManager]);
+```tsx
+{!online && <OfflineIndicator />}
 ```
 
-**`sendMessage` / `sendMedia` — guard at the top:**
-
-```ts
-if (!online) {
-    // surface error to user — replace the existing alert() with whatever
-    // error display pattern the UI uses
-    alert('You are offline');
-    return;
-}
-```
-
-### 3. Offline indicator in the chat UI
-
-Find the component that renders the chat view (likely `web/src/components/`
-or wherever `useChat` is consumed). Add a visible banner or status badge when
-`online === false`. Exact styling is left to the implementer; it must be
-identifiable by a `data-testid="offline-indicator"` attribute for the e2e
-test.
+If both the SW toast and the offline indicator are visible at the same
+time they will stack — acceptable for v0.1; visual collision is
+extremely rare (SW updates are not triggered while offline).
 
 ## Verify
 
-- `cd web && npx tsc --noEmit` passes
-- `cd web && npm test` passes
-- E2e test passes (see below)
+Gate, in the order required by `CONTRIBUTING.md`:
+
+```
+make fmt
+make lint
+make test
+make e2e-local SPEC=offline
+```
+
+Manual check: `make web-storybook`, view OfflineIndicator and the new
+`ChatView online=false` story in both light and dark mode.
 
 ### E2e test — `web/e2e/offline-mode.spec.ts`
 
-Playwright supports `browserContext.setOffline(true/false)` to toggle network
-access at the context level.
+Playwright supports `browserContext.setOffline(true/false)` to toggle
+network access at the context level.
 
 ```
 describe('Offline mode')
 
-test: 'shows cached messages offline and syncs on reconnect'
+test: 'shows cached messages offline, blocks send, syncs on reconnect'
 
-  1.  Register Alice with mnemonic (registerUserWithMnemonic) — needed so
-      Alice can log back in; also register Bob (registerUser)
-  2.  Bob opens chat with Alice, sends 'Message before offline'
+  1.  Register Alice with mnemonic (registerUserWithMnemonic) — needed
+      so Alice can log back in; also register Bob (registerUser).
+  2.  Bob opens chat with Alice, sends 'Message before offline'.
   3.  Alice opens chat with Bob, waits for 'Message before offline'
-      (ensures it is saved to IndexedDB)
-  4.  Go offline: aliceContext.setOffline(true)
-  5.  Alice reloads the page (alice.reload())
-  6.  Alice navigates back to the chat with Bob (openChat)
-  7.  Assert 'Message before offline' is visible (from IndexedDB)
+      (ensures it is saved to IndexedDB).
+  4.  Go offline: aliceContext.setOffline(true).
+  5.  Alice reloads the page (alice.reload()).
+  6.  Alice navigates back to the chat with Bob (openChat).
+  7.  Assert 'Message before offline' is visible (from IndexedDB).
   8.  Assert offline indicator is visible:
-        expect(alice.locator('[data-testid="offline-indicator"]')).toBeVisible()
+        expect(alice.locator('[data-testid="offline-indicator"]'))
+            .toBeVisible()
   9.  Alice tries to send 'Offline message':
-        alice.getByPlaceholder('Type a message...').fill('Offline message')
-        alice.getByRole('button', { name: 'Send' }).click()
-        — assert 'Offline message' does NOT appear in the message list
-        — assert some error feedback is visible (exact selector TBD by UI impl)
-  10. Bob sends 'Message while Alice offline' (Bob is still online)
-  11. Come back online: aliceContext.setOffline(false)
-  12. Wait for Alice's offline indicator to disappear
-  13. Wait for 'Message while Alice offline' to appear in Alice's chat
-        waitForMessage(alice, 'Message while Alice offline')
-  14. Assert 'Offline message' is still not in the list (was never sent)
+        - fill the input
+        - assert the Send button is disabled:
+            expect(alice.getByRole('button', { name: 'Send' }))
+                .toBeDisabled()
+        - assert the input placeholder reads 'You are offline':
+            expect(alice.getByPlaceholder('You are offline'))
+                .toBeVisible()
+        - assert 'Offline message' is NOT in the message list
+  10. Bob sends 'Message while Alice offline' (Bob is still online).
+  11. Come back online: aliceContext.setOffline(false).
+  12. Wait for Alice's offline indicator to disappear:
+        expect(alice.locator('[data-testid="offline-indicator"]'))
+            .toBeHidden()
+  13. Wait for 'Message while Alice offline' in Alice's chat
+      (waitForMessage).
+  14. Assert 'Offline message' is still not in the list (was never sent).
+  15. Alice now sends 'After reconnect' successfully and Bob receives it
+      (waitForMessage on Bob's side). Confirms sends work after the
+      online flip without a manual page refresh.
 ```
 
-No new helpers needed.
+No new helpers needed — `registerUser`, `registerUserWithMnemonic`,
+`openChat`, `waitForMessage` already exist in `web/e2e/helpers.ts`.
