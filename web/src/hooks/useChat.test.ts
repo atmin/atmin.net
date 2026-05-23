@@ -35,6 +35,7 @@ vi.mock('@/lib/messaging', () => ({
 vi.mock('./useChatSend', () => ({
     useChatSend: vi.fn().mockReturnValue({
         sending: false,
+        online: true,
         sendText: vi.fn(),
         sendMedia: vi.fn(),
     }),

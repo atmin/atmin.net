@@ -3,18 +3,8 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@/lib/auth';
 
-vi.mock('@/lib/api', () => ({
-    storeList: vi.fn().mockResolvedValue({ keys: [], next_cursor: '' }),
-}));
-
 vi.mock('@/lib/inbox-sync', () => ({
     syncAndPublish: vi.fn().mockResolvedValue(undefined),
-}));
-
-vi.mock('@/lib/paths', () => ({
-    path: {
-        inboxLive: vi.fn().mockReturnValue('inbox/user1/live/'),
-    },
 }));
 
 const fakeSession: Session = {
@@ -133,5 +123,58 @@ describe('useInboxSync', () => {
 
         expect(syncAndPublish).not.toHaveBeenCalled();
         expect(FakeEventSource.instances).toHaveLength(0);
+    });
+
+    it('does not open EventSource while offline; reconnects when back online', async () => {
+        const onLineSpy = vi
+            .spyOn(navigator, 'onLine', 'get')
+            .mockReturnValue(false);
+        try {
+            const { syncAndPublish } = await import('@/lib/inbox-sync');
+            const { useInboxSync } = await import('./useInboxSync');
+
+            renderHook(() => useInboxSync(fakeSession, fakeMgr as never));
+
+            await act(async () => {
+                await new Promise((r) => setTimeout(r, 0));
+            });
+
+            expect(syncAndPublish).not.toHaveBeenCalled();
+            expect(FakeEventSource.instances).toHaveLength(0);
+
+            // Flip the spy back to true and fire the event so the hook
+            // re-runs its effect with online=true.
+            onLineSpy.mockReturnValue(true);
+            await act(async () => {
+                window.dispatchEvent(new Event('online'));
+                await new Promise((r) => setTimeout(r, 0));
+            });
+
+            expect(syncAndPublish).toHaveBeenCalledOnce();
+            expect(FakeEventSource.instances).toHaveLength(1);
+        } finally {
+            onLineSpy.mockRestore();
+        }
+    });
+
+    it('closes EventSource and skips reopening when going offline', async () => {
+        const { useInboxSync } = await import('./useInboxSync');
+
+        renderHook(() => useInboxSync(fakeSession, fakeMgr as never));
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        expect(FakeEventSource.instances).toHaveLength(1);
+        const es = FakeEventSource.instances[0];
+
+        await act(async () => {
+            window.dispatchEvent(new Event('offline'));
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        expect(es.closed).toBe(true);
+        expect(FakeEventSource.instances).toHaveLength(1);
     });
 });

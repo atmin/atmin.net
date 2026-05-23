@@ -8,6 +8,7 @@ const meta = {
     args: {
         onSend: fn(),
         encryptionReady: true,
+        online: true,
     },
 } satisfies Meta<typeof ChatView>;
 
@@ -92,5 +93,24 @@ export const Sending: Story = {
         ],
         loading: false,
         sending: true,
+    },
+};
+
+export const Offline: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'This was synced before the network dropped.',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: false,
+            },
+        ],
+        loading: false,
+        sending: false,
+        online: false,
     },
 };

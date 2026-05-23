@@ -6,6 +6,7 @@ import { syncAndPublish } from '@/lib/inbox-sync';
 import { encryptMedia } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
 import { sendTextMessage } from '@/lib/messaging';
+import { useOnlineStatus } from './useOnlineStatus';
 
 export function useChatSend(
     handle: string | undefined,
@@ -14,10 +15,12 @@ export function useChatSend(
     sessionManager: SessionManager | null,
 ): {
     sending: boolean;
+    online: boolean;
     sendText: (text: string) => Promise<void>;
     sendMedia: (file: File) => Promise<void>;
 } {
     const [sending, setSending] = useState(false);
+    const online = useOnlineStatus();
 
     async function resolveRecipient(): Promise<{
         recipientUserId: string;
@@ -57,7 +60,7 @@ export function useChatSend(
     }
 
     const sendText = async (text: string) => {
-        if (!text || sending || !sessionManager) return;
+        if (!text || sending || !sessionManager || !online) return;
         setSending(true);
         try {
             const { recipientUserId, recipientPubKeyBytes } =
@@ -77,7 +80,7 @@ export function useChatSend(
     };
 
     const sendMedia = async (file: File) => {
-        if (sending || !sessionManager) return;
+        if (sending || !sessionManager || !online) return;
         setSending(true);
         try {
             const { recipientUserId, recipientPubKeyBytes } =
@@ -113,5 +116,5 @@ export function useChatSend(
         }
     };
 
-    return { sending, sendText, sendMedia };
+    return { sending, online, sendText, sendMedia };
 }

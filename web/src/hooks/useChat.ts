@@ -3,7 +3,11 @@ import { resolve } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
 import { base64UrlDecode } from '@/lib/crypto';
-import { loadMessages as loadFromDB, saveContact } from '@/lib/db';
+import {
+    loadAllContacts,
+    loadMessages as loadFromDB,
+    saveContact,
+} from '@/lib/db';
 import { onInboxUpdated } from '@/lib/inbox-sync';
 import type { MediaFile } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
@@ -85,6 +89,7 @@ export interface ChatState {
     messages: Message[];
     loading: boolean;
     sending: boolean;
+    online: boolean;
     encryptionReady: boolean;
     chatTitle: string;
     sendMessage: (text: string) => Promise<void>;
@@ -105,7 +110,7 @@ export function useChat(
         isSaved ? 'Saved Messages' : (handle ?? ''),
     );
 
-    const { sending, sendText, sendMedia } = useChatSend(
+    const { sending, online, sendText, sendMedia } = useChatSend(
         handle,
         isSaved,
         session,
@@ -120,16 +125,34 @@ export function useChat(
         }
         if (!handle) return;
 
-        resolve(handle).then(async (res) => {
-            if (res.display_name) setChatTitle(res.display_name);
-            await saveContact(res.user_id, handle);
-            uploadContacts(
-                session.token,
-                session.userId,
-                session.backupKey,
-            ).catch((err) => console.error('Contact backup failed:', err));
-            setConvId(conversationId(session.userId, res.user_id));
-        });
+        resolve(handle)
+            .then(async (res) => {
+                if (res.display_name) setChatTitle(res.display_name);
+                await saveContact(res.user_id, handle);
+                uploadContacts(
+                    session.token,
+                    session.userId,
+                    session.backupKey,
+                ).catch((err) => console.error('Contact backup failed:', err));
+                setConvId(conversationId(session.userId, res.user_id));
+            })
+            .catch(async (err) => {
+                // Offline / handle server unreachable: fall back to the
+                // IDB-cached contact so previously-synced messages still
+                // render. A handle never resolved before genuinely cannot
+                // be opened offline.
+                if (!(err instanceof TypeError)) {
+                    console.error('Failed to resolve handle:', err);
+                    return;
+                }
+                const contacts = await loadAllContacts();
+                for (const [userId, h] of contacts) {
+                    if (h === handle) {
+                        setConvId(conversationId(session.userId, userId));
+                        return;
+                    }
+                }
+            });
     }, [handle, isSaved, session]);
 
     // Read from IndexedDB immediately on convId change, then subscribe to
@@ -160,6 +183,7 @@ export function useChat(
         messages,
         loading,
         sending,
+        online,
         encryptionReady: !!sessionManager,
         chatTitle,
         sendMessage: sendText,

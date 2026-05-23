@@ -1,16 +1,17 @@
 import { useEffect } from 'react';
-import { storeList } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { syncAndPublish } from '@/lib/inbox-sync';
 import type { SessionManager } from '@/lib/megolm-session';
-import { path } from '@/lib/paths';
+import { useOnlineStatus } from './useOnlineStatus';
 
 export function useInboxSync(
     session: Session | null,
     sessionManager: SessionManager | null,
 ): void {
+    const online = useOnlineStatus();
+
     useEffect(() => {
-        if (!session || !sessionManager) return;
+        if (!session || !sessionManager || !online) return;
 
         const s = session;
         const sm = sessionManager;
@@ -26,11 +27,8 @@ export function useInboxSync(
 
         events.onerror = () => {
             events.close();
-            if (navigator.onLine) {
-                storeList(s.token, path.inboxLive(s.userId)).catch(() => {});
-            }
         };
 
         return () => events.close();
-    }, [session, sessionManager]);
+    }, [session, sessionManager, online]);
 }

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { SWUpdateToast } from '@/components/SWUpdateToast';
 import { useInboxSync } from '@/hooks/useInboxSync';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useSession } from '@/hooks/useSession';
 import { useSWUpdate } from '@/hooks/useSWUpdate';
 import Chat from '@/routes/chat';
@@ -15,6 +17,7 @@ export default function App() {
     const { session, sessionManager, loading, handleLogin, handleLogout } =
         useSession();
     useInboxSync(session, sessionManager);
+    const online = useOnlineStatus();
     const [chatSending, setChatSending] = useState(false);
     const swUpdate = useSWUpdate(chatSending);
 
@@ -94,6 +97,7 @@ export default function App() {
                     onDismiss={swUpdate.onDismiss}
                 />
             )}
+            {!online && <OfflineIndicator />}
         </BrowserRouter>
     );
 }

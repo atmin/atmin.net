@@ -201,4 +201,50 @@ describe('useChatSend', () => {
 
         expect(sendTextMessage).toHaveBeenCalledTimes(1);
     });
+
+    it('sendText is a no-op when offline', async () => {
+        const onLineSpy = vi
+            .spyOn(navigator, 'onLine', 'get')
+            .mockReturnValue(false);
+        try {
+            const { sendTextMessage } = await import('@/lib/messaging');
+
+            const { useChatSend } = await import('./useChatSend');
+            const { result } = renderHook(() =>
+                useChatSend('bob', false, fakeSession, fakeMgr as never),
+            );
+
+            expect(result.current.online).toBe(false);
+
+            await act(async () => {
+                await result.current.sendText('while offline');
+            });
+
+            expect(sendTextMessage).not.toHaveBeenCalled();
+        } finally {
+            onLineSpy.mockRestore();
+        }
+    });
+
+    it('sendMedia is a no-op when offline', async () => {
+        const onLineSpy = vi
+            .spyOn(navigator, 'onLine', 'get')
+            .mockReturnValue(false);
+        try {
+            const { encryptMedia } = await import('@/lib/media');
+
+            const { useChatSend } = await import('./useChatSend');
+            const { result } = renderHook(() =>
+                useChatSend('bob', false, fakeSession, fakeMgr as never),
+            );
+
+            await act(async () => {
+                await result.current.sendMedia(new File(['x'], 'x.jpg'));
+            });
+
+            expect(encryptMedia).not.toHaveBeenCalled();
+        } finally {
+            onLineSpy.mockRestore();
+        }
+    });
 });

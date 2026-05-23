@@ -23,6 +23,7 @@ export default function ChatRoute({
         messages,
         loading,
         sending,
+        online,
         encryptionReady,
         chatTitle,
         sendMessage,
@@ -50,6 +51,7 @@ export default function ChatRoute({
             messages={messages}
             loading={loading}
             sending={sending}
+            online={online}
             encryptionReady={encryptionReady}
             mediaStates={mediaStates}
             onMediaRetry={onMediaRetry}

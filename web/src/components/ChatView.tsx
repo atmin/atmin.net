@@ -12,6 +12,7 @@ interface Props {
     messages: Message[];
     loading: boolean;
     sending: boolean;
+    online: boolean;
     encryptionReady: boolean;
     mediaStates?: Record<string, MediaState>;
     onMediaRetry?: (url: string) => void;
@@ -26,6 +27,7 @@ export default function ChatView({
     messages,
     loading,
     sending,
+    online,
     encryptionReady,
     mediaStates = {},
     onMediaRetry = () => {},
@@ -37,10 +39,12 @@ export default function ChatView({
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         const text = inputValue.trim();
-        if (!text || sending) return;
+        if (!text || sending || !online) return;
         onSend(text);
         setInputValue('');
     };
+
+    const inputsDisabled = sending || !encryptionReady || !online;
 
     const topBar = (
         <>
@@ -103,9 +107,9 @@ export default function ChatView({
                         <label
                             data-testid="attach-button"
                             aria-label="Attach file"
-                            aria-disabled={sending || !encryptionReady}
+                            aria-disabled={inputsDisabled}
                             className={`rounded border border-input px-3 py-2 text-sm hover:bg-accent ${
-                                sending || !encryptionReady
+                                inputsDisabled
                                     ? 'pointer-events-none opacity-50'
                                     : 'cursor-pointer'
                             }`}
@@ -114,7 +118,7 @@ export default function ChatView({
                             <input
                                 type="file"
                                 className="hidden"
-                                disabled={sending || !encryptionReady}
+                                disabled={inputsDisabled}
                                 onChange={(e) => {
                                     const f = e.target.files?.[0];
                                     if (f) onSendMedia(f);
@@ -127,14 +131,14 @@ export default function ChatView({
                         type="text"
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
-                        placeholder="Type a message..."
+                        placeholder={
+                            online ? 'Type a message...' : 'You are offline'
+                        }
                         className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
                     />
                     <button
                         type="submit"
-                        disabled={
-                            !inputValue.trim() || sending || !encryptionReady
-                        }
+                        disabled={!inputValue.trim() || inputsDisabled}
                         className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                     >
                         {sending ? 'Sending...' : 'Send'}
