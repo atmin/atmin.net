@@ -8,11 +8,22 @@ DOCKER ?= docker
 # --- Setup ---
 
 install:
-	@command -v go >/dev/null 2>&1 || (echo "ERROR: go not found — https://golang.org/dl/"; exit 1)
-	@command -v pnpm >/dev/null 2>&1 || (echo "ERROR: pnpm not found — https://pnpm.io/installation"; exit 1)
-	@command -v cargo >/dev/null 2>&1 || (echo "ERROR: cargo not found — https://rustup.rs/"; exit 1)
-	@command -v $(DOCKER) >/dev/null 2>&1 || (echo "ERROR: $(DOCKER) not found — https://docs.docker.com/get-docker/"; exit 1)
-	@command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack
+	@missing=""; \
+	command -v go        >/dev/null 2>&1 || missing="$$missing\n  go        — Go toolchain         — https://golang.org/dl/"; \
+	command -v pnpm      >/dev/null 2>&1 || missing="$$missing\n  pnpm      — Node package manager  — https://pnpm.io/installation"; \
+	command -v cargo     >/dev/null 2>&1 || missing="$$missing\n  cargo     — Rust toolchain        — https://rustup.rs/"; \
+	command -v wasm-pack >/dev/null 2>&1 || missing="$$missing\n  wasm-pack — Rust→WASM build       — https://rustwasm.github.io/wasm-pack/installer/  (or: cargo install wasm-pack)"; \
+	command -v $(DOCKER) >/dev/null 2>&1 || missing="$$missing\n  $(DOCKER)    — containers (MinIO, e2e) — https://docs.docker.com/get-docker/"; \
+	if [ -n "$$missing" ]; then \
+		printf "ERROR: missing required tools:$$missing\n\nInstall the listed tools and re-run 'make install'.\n"; \
+		exit 1; \
+	fi
+	@if command -v rustup >/dev/null 2>&1; then \
+		rustup target list --installed 2>/dev/null | grep -q '^wasm32-unknown-unknown$$' || \
+			(echo "ERROR: rust target 'wasm32-unknown-unknown' not installed — run: rustup target add wasm32-unknown-unknown" && exit 1); \
+	else \
+		echo "WARNING: rustup not detected — ensure the 'wasm32-unknown-unknown' target is available for your Rust install"; \
+	fi
 	cd web && pnpm install
 	@test -f .env || cp .env.example .env
 	cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
@@ -35,15 +46,22 @@ fmt: server-fmt web-fmt
 server:
 	set -a; . ./.env; set +a; cd server && go run .
 
-server-build:
+server-build: web-build
 	rm -rf server/dist
 	cp -r web/dist server/dist
 	cd server && go build -o ../bin/atmin .
 
-server-test:
+# Placeholder so //go:embed dist resolves for lint/test without a full web build.
+# Filename has no leading dot so the embed directive does not skip it.
+# server-build wipes this directory before copying the real web bundle in.
+server/dist/PLACEHOLDER:
+	@mkdir -p server/dist
+	@echo "placeholder for //go:embed dist; replaced by server-build" > server/dist/PLACEHOLDER
+
+server-test: server/dist/PLACEHOLDER
 	cd server && go test ./...
 
-server-lint:
+server-lint: server/dist/PLACEHOLDER
 	cd server && go vet ./...
 
 server-fmt:
@@ -60,10 +78,10 @@ web-wasm:
 web-build: web-wasm
 	cd web && pnpm build
 
-web-test:
+web-test: web-wasm
 	cd web && pnpm test
 
-web-lint:
+web-lint: web-wasm
 	cd web && pnpm lint
 
 web-lint-arch:
