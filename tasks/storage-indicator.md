@@ -6,24 +6,67 @@ v0.1 ships without media GC. Orphan blobs and legitimate attachments both
 count against the 1 GiB quota until account deletion. Without a visible
 "storage used" figure, users have no way to notice pressure or act on it.
 
-A minimal indicator gets ~80% of the value of shipping GC, for a fraction
-of the effort, and is a useful building block for GC's UX later (the same
-endpoint can show "X MB reclaimable").
+A minimal indicator gets ~80% of the value of shipping GC for a fraction of
+the effort, and the same endpoint is reusable for GC's future UX
+("X MB reclaimable").
 
 ## Current state
 
-- `MediaQuotaStore` interface has only `ReserveUpload`. No read path is
-  exposed.
-- `s3UsageProbe(ctx, store, uid)` already exists in `media_quota.go` and
-  returns `(totalBytes int64, count int, err error)` via `ListObjectSizes`.
-- Constants in place: `USER_MEDIA_QUOTA_BYTES = 1 << 30` (1 GiB),
+- `MediaQuotaStore` ([media_quota.go:21-27](../server/media_quota.go)) has
+  only `ReserveUpload`. No read path.
+- `s3UsageProbe(ctx, store, uid)` ([media_quota.go:48-58](../server/media_quota.go))
+  already returns `(totalBytes int64, count int, err error)` via
+  `ListObjectSizes` — usable directly.
+- Cache TTL = `QUOTA_CACHE_TTL = 10 * time.Minute`; cache is keyed by uid
+  and shared by all callers of the same `*inProcessMediaQuota`.
+- Constants: `USER_MEDIA_QUOTA_BYTES = 1 << 30` (1 GiB),
   `USER_MEDIA_BLOB_CAP = 1000`.
-- No `/v1/storage/usage` endpoint exists (`routes.go`).
-- `web/src/routes/settings.tsx` has no storage section.
+- Existing storage routes use `/v1/store/*` prefix
+  ([routes.go:27-30](../server/routes.go)).
+- [routes.go:29](../server/routes.go) constructs `NewMediaQuota(store)`
+  inline — needs extraction to share the instance.
+- [routes/settings.tsx](../web/src/routes/settings.tsx) renders
+  `<ProfileSettings><DeviceSettings/></ProfileSettings>` via the `children`
+  slot ([ProfileSettings.tsx:109](../web/src/components/ProfileSettings.tsx)).
+- Existing hook+component split precedent: `useDevices` + `DeviceSettings`
+  ([useDevices.ts](../web/src/hooks/useDevices.ts)).
+
+## Architecture constraints
+
+[lint-architecture.sh](../web/scripts/lint-architecture.sh):
+- `components/` may not use `useEffect` or value-import from `@/hooks/`.
+- `hooks/` files must be `.ts`.
+
+Therefore: a `useStorageUsage` hook owns the fetch state; `StorageIndicator`
+is pure presentational; the route calls the hook and passes data down. Same
+shape as `useDevices` + `DeviceSettings`.
 
 ## Change
 
-### 1. `server/media_quota.go` — add `GetUsage` to the interface
+### 1. `docs/specs/mvp-v0.1.md` — document the new endpoint
+
+Add a section under "Storage API" alongside list/object/presign/compact:
+
+> #### Usage
+>
+> `GET /v1/store/usage`
+>
+> Output:
+> ```json
+> {
+>   "used_bytes": 357564416,
+>   "quota_bytes": 1073741824,
+>   "blob_count": 12,
+>   "quota_blob_cap": 1000
+> }
+> ```
+>
+> Returns the caller's media usage from the server's quota cache (TTL 10
+> min); on miss, the server probes S3 via `ListObjectSizes` under
+> `media/{uid}/`. No prefix authorization needed — the endpoint is implicitly
+> scoped to the authenticated user.
+
+### 2. `server/media_quota.go` — extend the interface
 
 ```go
 type MediaQuotaStore interface {
@@ -32,8 +75,7 @@ type MediaQuotaStore interface {
 }
 ```
 
-Implement on `inProcessMediaQuota` — read from cache, refresh via
-`s3UsageProbe` if expired (same TTL logic as `ReserveUpload`):
+Implement on `inProcessMediaQuota`:
 
 ```go
 func (q *inProcessMediaQuota) GetUsage(ctx context.Context, userID string) (int64, int, error) {
@@ -54,21 +96,22 @@ func (q *inProcessMediaQuota) GetUsage(ctx context.Context, userID string) (int6
 }
 ```
 
-Update `store_mem.go` mock — `MemStore` wires `MediaQuotaStore`; add a
-`GetUsage` stub that returns zeros (or a configurable field for tests).
+`MemStore` requires no changes — `MemStore` implements `Store`, not
+`MediaQuotaStore`. Tests construct the quota directly: `NewMediaQuota(NewMemStore())`.
 
-### 2. `server/handlers.go` — new handler
+### 3. `server/handlers.go` — new handler
 
 ```go
-func handleStoreUsage(store Store, quota MediaQuotaStore) http.HandlerFunc {
+// GET /v1/store/usage
+func handleStoreUsage(quota MediaQuotaStore) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        uid := r.Context().Value(ctxUserID).(string)
-        used, count, err := quota.GetUsage(r.Context(), uid)
+        userID := userIDFrom(r.Context())
+        used, count, err := quota.GetUsage(r.Context(), userID)
         if err != nil {
-            writeError(w, errInternal)
+            internalError(w, "GetUsage failed")
             return
         }
-        writeJSON(w, map[string]any{
+        writeJSON(w, http.StatusOK, map[string]any{
             "used_bytes":     used,
             "quota_bytes":    USER_MEDIA_QUOTA_BYTES,
             "blob_count":     count,
@@ -78,17 +121,38 @@ func handleStoreUsage(store Store, quota MediaQuotaStore) http.HandlerFunc {
 }
 ```
 
-### 3. `server/routes.go` — wire the route
+Handler does not need `Store` — only the quota interface.
+
+### 4. `server/routes.go` — share the quota instance
 
 ```go
-mux.HandleFunc("GET /v1/storage/usage", auth(handleStoreUsage(store, NewMediaQuota(store))))
+quota := NewMediaQuota(store)
+// ...
+mux.HandleFunc("POST /v1/store/presign", auth(handleStorePresign(store, quota)))
+mux.HandleFunc("GET /v1/store/usage", auth(handleStoreUsage(quota)))
 ```
 
-Pass the same `MediaQuota` instance used by `handleStorePresign` to share
-the cache — extract it as a local variable in `SetupRoutes` rather than
-constructing a second one.
+Sharing one instance is essential — otherwise the usage endpoint reads a
+different cache than `ReserveUpload` writes, and uploads + reads see
+inconsistent counts.
 
-### 4. `web/src/lib/api.ts` — typed wrapper
+### 5. `server/handlers_test.go` — endpoint tests
+
+Reuse `testServer`, `registerTestUser`, `authedRequest`. Required cases:
+
+| Test | Setup | Assert |
+|---|---|---|
+| `TestStoreUsageGolden` | register user, put 2 objects under `media/{uid}/` | 200; `used_bytes == sum of sizes`; `blob_count == 2`; `quota_bytes == 1<<30`; `quota_blob_cap == 1000` |
+| `TestStoreUsageUnauthenticated` | no token | 401 |
+| `TestStoreUsageEmpty` | registered user with no media | 200; `used_bytes == 0`; `blob_count == 0` |
+| `TestStoreUsageSharesQuotaCache` | `ReserveUpload` once, then GET usage | usage reflects the reserve (proves same instance is wired) |
+
+Cross-user denial is not applicable — endpoint takes no prefix/key, always
+returns the caller's own usage.
+
+### 6. `web/src/lib/api.ts` — typed wrapper
+
+Use the existing `request<T>` helper (not `apiFetch`):
 
 ```ts
 export interface StorageUsage {
@@ -98,66 +162,154 @@ export interface StorageUsage {
     quota_blob_cap: number;
 }
 
-export async function getStorageUsage(token: string): Promise<StorageUsage> {
-    return apiFetch<StorageUsage>('/v1/storage/usage', { token });
+export function getStorageUsage(token: string): Promise<StorageUsage> {
+    return request('GET', '/v1/store/usage', { token });
 }
 ```
 
-### 5. `web/src/components/StorageIndicator.tsx` — new component
+### 7. `web/src/lib/utils.ts` — byte formatter
 
-Display "Storage: 340 MB / 1 GB (12 files)". Warn when `used_bytes /
-quota_bytes >= 0.9`.
+```ts
+export function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = bytes / 1024;
+    if (kb < 1024) return `${kb.toFixed(0)} KB`;
+    const mb = kb / 1024;
+    if (mb < 1024) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`;
+    const gb = mb / 1024;
+    return `${gb.toFixed(gb < 10 ? 2 : 1)} GB`;
+}
+```
+
+Colocated test `utils.test.ts` (file does not exist yet — create it):
+
+| Input | Expected |
+|---|---|
+| 0 | "0 B" |
+| 1023 | "1023 B" |
+| 1024 | "1 KB" |
+| 500 \* 1024 | "500 KB" |
+| 1024 \* 1024 | "1.0 MB" |
+| 12 \* 1024 \* 1024 | "12 MB" |
+| 1 << 30 | "1.00 GB" |
+| 12 \* (1 << 30) | "12.0 GB" |
+
+### 8. `web/src/hooks/useStorageUsage.ts` — new hook
+
+Pattern matches [useDevices.ts](../web/src/hooks/useDevices.ts).
+
+```ts
+import { useEffect, useState } from 'react';
+import { getStorageUsage, type StorageUsage } from '@/lib/api';
+
+export interface StorageUsageState {
+    usage: StorageUsage | null;
+    loading: boolean;
+    error: string | null;
+}
+
+export function useStorageUsage(token: string): StorageUsageState {
+    const [usage, setUsage] = useState<StorageUsage | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        setError(null);
+        getStorageUsage(token)
+            .then((u) => { if (!cancelled) setUsage(u); })
+            .catch((e) => {
+                if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load usage');
+            })
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
+    }, [token]);
+
+    return { usage, loading, error };
+}
+```
+
+Colocated test `useStorageUsage.test.ts`: happy-dom + `vi.stubGlobal('fetch', …)`
+(see [useConversations.test.ts](../web/src/hooks/useConversations.test.ts) for
+the fetch-mocking pattern). Cases: loading→loaded transition; fetch error sets
+`error` and leaves `usage` null.
+
+### 9. `web/src/components/StorageIndicator.tsx` — pure component
 
 ```tsx
+import { formatBytes } from '@/lib/utils';
+import type { StorageUsage } from '@/lib/api';
+
 interface Props {
     usage: StorageUsage | null;
     loading: boolean;
 }
 
 export function StorageIndicator({ usage, loading }: Props) {
-    if (loading) return <div className="text-sm text-muted-foreground">Loading…</div>;
+    if (loading) {
+        return <div className="text-sm text-muted-foreground">Loading storage usage…</div>;
+    }
     if (!usage) return null;
 
     const pct = usage.used_bytes / usage.quota_bytes;
     const warn = pct >= 0.9;
-    const usedMB = (usage.used_bytes / (1024 * 1024)).toFixed(0);
-    const quotaGB = (usage.quota_bytes / (1024 * 1024 * 1024)).toFixed(0);
-
     return (
         <div className={warn ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
-            Storage: {usedMB} MB / {quotaGB} GB ({usage.blob_count} files)
+            Storage: {formatBytes(usage.used_bytes)} / {formatBytes(usage.quota_bytes)} ({usage.blob_count} files)
             {warn && <span className="ml-2">Approaching storage limit.</span>}
         </div>
     );
 }
 ```
 
-Add a Storybook story covering normal, warning (≥90%), and loading states.
+### 10. `web/src/components/StorageIndicator.stories.tsx` — stories
 
-### 6. `web/src/routes/settings.tsx` — wire it in
+States to cover:
 
-Fetch on mount (or on settings-screen open). One call per visit is cheap
-enough; no polling or push channel needed.
+| Story | Args |
+|---|---|
+| `Loading` | `loading: true, usage: null` |
+| `EmptyUsage` | `loading: false, usage: { used_bytes: 0, quota_bytes: 1<<30, blob_count: 0, quota_blob_cap: 1000 }` |
+| `SubMegabyte` | `used_bytes: 320 * 1024` (verifies KB rendering) |
+| `Typical` | `used_bytes: 320 * 1024 * 1024` (~320 MB) |
+| `Warning` | `used_bytes: 0.95 * (1<<30)` (≥90% → destructive colour + message) |
+| `AtQuota` | `used_bytes: 1<<30` (100%) |
 
-```ts
-const [usage, setUsage] = useState<StorageUsage | null>(null);
-const [usageLoading, setUsageLoading] = useState(true);
+Verify both light and dark mode in Storybook.
 
-useEffect(() => {
-    getStorageUsage(session.token)
-        .then(setUsage)
-        .catch(() => setUsage(null))
-        .finally(() => setUsageLoading(false));
-}, [session.token]);
+### 11. `web/src/routes/settings.tsx` — wire it
+
+Place above `<DeviceSettings>` in the `<ProfileSettings>` `children` slot:
+
+```tsx
+const storage = useStorageUsage(session.token);
+// ...
+<ProfileSettings handle={session.handle} token={session.token}>
+    <StorageIndicator usage={storage.usage} loading={storage.loading} />
+    <DeviceSettings ... />
+</ProfileSettings>
 ```
 
-Render `<StorageIndicator usage={usage} loading={usageLoading} />` in the
-settings layout.
+## Cache staleness — known and acceptable
+
+The reported usage can lag by up to `QUOTA_CACHE_TTL` (10 min) after a
+successful upload, since `ReserveUpload` increments optimistically and the
+cache is rebuilt from S3 only on expiry. A user uploading a file and
+immediately opening settings will see the new value (same cache); a user
+who took an action that *reduced* usage (none exist in v0.1 — there's no
+delete UI yet) might see stale data. Not a bug — document and move on.
+GC work will revisit this.
 
 ## Verify
 
-- `make test` — handler-level Go test: golden path returns correct JSON;
-  401 when unauthenticated; other-user prefix denial.
-- `make lint` — `tsc --noEmit` passes.
-- Open settings screen: storage line appears, values are plausible.
-- Manually set `used_bytes` close to quota in test to confirm warning colour.
+- `cd server && go test ./...` — `TestStoreUsage*` cases pass.
+- `make lint test` — TS + architecture lint pass; `formatBytes` and
+  `useStorageUsage` unit tests pass.
+- Storybook (`make web-storybook` on `:6006`) — all six `StorageIndicator`
+  stories render correctly in light and dark mode.
+- `make dev` → register a user → upload a small file → open Settings →
+  indicator shows the size and count, formatter picks an appropriate unit.
+- Hit 90% by uploading enough media (or manually setting a high
+  `used_bytes` in a test) → warning colour + "Approaching storage limit"
+  appears.
