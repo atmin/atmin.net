@@ -1244,10 +1244,13 @@ describe('messaging - key-share backup', () => {
             recipientKeys.backupKey,
         );
 
-        const presignCountAfterFirst = fetchMock.mock.calls.filter(
-            (call) => (call[0] as string) === '/v1/store/presign',
-        ).length;
-        expect(presignCountAfterFirst).toBe(1);
+        // Backup upload is fire-and-forget; wait for it.
+        await vi.waitFor(() => {
+            const count = fetchMock.mock.calls.filter(
+                (call) => (call[0] as string) === '/v1/store/presign',
+            ).length;
+            if (count !== 1) throw new Error(`presign count=${count}, want 1`);
+        });
 
         resetFetchMock();
 
@@ -1264,6 +1267,8 @@ describe('messaging - key-share backup', () => {
             recipientKeys.backupKey,
         );
 
+        // Give any stray backup a tick to fire before asserting it didn't.
+        await new Promise((r) => setTimeout(r, 50));
         const presignCountAfterSecond = fetchMock.mock.calls.filter(
             (call) => (call[0] as string) === '/v1/store/presign',
         ).length;
