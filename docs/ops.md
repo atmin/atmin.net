@@ -235,7 +235,7 @@ scw container container get <CONTAINER_ID>
 # View container logs — not available via CLI; use Cockpit (see Logging section below)
 
 # Redeploy after pushing a new image
-scw container container deploy <CONTAINER_ID>
+scw container container redeploy <CONTAINER_ID>
 
 # Update container config — triggers automatic redeploy
 # Pass ALL secrets together to be safe; unclear if omitted ones are wiped or preserved:
