@@ -63,10 +63,14 @@ Inbox (per user, not per device):
 - `inbox/{user_id}/live/{msg_id}`
 - `inbox/{user_id}/archive/{YYYY}-{MM}-{DD}-{ULID}`
 
-Key backup (Megolm session keys, encrypted with backup key):
+Key backup (Megolm session keys, encrypted with the current backup key):
 
 - `keys/{user_id}/live/{session_id}`
 - `keys/{user_id}/archive/{YYYY}-{MM}-{DD}-{ULID}`
+- `keys/{user_id}/key_chain.json` — links of historical backup keys
+  encrypted by their successors. Written on rotation; absent for
+  accounts that have never rotated. See [Backup secret](#backup-secret)
+  and [Key chain](#key-chain).
 
 Handles (lookup index):
 
@@ -85,43 +89,115 @@ Media (encrypted by client):
 
 ### Backup secret
 
-At first registration, the client generates a random backup secret:
-128 bits (16 bytes), encoded as a 12-word BIP39 mnemonic.
-The user saves it in a password manager.
+The backup secret is a 16-byte value used as input to HKDF-SHA256.
+Three keys are derived from it (Ed25519 auth, P-256 sharing, AES-256-GCM
+backup) via the same HKDF chain used since v0.1; the derivation path is
+unchanged. What changed is how the 16-byte value gets produced.
 
-Three keys are derived from the backup secret via HKDF-SHA256:
+#### Credential paths (v2)
+
+New accounts (v2) take a user-typed password and stretch it through
+Argon2id to produce the 16-byte secret. The password+salt+params live
+nowhere; only the derived secret reaches HKDF, and only the public
+outputs of HKDF reach the server. See
+[ADR-0011](../decisions/adr-0011-credential-derivation.md) for the full
+rationale.
 
 ```
-PRK = HKDF-Extract(salt="atmin.net", ikm=backup_secret)
+backup_secret = Argon2id(
+    password = <user_utf8>,
+    salt     = <16 random bytes, per-account>,
+    m        = <from profile.kdf>,
+    t        = <from profile.kdf>,
+    p        = <from profile.kdf>,
+    hash_len = 16
+)
 
+PRK = HKDF-Extract(salt="atmin.net", ikm=backup_secret)
 auth_seed    = HKDF-Expand(PRK, info="auth-v1",    L=32)  → Ed25519 keypair
 sharing_seed = HKDF-Expand(PRK, info="sharing-v1", L=32)  → P-256 keypair (scalar)
 backup_key   = HKDF-Expand(PRK, info="backup-v1",  L=32)  → AES-256-GCM key
 ```
 
-Version suffixes (`-v1`) allow future derivation path changes without changing the backup secret.
+Argon2id runs in a Web Worker. The default parameters at registration
+are `m=65536 KiB, t=3, p=1`. The chosen `(salt, m, t, p)` are stored on
+`profile.json` and surfaced via `GET /v1/resolve/{handle}` so any device
+can re-derive the same keys from the password.
 
-- **Auth key** (Ed25519) — proves account ownership when adding devices.
-  Public half stored in `profile.json`.
-  Private half used only transiently during device addition, then discarded.
-- **Sharing key** (ECDH P-256) — public half stored in `profile.json` as
-  uncompressed SEC1 (65 bytes, `0x04 || X || Y`).
-  Other users encrypt Megolm session keys with it via ECIES.
-  Private half stored on device (IndexedDB) as a **non-extractable** CryptoKey
-  for ongoing key-share decryption. See [ADR-0008](../decisions/adr-0008-p256-sharing-keypair.md).
-- **Backup encryption key** (AES-256-GCM) — encrypts key backups on S3.
-  Stored on device (IndexedDB) for ongoing key backup writes.
-  Never transmitted.
+Legacy accounts (v1, BIP39 mnemonic) skip the Argon2id stage: the
+mnemonic decodes directly to 16 bytes and feeds HKDF. A v1 `profile.json`
+has no `salt` / `kdf` / `key_version` fields — that absence *is* the v1
+signal. v1 accounts migrate to v2 by going through the rotation flow
+(see [Rotate keys](#rotate-keys)); there is no in-place upgrade.
 
-The backup secret itself is never persisted in the browser.
-It is entered once (at registration or device addition), used to derive keys,
-then discarded from memory. Only the sharing private key and backup encryption key
-are stored on the device — the minimum needed for ongoing operation.
+Version suffixes (`-v1`) on the HKDF `info` strings allow future
+derivation path changes without changing the backup secret itself.
 
-A compromised browser cannot add rogue devices (requires the auth key,
-which requires the backup secret, which lives only in the user's password manager).
+#### Key roles
 
-Losing the backup secret and all devices means unrecoverable loss of account and history.
+- **Auth key** (Ed25519) — proves account ownership when adding
+  devices and when rotating the credential. Public half stored in
+  `profile.json`. Private half used only transiently and discarded.
+- **Sharing key** (ECDH P-256) — public half stored in `profile.json`
+  as uncompressed SEC1 (65 bytes, `0x04 || X || Y`). Other users
+  encrypt Megolm session keys with it via ECIES. Private half stored
+  on device (IndexedDB) as a **non-extractable** CryptoKey. See
+  [ADR-0008](../decisions/adr-0008-p256-sharing-keypair.md).
+- **Backup encryption key** (AES-256-GCM) — encrypts key backups on
+  S3. Stored on device (IndexedDB) for ongoing writes. Never
+  transmitted.
+
+The backup secret itself is never persisted in the browser. The
+password (for v2) is entered once per device, stretched, and the
+derived secret is discarded as soon as the three keys are derived.
+Only the sharing private key and current backup encryption key remain
+on the device — the minimum needed for ongoing operation.
+
+A compromised browser cannot add rogue devices (requires the auth
+key, which requires the secret, which requires the password the user
+keeps in their password manager).
+
+Losing the password (v2) or the mnemonic (v1) and all devices means
+unrecoverable loss of account and history. There is no recovery
+mechanism.
+
+#### Key rotation
+
+The credential and all derived keys can be rotated atomically via
+`POST /v1/rotate-keys`. Rotation:
+
+1. Derives new keys from a new password (or new BIP39 mnemonic for
+   v1→v2 migration) and a freshly generated salt.
+2. Atomically replaces the public keys in `profile.json` under an
+   ETag precondition, with a continuity signature proving possession
+   of the old auth private key.
+3. Bumps `profile.key_version` by one.
+4. Appends a link to `keys/{uid}/key_chain.json` so historical
+   key-backup blobs encrypted with the previous backup key remain
+   readable.
+5. Issues a new bearer token to the rotating device, bound to the
+   new `key_version`.
+
+All other devices on the account are cut off immediately: their
+tokens are bound to the old `key_version` and fail authentication
+on next request. The user must re-enter the new password on each
+other device. See [Rotate keys](#rotate-keys) and
+[ADR-0012](../decisions/adr-0012-backup-secret-rotation.md).
+
+#### Login fork (autodetect)
+
+The login screen has a single text field. The client autodetects the
+credential format:
+
+- If the input is 12 whitespace-separated tokens, all present in the
+  BIP39 English wordlist → treat as a legacy mnemonic, decode to 16
+  bytes, run HKDF directly.
+- Otherwise → fetch `salt` and `kdf` from `GET /v1/resolve/{handle}`,
+  run Argon2id with those parameters in a Web Worker, then HKDF.
+
+The legacy code path is retained deliberately as a rehearsal of the
+protocol-upgrade migration mechanism, not for any specific
+population of v1 users. Sunset is expected but not pinned.
 
 ### Adding a device
 
@@ -176,6 +252,12 @@ under `keys/{user_id}/live/`. Compacted into daily archive objects like everythi
 
 On restore, the new device decrypts key backups with the backup encryption key,
 then syncs the inbox normally — decrypting messages with the restored Megolm keys.
+
+For accounts that have rotated, each key-backup blob carries a `v`
+field identifying which `key_version`'s backup key encrypted it. A
+restoring device that has only the current backup key walks
+[`keys/{user_id}/key_chain.json`](#key-chain) backwards to recover
+older backup keys on demand.
 
 ## Message immutability and state reconstruction
 
@@ -247,13 +329,63 @@ See [Media](#media) for size limits, rendering rules, lifecycle, and failure han
 
 ### Key backup objects
 
-Individual live key backups are JSON, encrypted with the backup encryption key:
+Individual live key backups are JSON, encrypted with the **current**
+backup encryption key:
 
 ```json
-{"iv": "<base64 12-byte IV>", "ciphertext": "<base64 AES-256-GCM>"}
+{"v": 1, "iv": "<base64 12-byte IV>", "ciphertext": "<base64 AES-256-GCM>"}
 ```
 
-The plaintext is the Megolm session key (base64, as returned by `session_key()`).
+The plaintext is the Megolm session key (base64, as returned by
+`session_key()`).
+
+The outer `v` field identifies which `key_version`'s backup key
+encrypted this blob. A blob without `v` is treated as `v: 1` (legacy
+envelope; predates ADR-0012). When reading a blob with `v: N` while
+the account is at `key_version: M` and `N < M`, the client walks
+[`keys/{uid}/key_chain.json`](#key-chain) backwards from `M` to `N`
+to recover the right backup key. Archives carry the same `v` field;
+compaction must produce homogeneous archives (one `v` per archive
+blob).
+
+`users/{user_id}/contacts.json` follows the same envelope.
+
+### Key chain
+
+`keys/{user_id}/key_chain.json` is written on rotation. It carries
+the historical backup keys, each wrapped by its successor:
+
+```jsonc
+{
+  "links": [
+    {
+      "from":       1,           // older key_version
+      "to":         2,           // newer key_version
+      "iv":         "<base64 12-byte IV>",
+      "ciphertext": "<base64 AES-256-GCM>"
+    }
+    // ...one link appended per rotation
+  ]
+}
+```
+
+`ciphertext` is `AES-256-GCM(backup_key_to, backup_key_from)` — the
+older backup key encrypted by the newer. The rotating device, which
+holds both keys at the moment of rotation, writes the new link
+before invoking `POST /v1/rotate-keys`. Links are append-only;
+existing links are never rewritten.
+
+On read of a blob with `v: N` while the current `key_version` is
+`M`, a client that has `backup_key_M` in IndexedDB walks the
+`links` array backwards (`M → M-1 → … → N`), decrypting each link's
+`ciphertext` to recover the next-older backup key, until it reaches
+`backup_key_N`. Recovered keys should be memoized in IndexedDB to
+amortize subsequent reads.
+
+The file itself is unencrypted at the envelope level — only its
+`ciphertext` fields are encrypted. Its existence reveals that at
+least one rotation occurred but not when, with what parameters, or
+how many.
 
 ## Media
 
@@ -472,20 +604,33 @@ native export format and is URL-safe.
 
 Source of truth for all profile data (see [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md)).
 
-```json
+```jsonc
 {
   "user_id": "01HWQA...",
   "handle": "copper-falcon",
   "auth_public_key": "<base64url Ed25519, 32 bytes>",
   "sharing_public_key": "<base64url P-256 uncompressed SEC1, 65 bytes>",
+
+  // v2 fields (ADR-0011 + ADR-0012). Absent on v1 accounts.
+  "salt":        "<base64url, 16 bytes>",
+  "kdf":         { "type": "argon2id", "m": 65536, "t": 3, "p": 1 },
+  "key_version": 1,
+
+  // Profile fields (ADR-0005). Absent until set.
   "display_name": "Alice",
-  "avatar_url": "media/01HWQA.../avatar/photo.jpg",
-  "last_active": "2026-02-15T10:30:00Z",
-  "created_at": "2025-01-15T10:00:00Z"
+  "avatar_url":   "media/01HWQA.../avatar/photo.jpg",
+  "last_active":  "2026-02-15T10:30:00Z",
+
+  "created_at":  "2025-01-15T10:00:00Z"
 }
 ```
 
 `display_name`, `avatar_url`, and `last_active` are absent until set.
+`salt`, `kdf`, and `key_version` are absent on v1 accounts (their
+absence is the v1 signal); on v2 accounts they are always present
+together. `key_version` is initialised to `1` at v2 registration and
+bumps by one on each rotation. `kdf.m` is in KiB per the Argon2 spec
+convention.
 
 ### `users/{user_id}/devices/{device_id}.json`
 
@@ -514,9 +659,12 @@ Error codes used by the server:
 |------|---------|---------|
 | 400 | `bad_request` | Malformed input, missing fields |
 | 401 | `unauthorized` | Missing or invalid token |
+| 401 | `key_version_stale` | Token or auth-proof bound to a superseded `key_version`. Body: `{ "error": "key_version_stale", "current": N }` — client must wipe local state and prompt for the new credential |
 | 403 | `device_revoked` | Device file deleted (triggers client self-wipe) |
 | 403 | `forbidden` | Prefix access denied |
+| 403 | `bad_continuity` | `continuity_signature` on a `rotate-keys` request did not verify against the current `profile.auth_public_key` |
 | 404 | `not_found` | Object or handle does not exist |
+| 409 | `key_version_stale` | `rotate-keys` request's `key_version` did not equal `profile.key_version + 1`, or the conditional `profile.json` write lost the race |
 | 413 | `too_large` | Single upload exceeds per-blob size cap |
 | 413 | `quota_exceeded` | Upload would exceed per-user storage quota |
 
@@ -525,14 +673,32 @@ Error codes used by the server:
 ### Auth
 
 - Bearer token per device: `Authorization: Bearer <token>`.
-- Token issued at device registration; long-lived, no expiry.
-- **Token format**: `base64url(user_id || "." || device_id || "." || HMAC-SHA256(server_secret, user_id || "." || device_id))`.
-  Opaque to the client. Server parses `user_id` and `device_id` from the token
-  and verifies the HMAC — no database lookup needed.
+- Token issued at device registration or rotation; long-lived, no expiry,
+  but bound to the `key_version` in force when it was issued.
+- **Token format (v2)**:
+  ```
+  base64url(
+      user_id || "." ||
+      device_id || "." ||
+      key_version || "." ||
+      HMAC-SHA256(server_secret, user_id || "." || device_id || "." || key_version)
+  )
+  ```
+  Opaque to the client. The HMAC covers `key_version` so the client cannot
+  forge a token for a different version.
+- **Token format (v1, legacy)**: same shape without the `key_version`
+  segment. Accepted indefinitely; treated as `key_version = 1`.
+- **Auth middleware**:
+  1. Parse the token; verify HMAC.
+  2. Read current `profile.key_version` (cached). Treat absence as `1`.
+  3. Reject with `401 key_version_stale` if the token's `key_version`
+     does not match. Response body includes `{ "current": N }` so
+     the client can render the right re-login UX.
+  4. Do the existing S3 HEAD revocation check.
 - **Revocation check**: server does S3 HEAD on `users/{user_id}/devices/{device_id}.json`,
   cached with short TTL. Missing file = `403 device_revoked`.
-- Backup secret rotation (re-keying) is deferred.
-  See [evolution notes](../evolution/device-revocation.md).
+- See [ADR-0012](../decisions/adr-0012-backup-secret-rotation.md)
+  for the full rotation mechanism.
 
 ### Register (first device)
 
@@ -543,6 +709,20 @@ Input:
 - `device_label`
 - `auth_public_key` (base64url Ed25519)
 - `sharing_public_key` (base64url P-256 uncompressed SEC1)
+- `salt` (base64url, 16 bytes — v2 accounts; omit for v1)
+- `kdf` (object `{ type, m, t, p }` — v2 accounts; omit for v1)
+
+For v2 registrations the client generates a random `salt`, runs
+Argon2id over the user's password, and derives the auth and sharing
+keypairs from the resulting 16-byte secret. The salt and KDF
+parameters are sent alongside the public keys. The server stores all
+of `auth_public_key`, `sharing_public_key`, `salt`, `kdf`, and
+`key_version: 1` (the rotation counter starts at 1 for v2 accounts;
+it is bumped on each rotation) into `profile.json`.
+
+v1 registration paths (no `salt`/`kdf` in the request) are retained
+for the migration-mechanism rehearsal but are no longer exposed in
+the production UI.
 
 Server generates `user_id`, `device_id` (both ULIDs), `handle` (two BIP39 words),
 and `token`.
@@ -555,18 +735,48 @@ This is the only unauthenticated endpoint (no existing token to present).
 
 ### Auth proof
 
-Add-device and revoke-device require an `auth_proof`: an Ed25519 signature
-over a JSON payload containing a timestamp.
+Add-device, revoke-device, and rotate-keys require an `auth_proof`:
+an Ed25519 signature over a JSON payload.
+
+**v2 payload** (used for v2 accounts and all rotate-keys requests):
 
 ```json
 {
-  "payload": { "user_id": "...", "device_id": "...", "timestamp": "2025-01-15T10:30:00Z" },
+  "payload": {
+    "user_id":     "...",
+    "device_id":   "...",
+    "timestamp":   "2025-01-15T10:30:00Z",
+    "key_version": 1
+  },
   "signature": "<base64url Ed25519 signature>"
 }
 ```
 
-Server verifies the signature against `auth_public_key` from `profile.json`.
-**Replay protection**: reject if `timestamp` is more than 5 minutes from server time.
+v2 payloads are signed over their **JCS-canonicalized**
+([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)) bytes — recursive
+lexicographic key ordering, no whitespace, RFC 8259 string escapes,
+numbers in shortest round-tripping form. The client uses
+[`canonicalize`](https://www.npmjs.com/package/canonicalize); the
+server uses [`github.com/gowebpki/jcs`](https://github.com/gowebpki/jcs).
+
+**v1 payload** (legacy, no `key_version` field):
+
+```json
+{
+  "payload": { "user_id": "...", "device_id": "...", "timestamp": "..." },
+  "signature": "<base64url Ed25519 signature>"
+}
+```
+
+v1 payloads are verified against the existing `JSON.stringify` byte
+sequence (insertion-order keys, no whitespace). They are not
+regenerated — the path exists only to verify legacy mnemonic logins.
+
+Server verifies the signature against `auth_public_key` from
+`profile.json`. Server rejects with `401 key_version_stale` if the
+payload's `key_version` (treated as `1` if absent) does not match
+the current `profile.key_version`. **Replay protection**: reject if
+`timestamp` is more than 5 minutes from server time.
 
 ### Add device
 
@@ -599,6 +809,72 @@ When a client receives `403 device_revoked`, it must wipe all local state
 the welcome screen. This is best-effort — an offline attacker won't trigger it —
 but any network request from the stolen device causes self-wipe.
 
+### Rotate keys
+
+`POST /v1/rotate-keys`
+
+Atomically replaces the credential-derived keys on an account. See
+[ADR-0012](../decisions/adr-0012-backup-secret-rotation.md) for the
+full design.
+
+Input:
+
+```jsonc
+{
+  "key_version":          2,                         // = current + 1
+  "auth_public_key":      "<base64url>",
+  "sharing_public_key":   "<base64url>",
+  "salt":                 "<base64url, 16 bytes>",
+  "kdf":                  { "type": "argon2id", "m": 65536, "t": 3, "p": 1 },
+  "continuity_signature": "<base64url Ed25519>"
+}
+```
+
+The `continuity_signature` is an Ed25519 signature, produced by the
+**old** auth private key, over the JCS-canonicalized form of the
+request body excluding the `continuity_signature` field itself.
+
+Server flow:
+
+1. Authenticate the bearer token (existing middleware, including the
+   `key_version` check).
+2. Read current `profile.json` and capture its ETag.
+3. Reject `409 key_version_stale` if `request.key_version !=
+   profile.key_version + 1` (or, for a v1 account, `!= 2`).
+4. Verify `continuity_signature` against the current
+   `profile.auth_public_key`. On failure, return `403 bad_continuity`.
+5. Build the new `profile.json` from the request fields plus the
+   unchanged `user_id`, `handle`, and `created_at`; preserve any
+   `display_name` / `avatar_url` / `last_active`. Set the new
+   `key_version`.
+6. `PUT` the new `profile.json` to S3 with `If-Match: <prior ETag>`.
+   On a `412` from S3, return `409 key_version_stale` — another
+   device just rotated.
+7. Also write `handles/{handle}.json` (the resolve projection) with
+   the new public fields.
+8. Issue a new v2 bearer token to the rotating device, bound to the
+   new `key_version`.
+
+The device record `users/{user_id}/devices/{device_id}.json` is **not
+touched**. The rotating device keeps its `device_id` and existing
+record — only its credential changes. Other devices' records are
+also untouched; the cutoff is enforced via the token-version check,
+not via record deletion. Those devices re-add themselves via
+`POST /v1/devices` on next login.
+
+The rotating client is responsible for writing the new entry into
+`keys/{user_id}/key_chain.json` before issuing the rotation request
+(see [Key chain](#key-chain)). The two writes are not transactional:
+the client must complete the `key_chain.json` write first, then call
+`rotate-keys`. If the `rotate-keys` call fails the orphaned chain
+entry is harmless — it can't decrypt anything until a future
+rotation appends a matching link.
+
+Output:
+
+- `token` (v2, bound to new `key_version`)
+- `key_version` (echo of the new value)
+
 ### Resolve handle
 
 `GET /v1/resolve/{handle}`
@@ -607,8 +883,15 @@ Output:
 
 - `user_id`
 - `sharing_public_key`
+- `salt` (v2 accounts only — needed for the login fork)
+- `kdf` (v2 accounts only — `{ type, m, t, p }`)
+- `key_version` (v2 accounts only)
 - `display_name` (if set)
 - `avatar_url` (if set)
+
+`salt`, `kdf`, and `key_version` are public per-user values: they are
+not secrets, and senders ignore them. Only the account holder's
+login flow consumes them.
 
 ### Send
 
@@ -744,12 +1027,21 @@ Realtime hint:
 
 ### New device sync
 
-1. Restore Megolm session keys from `keys/{user_id}/` (archive + live).
-2. Sync `inbox/{user_id}/live/` — most recent messages appear first.
-3. Sync `inbox/{user_id}/archive/` in reverse date order — client walks backwards
+1. Resolve the user's salt + `kdf` + `key_version` via `GET /v1/resolve/{handle}`
+   (or skip for v1 accounts — fields absent).
+2. Derive keys from the entered credential (Argon2id in a Web Worker
+   for v2; direct HKDF for v1).
+3. If the account has rotated (i.e. `keys/{user_id}/key_chain.json`
+   exists), fetch it and memoize the resolved older backup keys in
+   IndexedDB.
+4. Restore Megolm session keys from `keys/{user_id}/` (archive + live).
+   For each blob, look at its `v` field; decrypt with the matching
+   backup key (current or chain-derived).
+5. Sync `inbox/{user_id}/live/` — most recent messages appear first.
+6. Sync `inbox/{user_id}/archive/` in reverse date order — client walks backwards
    by constructing month prefixes (`archive/2025-06`, `archive/2025-05`, …).
    History fills in backwards.
-4. Older archives can be fetched lazily (on scroll or in background).
+7. Older archives can be fetched lazily (on scroll or in background).
 
 ## Reliability & idempotency
 
