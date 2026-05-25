@@ -185,6 +185,20 @@ session is dead immediately") is the same trajectory as the routine
 
 Two changes:
 
+**0. Backup-key extractability.** ADR-0011 establishes backup keys
+as non-extractable AES-256-GCM `CryptoKey`s — XSS during a session
+can encrypt/decrypt with them but cannot exfiltrate the raw bytes.
+The chain mechanism below requires wrapping the *old* backup key
+with the *new* one, which requires a raw export. Resolution:
+backup keys remain non-extractable in the normal `deriveKeys` path.
+The rotation flow calls a variant (`deriveKeys({ extractable: true })`)
+to re-derive *only* the old backup key from the user's freshly
+re-entered current password, computes the chain link, and discards
+the extractable copy. The persisted at-rest backup key is never
+extractable. XSS at the moment of rotation could exfiltrate the
+temporarily-extractable key for the rotation window only — narrow
+and already covered by the larger "credential being entered" threat.
+
 **1. Envelope versioning.** All client-encrypted blobs (key backups
 under `keys/{uid}/live/...` and `keys/{uid}/archive/...`, and
 `users/{uid}/contacts.json`) switch to an outer envelope:
@@ -272,11 +286,11 @@ on the rotation request itself.
   Memoize the resolved backup keys in IDB to amortize.
 - Token and auth-proof formats now have two wire versions in
   circulation. Code paths must handle both until legacy sunset.
-- Compaction has to be version-aware. The current compaction code
-  iterates `keys/{uid}/live/*` and writes a single archive blob; it
-  now needs to bucket by version and write one archive per bucket
-  (or skip rotation-spanning compactions and let the next pass
-  catch them).
+- Archive CBOR arrays may now contain mixed-version entries when a
+  rotation lands between compactions. The compaction server flow is
+  unchanged — entries remain opaque to the server — but the client
+  decryption pass has to dispatch per-entry on `v`. Independently
+  cheap; just an extra dispatch step.
 - ETag-conditional `profile.json` writes assume the S3-compatible
   backend supports `If-Match`. MinIO does; production target
   (Scaleway) does. Verifying this in the test matrix is a

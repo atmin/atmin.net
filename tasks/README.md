@@ -2,12 +2,35 @@
 
 Active implementation tasks in priority order. Delete a file once its change lands.
 
-1. **[server-cleanup-routine](server-cleanup-routine.md)** — Automated S3 cleanup for inactive and abandoned accounts. The `last_active` tracking prerequisite is already in place; this is the production-health item most at risk of being deferred indefinitely.
+## Credential overhaul (highest priority)
 
-2. **[draft-persist](draft-persist.md)** — Persist unsent message drafts to localStorage across reloads. Small and self-contained; also unblocks the SW update path in `SWUpdateToast`, which suppresses auto-reload while a draft exists but has nothing to check yet.
+Replaces the BIP39-mnemonic credential with a user-chosen password
+stretched through Argon2id, and lifts backup-secret rotation out of
+deferred-status into a real "change my password" feature. Removes
+the two biggest WTF moments in the current onboarding (12-word
+phrase, "what's my recovery again?"). See
+[ADR-0011](../docs/decisions/adr-0011-credential-derivation.md) and
+[ADR-0012](../docs/decisions/adr-0012-backup-secret-rotation.md)
+for the design.
 
-3. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform.
+1. **[credential-registration](credential-registration.md)** — Password + confirm + zxcvbn-ts strength meter at registration, Argon2id derivation in a Web Worker, salt + KDF params on `profile.json`. Login screen accepts password or (legacy) mnemonic via autodetect. No rotation yet. Independent of task 2.
 
-4. **[storage-indicator](storage-indicator.md)** — `GET /v1/store/usage` endpoint backed by the existing quota cache, surfaced as a "X MB / 1 GB" line in settings with a warning at 90%. Straightforward now that media upload has landed and the quota infrastructure is in place.
+2. **[credential-rotate-endpoint](credential-rotate-endpoint.md)** — Server-only `POST /v1/rotate-keys` with JCS-canonicalized continuity signature, ETag-conditional `profile.json` write, token v2 format with `key_version` segment, auth-proof v2 format, new error codes. No UI in this task. Independent of task 1.
 
-5. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+3. **[credential-backup-chain](credential-backup-chain.md)** — `keys/{uid}/key_chain.json` of historical backup keys, `{v, iv, ciphertext}` envelope on key-backup blobs and `contacts.json`, in-IDB memoization. Depends on task 2 (for the `key_version` concept).
+
+4. **[credential-rotate-ui](credential-rotate-ui.md)** — Settings → "Change password" panel that orchestrates current-password re-derivation, new-credential derivation, chain-write, continuity-signed `rotateKeys` call. Depends on tasks 1, 2, 3.
+
+5. **[credential-multi-device-cutoff](credential-multi-device-cutoff.md)** — Client reaction to `401 key_version_stale`: clear local state, route to `/login`, show "rotated on another device" notice. Depends on task 2.
+
+## Other active tasks
+
+6. **[server-cleanup-routine](server-cleanup-routine.md)** — Automated S3 cleanup for inactive and abandoned accounts. The `last_active` tracking prerequisite is already in place; this is the production-health item most at risk of being deferred indefinitely.
+
+7. **[draft-persist](draft-persist.md)** — Persist unsent message drafts to localStorage across reloads. Small and self-contained; also unblocks the SW update path in `SWUpdateToast`, which suppresses auto-reload while a draft exists but has nothing to check yet.
+
+8. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform.
+
+9. **[storage-indicator](storage-indicator.md)** — `GET /v1/store/usage` endpoint backed by the existing quota cache, surfaced as a "X MB / 1 GB" line in settings with a warning at 90%. Straightforward now that media upload has landed and the quota infrastructure is in place.
+
+10. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.

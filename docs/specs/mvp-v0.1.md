@@ -344,9 +344,12 @@ encrypted this blob. A blob without `v` is treated as `v: 1` (legacy
 envelope; predates ADR-0012). When reading a blob with `v: N` while
 the account is at `key_version: M` and `N < M`, the client walks
 [`keys/{uid}/key_chain.json`](#key-chain) backwards from `M` to `N`
-to recover the right backup key. Archives carry the same `v` field;
-compaction must produce homogeneous archives (one `v` per archive
-blob).
+to recover the right backup key.
+
+Archives are CBOR arrays of these envelopes; each entry
+self-describes its version, so a single archive can contain blobs
+from multiple `key_version`s when a rotation lands between
+compactions. The reader decrypts each entry independently.
 
 `users/{user_id}/contacts.json` follows the same envelope.
 
