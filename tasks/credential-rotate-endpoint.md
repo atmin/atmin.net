@@ -12,8 +12,12 @@ Part of the credential-overhaul task group:
 
 Server-side primitive for credential rotation. No UI in this task —
 that's task 4. This adds the endpoint, the token-version binding,
-the auth-proof-version binding, and the ETag-conditional
-`profile.json` write that the higher-level rotation flow needs.
+the auth-proof-version binding, the per-`user_id` mutex that
+serializes the GET-VERIFY-WRITE on `profile.json`, and the
+idempotency record store that dedups retries. The production
+backend doesn't offer conditional writes
+([ops.md — Object storage constraints](../docs/ops.md#object-storage-constraints)),
+so the mutex is the only correct way to close the rotation race.
 
 Lands in parallel with task 1 (registration). They share no code.
 
@@ -31,10 +35,12 @@ Specs: [ADR-0012](../docs/decisions/adr-0012-backup-secret-rotation.md),
 - [server/auth.go](../server/auth.go) verifies auth-proof v1
   (`{user_id, device_id, timestamp}`) via `JSON.stringify` byte
   match. No JCS, no `key_version`.
-- [server/store.go](../server/store.go) `PutObject` does not support
-  conditional writes; no ETag plumbing.
-- [server/store_mem.go](../server/store_mem.go) `MemStore` has no
-  ETag tracking.
+- [server/store.go](../server/store.go) — no conditional write
+  primitive. Not needed; the mutex closes the race instead (see
+  [ops.md](../docs/ops.md#object-storage-constraints)).
+- The server today has no in-process mutex map for per-`user_id`
+  serialization. The existing in-process state lives in the SSE
+  hub, the device-existence cache, and the media-quota cache.
 - [web/src/lib/api.ts](../web/src/lib/api.ts) has no `rotateKeys`
   wrapper.
 
@@ -66,12 +72,14 @@ auth-proof path). This task reuses the same helper.
 var (
     errKeyVersionStale = APIError{401, "key_version_stale", "Token or auth proof bound to a superseded key_version"}
     errBadContinuity   = APIError{403, "bad_continuity", "Continuity signature did not verify"}
+    // 503 reserved for the multi-instance future; single-instance never emits it.
 )
 ```
 
-`rotateKeys` also returns `409` with the `key_version_stale` code for
-the precondition / ETag-race case. Keep one canonical struct but
-allow per-call status override (helper `apiErrorWithStatus(err, 409)`)
+`rotateKeys` also returns `409` with the `key_version_stale` code on
+the `request.key_version != current+1` precondition. Keep one
+canonical struct but allow per-call status override
+(helper `apiErrorWithStatus(err, 409)`)
 or define a second var. Pick whichever matches the existing pattern
 better.
 
@@ -139,34 +147,75 @@ Also: in the v2 path, after sig verification succeeds, compare the
 payload's `key_version` against the current profile's; mismatch is
 `401 key_version_stale` (not a verification error).
 
-### 6. Store: conditional write
+### 6. Per-`user_id` rotation mutex
 
-[server/store.go](../server/store.go) `Store` interface gains:
+A new file `server/rotation_mutex.go` (or inline in `handlers.go`,
+~30 LoC):
 
 ```go
-type Store interface {
-    // ...existing...
-    GetObjectWithETag(ctx context.Context, key string) (body []byte, etag string, err error)
-    PutObjectIfMatch(ctx context.Context, key string, body []byte, etag string) (newETag string, err error)
+type rotationMutexMap struct {
+    mu sync.Mutex
+    m  map[string]*rotationLock
 }
 
-var ErrPreconditionFailed = errors.New("precondition failed")
+type rotationLock struct {
+    mu       sync.Mutex
+    refCount int
+}
+
+// acquireRotation returns a function the caller must call to release.
+// Blocks up to timeout; returns errRotationContention on timeout.
+func (rm *rotationMutexMap) acquire(userID string, timeout time.Duration) (release func(), err error)
 ```
 
-S3 implementation passes `If-Match: <etag>` on `PutObject`. AWS SDK
-v1 surfaces this as `412 PreconditionFailed`; map to
-`ErrPreconditionFailed`.
+Implementation:
 
-[server/store_mem.go](../server/store_mem.go): track `etag` per key
-(simple `strconv.FormatInt(time.Now().UnixNano(), 36)` or an atomic
-counter). `PutObjectIfMatch` compares and increments.
+- `acquire` looks up or creates the `*rotationLock` for `userID`,
+  increments `refCount`, then attempts `lock.mu.Lock()` with a
+  timeout (via a `sync.Mutex` + `chan` trick or
+  `golang.org/x/sync/semaphore`).
+- The returned `release` unlocks and decrements; when `refCount`
+  reaches zero, the entry is deleted from the map (small periodic
+  sweep for safety).
+- The mutex is intentionally local to this server process. See
+  [ADR-0012 — Concurrency control](../docs/decisions/adr-0012-backup-secret-rotation.md)
+  for the multi-instance migration story.
 
-### 7. The `rotateKeys` handler
+Lives next to the existing in-process state (device-existence
+cache, media-quota cache, SSE hub).
+
+### 7. Idempotency record store
+
+The rotation request gains a `request_id` field (UUID v4). The
+server records every completed rotation outcome under
+`users/{user_id}/rotation-records/{request_id}.json` as:
+
+```jsonc
+// success
+{ "status": 200, "token": "...", "key_version": 2 }
+// failure
+{ "status": 409, "error": "key_version_stale", "current": 1 }
+```
+
+The record carries a 24-hour TTL (cleaned up by the
+[server-cleanup-routine](server-cleanup-routine.md) task — sweeps
+`users/*/rotation-records/*.json` older than 24h).
+
+Helper functions in `server/idempotency.go`:
+
+```go
+// Returns (cachedResponse, ok). If ok, replay the cachedResponse verbatim.
+func loadRotationRecord(ctx context.Context, store Store, uid, requestID string) (*RotationRecord, bool, error)
+func saveRotationRecord(ctx context.Context, store Store, uid, requestID string, rec RotationRecord) error
+```
+
+### 8. The `rotateKeys` handler
 
 [server/handlers.go](../server/handlers.go):
 
 ```go
 type rotateKeysReq struct {
+    RequestID           string     `json:"request_id"`            // idempotency key
     KeyVersion          int        `json:"key_version"`
     AuthPublicKey       string     `json:"auth_public_key"`
     SharingPublicKey    string     `json:"sharing_public_key"`
@@ -184,29 +233,54 @@ func (s *server) rotateKeys(w http.ResponseWriter, r *http.Request) {
         apiErr(w, errBadRequest)
         return
     }
+    if !validUUID(req.RequestID) {
+        apiErr(w, errBadRequest)
+        return
+    }
 
-    profileBytes, etag, err := s.store.GetObjectWithETag(r.Context(), profileKey(uid))
-    if err != nil { /* ... */ }
+    // 1. Acquire per-user_id mutex
+    release, err := s.rotationMu.acquire(uid, 500*time.Millisecond)
+    if err != nil {
+        // Single-instance: contention with self — return 409 (genuine concurrent
+        //   rotation, not unavailable). Future multi-instance: 503 unavailable.
+        apiErrWithStatus(w, errKeyVersionStale, 409, map[string]any{"current": -1})
+        return
+    }
+    defer release()
+
+    // 2. Idempotency: replay if seen
+    if rec, ok, _ := loadRotationRecord(r.Context(), s.store, uid, req.RequestID); ok {
+        writeJSONStatus(w, rec.Status, rec.Body())
+        return
+    }
+
+    // 3. Read current profile
+    profileBytes, err := s.store.GetObject(r.Context(), profileKey(uid))
+    if err != nil { /* 500 */ }
     var current Profile
     json.Unmarshal(profileBytes, &current)
 
     currentKV := current.KeyVersion
     if currentKV == 0 { currentKV = 1 }
     if req.KeyVersion != currentKV+1 {
+        rec := RotationRecord{Status: 409, Error: "key_version_stale", Current: currentKV}
+        saveRotationRecord(r.Context(), s.store, uid, req.RequestID, rec)
         apiErrWithStatus(w, errKeyVersionStale, 409, map[string]any{"current": currentKV})
         return
     }
 
-    // Verify continuity signature
-    canonical, _ := jcs.Transform(continuityBody(req))  // gowebpki/jcs
+    // 4. Verify continuity signature
+    canonical, _ := jcs.Transform(continuityBody(req)) // gowebpki/jcs
     oldAuthPub, _ := base64UrlDecode(current.AuthPublicKey)
     sigBytes, _ := base64UrlDecode(req.ContinuitySignature)
     if !ed25519.Verify(oldAuthPub, canonical, sigBytes) {
+        rec := RotationRecord{Status: 403, Error: "bad_continuity"}
+        saveRotationRecord(r.Context(), s.store, uid, req.RequestID, rec)
         apiErr(w, errBadContinuity)
         return
     }
 
-    // Build new profile
+    // 5. Build & write new profile (unconditional — mutex makes it atomic for this uid)
     next := current
     next.AuthPublicKey = req.AuthPublicKey
     next.SharingPublicKey = req.SharingPublicKey
@@ -214,28 +288,33 @@ func (s *server) rotateKeys(w http.ResponseWriter, r *http.Request) {
     next.KDF = req.KDF
     next.KeyVersion = req.KeyVersion
     body, _ := json.Marshal(next)
-
-    if _, err := s.store.PutObjectIfMatch(r.Context(), profileKey(uid), body, etag); err != nil {
-        if errors.Is(err, ErrPreconditionFailed) {
-            apiErrWithStatus(w, errKeyVersionStale, 409, map[string]any{"current": currentKV})
-            return
-        }
-        /* 500 */
+    if err := s.store.PutObject(r.Context(), profileKey(uid), body, "application/json"); err != nil {
+        /* 500; do NOT save record (let the client retry) */
+        return
     }
 
-    // Write the resolve projection
+    // 6. Write resolve projection
     handleProj, _ := json.Marshal(projectHandle(&next))
-    s.store.PutObject(r.Context(), handleKey(next.Handle), handleProj)
+    s.store.PutObject(r.Context(), handleKey(next.Handle), handleProj, "application/json")
 
-    // Mint new token bound to the new key_version
+    // 7. Mint new token + save idempotency record
     token := mintToken(s.cfg.ServerSecret, uid, did, req.KeyVersion)
+    rec := RotationRecord{Status: 200, Token: token, KeyVersion: req.KeyVersion}
+    saveRotationRecord(r.Context(), s.store, uid, req.RequestID, rec)
     writeJSON(w, map[string]any{"token": token, "key_version": req.KeyVersion})
 }
 ```
 
-`continuityBody(req)` returns a `map[string]any` (or struct with
-`omitempty` for the sig field) — whatever feeds JCS produces a
-canonical byte sequence the client also produces.
+`continuityBody(req)` strips `continuity_signature` from the
+request body and feeds the rest into JCS. The client builds the
+exact same map; both sides produce identical bytes.
+
+Note on `RequestID` and the continuity signature: `RequestID` is
+**included** in the JCS-canonicalized payload covered by the
+signature. An attacker who replays a captured rotation body
+reuses the recorded outcome (idempotent replay), but the recorded
+outcome includes a token bound to the original `device_id` via
+HMAC — useless on a different device.
 
 ### 8. Route registration
 
@@ -356,9 +435,26 @@ locus. This fixture is the cheapest catch.
   than the request claims.
 - `409 key_version_stale` when `req.key_version != current+1`
   (try `current`, try `current+2`).
-- `409 key_version_stale` on ETag race — wrap the MemStore to
-  return `ErrPreconditionFailed` once, assert mapping to the right
-  status + code.
+- **Concurrent rotation serialization (mutex test)**: fire two
+  rotation requests for the same `user_id` concurrently via
+  `httptest` (e.g. spawn two goroutines hitting the handler).
+  Assert exactly one returns 200 with `key_version: 2` and the
+  other returns `409 key_version_stale` with `current: 2`. Repeat
+  for two *different* `user_id`s to confirm the mutex is
+  per-user, not global.
+- **Idempotent replay**: rotate with `request_id = X`, capture the
+  200 response. Re-submit the *same* request bytes (same
+  `request_id`, same continuity sig, same payload). Assert the
+  handler returns the recorded 200 verbatim without re-running
+  the rotation — in particular, `profile.json` is not rewritten
+  (verify via store call counter or ETag in MemStore).
+- **Idempotent replay of failure**: same with a request that
+  fails `key_version_stale`. The replay returns the same 409 with
+  the same `current` field.
+- **Concurrent retry race (mutex + idempotency together)**: fire
+  the same `request_id` twice concurrently. Assert both return
+  the same 200, exactly one rotation write happened, exactly one
+  idempotency record was written.
 - v1-to-v2 first rotation: register a v1 account directly via
   `MemStore`, call rotate-keys with `key_version: 2`, assert the
   new profile carries `Salt`, `KDF`, `KeyVersion`.
@@ -376,12 +472,23 @@ locus. This fixture is the cheapest catch.
 - Auth proof rejection on `key_version` mismatch returns
   `key_version_stale`, not the verification error.
 
-**MemStore tests:**
+**Rotation mutex tests (`rotation_mutex_test.go`):**
 
-- `PutObjectIfMatch` succeeds on matching ETag, returns new ETag.
-- `PutObjectIfMatch` returns `ErrPreconditionFailed` on stale ETag.
-- `GetObjectWithETag` returns the value last `Put` and the ETag
-  that resulted from that Put.
+- `acquire` returns immediately when no contention.
+- `acquire` serializes two goroutines on the same `user_id`: the
+  second blocks until the first releases.
+- `acquire` returns an error after `timeout` if contention persists.
+- Different `user_id`s do not serialize (regression guard).
+- `acquire` cleans up the map entry after the final `release`
+  (no goroutine leak, no memory growth across many handles).
+
+**Idempotency tests (`idempotency_test.go`):**
+
+- `saveRotationRecord` + `loadRotationRecord` round-trip.
+- `loadRotationRecord` returns `ok: false` for an unknown
+  `request_id`.
+- Records expire (cleanup sweep), assertion: a record written
+  >24h ago is removed by the sweep function.
 
 **Vitest:**
 
@@ -391,6 +498,10 @@ locus. This fixture is the cheapest catch.
   same file.
 - `rotateKeys` wrapper builds the right request body, throws a typed
   `KeyVersionStaleError` on `401`.
+- The client generates a fresh `request_id` (UUID v4) per rotation
+  attempt; retries of the same attempt reuse the same
+  `request_id`. Test by mocking the network layer to fail once,
+  observing the retry carries the same `request_id`.
 
 **No e2e in this task.** The rotation flow as a whole is exercised
 by task 4's spec.

@@ -47,7 +47,8 @@ A new endpoint `POST /v1/rotate-keys` accepts:
 
 ```jsonc
 {
-  "key_version": 2,                        // new version, must be current+1
+  "request_id":          "<UUID v4>",      // client-generated; idempotency key
+  "key_version":          2,               // new version, must be current+1
   "auth_public_key":     "<base64url>",    // Ed25519, derived from new secret
   "sharing_public_key":  "<base64url>",    // P-256, derived from new secret
   "salt":                "<base64url>",    // new 16-byte Argon2id salt
@@ -76,17 +77,27 @@ canonicalization. We use `canonicalize` (npm) on the client and
 The server flow:
 
 1. Authenticate the bearer token (existing middleware).
-2. Read current `profile.json` along with its ETag.
-3. Verify `request.key_version == profile.key_version + 1`. Reject
+2. **Acquire the per-`user_id` rotation mutex** (see *Concurrency
+   control* below). If already held by another in-flight handler,
+   block briefly with a short timeout; on timeout return
+   `503 rotation_in_progress`.
+3. Check the idempotency store: if this `request_id` has been
+   processed before, replay its recorded outcome (token + key_version
+   or error) without re-running the rotation. See *Idempotency*.
+4. Read current `profile.json`.
+5. Verify `request.key_version == profile.key_version + 1`. Reject
    `409 key_version_stale` otherwise.
-4. Verify `continuity_signature` with the current
+6. Verify `continuity_signature` with the current
    `profile.auth_public_key`. Reject `403 bad_continuity` otherwise.
-5. Build the new `profile.json` from the request fields plus the
+7. Build the new `profile.json` from the request fields plus the
    unchanged `user_id`, `handle`, `created_at`. Bump `key_version`.
-6. `PUT` it to S3 with `If-Match: <prior ETag>`. On `412`, return
-   `409 key_version_stale` — another device just rotated.
-7. Issue a new token bound to the new `key_version` (see *Token
-   binding* below). Return it in the response.
+8. Write `profile.json` (unconditional `PUT`). The mutex serializes
+   any concurrent rotation handlers for this `user_id`, so the
+   GET-VERIFY-WRITE sequence is effectively atomic. No conditional
+   write is used; see [ops.md — Object storage constraints](../ops.md#object-storage-constraints).
+9. Issue a new token bound to the new `key_version` (see *Token
+   binding* below). Record the outcome under the `request_id` in
+   the idempotency store. Release the mutex. Return the token.
 
 The device record `users/{user_id}/devices/{device_id}.json` is
 **not touched** by this flow. The rotating device keeps its existing
@@ -98,6 +109,74 @@ via the normal add-device flow on re-login.
 
 The endpoint is the only way to mutate `auth_public_key` or
 `sharing_public_key` after registration.
+
+### Concurrency control
+
+The production object storage backend does not support request
+preconditions (see
+[ops.md — Object storage constraints](../ops.md#object-storage-constraints)),
+so the GET-VERIFY-WRITE sequence on `profile.json` needs an
+out-of-band serialization primitive.
+
+For the current single-process server, that primitive is a Go
+`sync.Map<user_id, *sync.Mutex>` in the rotation handler. The map
+keeps the mutex alive only while a rotation is in flight; idle
+entries are reclaimed by a periodic sweep. Two concurrent rotation
+requests for the same `user_id` serialize on the mutex; only one
+sees `kv=N` and writes `kv=N+1`. The other sees `kv=N+1` and
+returns `409 key_version_stale`.
+
+This pattern joins the existing in-process state on the server
+(SSE hub, device-existence cache, profile-`key_version` cache,
+media-quota cache). [ADR-0001](adr-0001-sync-first-s3-mailbox.md)
+states "stateless by design," meaning S3 is the durable source of
+truth — not that the server has no in-memory state. The mutex map
+contains no durable information; on restart it's empty, which is
+correct (no rotation is in flight after a restart).
+
+**Multi-instance migration path.** If the server is later scaled
+horizontally, the rotation mutex (along with the existing in-process
+caches and the SSE hub) needs to move to shared state. A future
+ADR will pick the substrate (Redis SETNX, Postgres advisory locks,
+etc.) and migrate this work coherently. Until then, "single Go
+process" is an explicit operational assumption.
+
+**Degraded mode (shared state down).** When the system is later
+multi-instance and the shared coordination store is unavailable,
+rotation requests return `503 rotation_unavailable`. Messaging,
+device add/revoke, and the rest of the system keep working —
+rotation is the single operation that strictly needs strong
+coordination. A "sign out other devices, wait T, then rotate"
+degraded protocol was considered (see *Alternatives*) but its
+correctness delta versus `503` is marginal and its complexity is
+substantial, so the policy is hard-fail. The user is told *"can't
+change your password right now, try again in a few minutes."*
+
+### Idempotency
+
+The continuity-signed rotation request body includes a
+client-generated `request_id` UUID. The server records every
+completed rotation outcome (`token` + `key_version` for success;
+`error` + `status` for failure) under
+`users/{user_id}/rotation-records/{request_id}.json`. The record's
+TTL is bounded by a periodic cleanup (24 hours suffices — clients
+that retry after a day get a fresh `request_id` anyway).
+
+On every rotation request the handler first checks for an existing
+record under the request's `request_id`. If present, the recorded
+outcome is replayed verbatim. This dedups:
+
+- The common network-retry case (client times out, retries with
+  the same `request_id`, sees the same successful result instead
+  of a `409 key_version_stale`).
+- Genuinely-duplicated requests from buggy clients.
+
+`request_id` is part of the JCS-canonicalized payload covered by
+`continuity_signature`, so an attacker cannot forge an idempotent
+replay by reusing a captured signed body — the recorded outcome
+includes the *issued token*, and tokens are bound to the issuing
+device's `device_id` (via the HMAC), so a replayed token wouldn't
+help an attacker on a different device.
 
 ### `profile.json` schema
 
@@ -246,7 +325,7 @@ fresh sharing key. No explicit signal needed.
 
 ### Error model
 
-Two new error codes:
+Three new error codes:
 
 - `401 key_version_stale` — token or auth proof bound to a
   superseded `key_version`. Response body includes `{ "current": N }`
@@ -254,6 +333,9 @@ Two new error codes:
 - `403 bad_continuity` — `continuity_signature` does not verify
   against the current `profile.auth_public_key`. Distinct from
   `401`: this is malicious or buggy, not stale.
+- `503 rotation_unavailable` — multi-instance only, when the shared
+  coordination store is unreachable. Single-instance deployments
+  never emit this. Body: `{ "retry_after_seconds": N }`.
 
 Existing `409` semantics are reused for the `key_version` precondition
 on the rotation request itself.
@@ -291,14 +373,18 @@ on the rotation request itself.
   unchanged — entries remain opaque to the server — but the client
   decryption pass has to dispatch per-entry on `v`. Independently
   cheap; just an extra dispatch step.
-- ETag-conditional `profile.json` writes assume the S3-compatible
-  backend supports `If-Match`. MinIO does; production target
-  (Scaleway) does. Verifying this in the test matrix is a
-  prerequisite to Task B.
+- Concurrency on `profile.json` writes relies on an in-process
+  per-`user_id` mutex (see *Concurrency control* above and
+  [ops.md — Object storage constraints](../ops.md#object-storage-constraints)).
+  This pins single-instance deployment as an explicit operational
+  assumption; multi-instance migration is a future ADR.
 - Two new small dependencies are required for JCS canonicalization:
   `canonicalize` (npm, ~1 KB) on the client and
   `github.com/gowebpki/jcs` on the server. Both are narrow,
   single-purpose libraries with no transitive surface to speak of.
+- Idempotency records (`users/{uid}/rotation-records/{request_id}.json`)
+  add a tiny per-rotation storage cost (~200 bytes) with a 24h TTL.
+  Negligible.
 
 ### Neutral
 
@@ -317,6 +403,37 @@ on the rotation request itself.
   anything about the credentials.
 
 ## Alternatives considered
+
+### Conditional writes with `If-Match` (the original design)
+
+Rejected because the production object storage backend does not
+support request preconditions (see
+[ops.md — Object storage constraints](../ops.md#object-storage-constraints)).
+The in-process mutex pattern serves the same role at the cost of
+pinning single-instance operation as an explicit assumption.
+
+### "Sign out other devices, wait T, then rotate" (degraded-mode protocol)
+
+Considered for shared-state-unavailable scenarios in a future
+multi-instance deployment. The protocol closes most of the same
+race windows the mutex closes — the user revokes their other
+devices, waits `T = T_cache_TTL + T_proc_max` (~30–60 s) for any
+in-flight requests to settle, then submits the rotation with a
+server-signed `rotation_after` token.
+
+Rejected for v0.1 because:
+
+- It doesn't close the active-attacker-with-current-credentials
+  race, which the in-process mutex doesn't close either — so the
+  correctness delta versus a hard `503` is small.
+- It doubles the rotation surface (two protocols, two UX flows,
+  two test matrices, and the compose-during-shared-state-flap
+  case).
+- v0.1 is single-instance, so the question is hypothetical until
+  multi-instance lands.
+
+Pinned here so future-us can pick it up coherently if shared-state
+outages become a real concern after multi-instance scaling.
 
 ### Graceful grace-period rotation (α)
 

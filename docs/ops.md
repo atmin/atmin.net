@@ -17,6 +17,52 @@ Living document — infrastructure, deployment, and CI decisions.
 - Stateless Go container: signs presigned URLs, validates auth, routes to S3
 - Can scale to 0 in dev, always-on in prod
 
+### Operational stance: EU-resident infrastructure
+
+The running service runs on EU-resident infrastructure for
+data-sovereignty reasons. GitHub and the surrounding CI tooling
+are acknowledged exceptions; nothing on the request/data path
+crosses an EU boundary.
+
+This is a constraint, not a religion — multiple EU-resident
+S3-compatible providers exist (OVH, Hetzner, Exoscale, Wasabi EU,
+IDrive E2 EU, etc.). Scaleway is the v0.1 choice; if the choice
+ever changes, the constraints below need re-verification.
+
+### Object storage constraints
+
+Scaleway Object Storage is S3 API-compatible but **does not
+support request preconditions** — neither `If-Match` nor
+`If-None-Match` on `PutObject`. The feature has been requested
+since 2023 ([open feature request, off-roadmap as of 2024-05](https://feature-request.scaleway.com/posts/1133/support-conditional-writes-in-object-storage)).
+The recent Object Lock addition is the WORM/retention feature, not
+request preconditions; do not confuse them.
+
+This shapes two parts of the system design:
+
+- **Backup-secret rotation** ([ADR-0012](decisions/adr-0012-backup-secret-rotation.md))
+  uses an in-process per-`user_id` mutex to serialize the
+  GET-VERIFY-WRITE on `profile.json`, instead of an `If-Match`
+  ETag-conditional write.
+- **User-chosen handle claim** ([ADR-0013](decisions/adr-0013-user-chosen-handles.md))
+  uses an in-process per-handle mutex to serialize the
+  GET-then-PUT on `handles/{handle}.json`, instead of an
+  `If-None-Match: *` conditional create.
+
+Both depend on the server running as a single Go process today.
+Multi-instance deployment requires a future ADR that picks a
+shared-state substrate (Redis SETNX, Postgres advisory locks,
+etc.) and migrates these primitives along with the other
+in-process state (SSE hub, device-existence cache,
+profile-`key_version` cache, media-quota cache).
+
+If the backend later changes to one that supports preconditions
+(or if Scaleway eventually ships the feature), both ADRs can be
+revisited to drop the mutex pattern in favour of conditional
+writes — but the single-instance assumption still holds, so the
+mutexes don't *need* to come out unless multi-instance is the
+goal of the change.
+
 ### Resource tiers (for reference)
 
 | Memory | vCPU |

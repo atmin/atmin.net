@@ -46,10 +46,19 @@ See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime d
 - `device_id`: ULID
 - `msg_id`: ULID (sender-generated)
 - `session_id`: Megolm session identifier
-- `handle`: two BIP39 words joined by hyphen (e.g. `copper-falcon`).
-  Server-generated from the same 2048-word English wordlist used for backup mnemonics.
-  ~22 bits of entropy (~4M combinations); sufficient for v0.1 namespace.
-  Server retries on collision.
+- `handle`: user-chosen ASCII string matching
+  `^[a-z][a-z0-9-]{1,30}[a-z0-9]$` — 3–32 characters,
+  lowercase letters / digits / hyphens, must start with a letter
+  and end with a letter or digit, no consecutive hyphens. See
+  [ADR-0013](../decisions/adr-0013-user-chosen-handles.md).
+  Validated and reserved-list-checked at registration. Atomic
+  claim is enforced by an in-server per-handle mutex (see
+  [ops.md — Object storage constraints](../ops.md#object-storage-constraints)).
+  A "Surprise me" UI option generates a random BIP39
+  two-word candidate client-side; the user can edit before
+  submission. PWA URLs use the `/@{handle}` prefix to keep
+  user routes separate from system routes; the bare handle
+  is what the API and S3 keys store.
 
 ## Storage layout (S3 keys)
 
@@ -74,7 +83,11 @@ Key backup (Megolm session keys, encrypted with the current backup key):
 
 Handles (lookup index):
 
-- `handles/{handle}.json` — denormalized public profile (user_id, sharing key, display name, avatar)
+- `handles/{handle}.json` — denormalized public profile
+  (user_id, sharing key, salt, kdf, key_version, display name,
+  avatar) for a live handle, OR a tombstone
+  `{ "released_at": "..." }` for a handle in 30-day cooldown after
+  account deletion. See [ADR-0013](../decisions/adr-0013-user-chosen-handles.md).
 - `users/{user_id}/contacts.json` — encrypted contacts blob (client-side AES-256-GCM)
 
 Media (encrypted by client):
@@ -168,9 +181,11 @@ The credential and all derived keys can be rotated atomically via
 
 1. Derives new keys from a new password (or new BIP39 mnemonic for
    v1→v2 migration) and a freshly generated salt.
-2. Atomically replaces the public keys in `profile.json` under an
-   ETag precondition, with a continuity signature proving possession
-   of the old auth private key.
+2. Atomically replaces the public keys in `profile.json`, with a
+   continuity signature proving possession of the old auth private
+   key. Concurrency is enforced by an in-server per-`user_id` mutex
+   (see [ADR-0012](../decisions/adr-0012-backup-secret-rotation.md)
+   and [ops.md — Object storage constraints](../ops.md#object-storage-constraints)).
 3. Bumps `profile.key_version` by one.
 4. Appends a link to `keys/{uid}/key_chain.json` so historical
    key-backup blobs encrypted with the previous backup key remain
@@ -661,15 +676,22 @@ Error codes used by the server:
 | HTTP | `error` | Meaning |
 |------|---------|---------|
 | 400 | `bad_request` | Malformed input, missing fields |
+| 400 | `handle_invalid` | Requested handle violates the charset/length rules ([IDs & naming](#ids--naming)) |
+| 400 | `handle_reserved` | Requested handle is on the server reserved list |
 | 401 | `unauthorized` | Missing or invalid token |
 | 401 | `key_version_stale` | Token or auth-proof bound to a superseded `key_version`. Body: `{ "error": "key_version_stale", "current": N }` — client must wipe local state and prompt for the new credential |
 | 403 | `device_revoked` | Device file deleted (triggers client self-wipe) |
 | 403 | `forbidden` | Prefix access denied |
 | 403 | `bad_continuity` | `continuity_signature` on a `rotate-keys` request did not verify against the current `profile.auth_public_key` |
 | 404 | `not_found` | Object or handle does not exist |
-| 409 | `key_version_stale` | `rotate-keys` request's `key_version` did not equal `profile.key_version + 1`, or the conditional `profile.json` write lost the race |
+| 409 | `key_version_stale` | `rotate-keys` request's `key_version` did not equal `profile.key_version + 1` |
+| 409 | `handle_taken` | Requested handle is currently registered to another account |
+| 409 | `handle_in_cooldown` | Requested handle is in 30-day cooldown after deletion. Body: `{ "error": "handle_in_cooldown", "released_at": "...", "available_at": "..." }` |
+| 410 | `released` | `GET /v1/resolve/{handle}` for a handle in cooldown. Body: `{ "released_at": "...", "available_at": "..." }` |
 | 413 | `too_large` | Single upload exceeds per-blob size cap |
 | 413 | `quota_exceeded` | Upload would exceed per-user storage quota |
+| 503 | `registration_unavailable` | Multi-instance only: the shared coordination store hosting the handle-claim mutex is unreachable |
+| 503 | `rotation_unavailable` | Multi-instance only: the shared coordination store hosting the rotation mutex is unreachable. Body: `{ "retry_after_seconds": N }`. Single-instance deployments never emit this |
 
 ## API (HTTP)
 
@@ -709,6 +731,7 @@ Error codes used by the server:
 
 Input:
 
+- `handle` (user-chosen, must match the rules in [IDs & naming](#ids--naming))
 - `device_label`
 - `auth_public_key` (base64url Ed25519)
 - `sharing_public_key` (base64url P-256 uncompressed SEC1)
@@ -727,8 +750,30 @@ v1 registration paths (no `salt`/`kdf` in the request) are retained
 for the migration-mechanism rehearsal but are no longer exposed in
 the production UI.
 
-Server generates `user_id`, `device_id` (both ULIDs), `handle` (two BIP39 words),
-and `token`.
+Handle claim flow (see
+[ADR-0013](../decisions/adr-0013-user-chosen-handles.md) for the
+full design):
+
+1. Server validates `handle` against the charset/length rules.
+   Reject `400 handle_invalid` on format violations or
+   `400 handle_reserved` on reserved-list matches.
+2. Server acquires the per-handle in-server mutex (short timeout;
+   on timeout return `503 registration_unavailable`).
+3. Server `GET handles/{handle}.json`:
+   - `404` → handle is free.
+   - `200` with live projection → reject `409 handle_taken`.
+   - `200` with `released_at` in the future → reject
+     `409 handle_in_cooldown` (body includes `released_at`).
+   - `200` with `released_at` in the past → `DeleteObject` the
+     stale tombstone, continue.
+4. Server generates `user_id`, `device_id`, `token`.
+5. Server writes `handles/{handle}.json` (unconditional; the mutex
+   makes the GET+PUT effectively atomic for this handle).
+6. Server writes `users/{user_id}/profile.json` and
+   `users/{user_id}/devices/{device_id}.json`. If either fails,
+   best-effort `DeleteObject` the handle projection to release
+   the handle.
+7. Server releases the mutex.
 
 Output:
 
@@ -824,6 +869,7 @@ Input:
 
 ```jsonc
 {
+  "request_id":           "<UUID v4>",               // idempotency key
   "key_version":          2,                         // = current + 1
   "auth_public_key":      "<base64url>",
   "sharing_public_key":   "<base64url>",
@@ -836,27 +882,40 @@ Input:
 The `continuity_signature` is an Ed25519 signature, produced by the
 **old** auth private key, over the JCS-canonicalized form of the
 request body excluding the `continuity_signature` field itself.
+`request_id` is part of the canonicalized payload, so an attacker
+cannot replay an idempotency record by reusing a captured signed
+body without also reusing the bound token.
 
 Server flow:
 
 1. Authenticate the bearer token (existing middleware, including the
    `key_version` check).
-2. Read current `profile.json` and capture its ETag.
-3. Reject `409 key_version_stale` if `request.key_version !=
+2. **Acquire the in-server per-`user_id` rotation mutex** (see
+   [ADR-0012 — Concurrency control](../decisions/adr-0012-backup-secret-rotation.md)).
+   On contention with a short timeout (~500 ms), return
+   `503 rotation_unavailable`.
+3. Check `users/{user_id}/rotation-records/{request_id}.json`. If
+   present, replay the recorded outcome (token + key_version, or
+   the recorded error) without re-running the rotation.
+4. Read current `profile.json`.
+5. Reject `409 key_version_stale` if `request.key_version !=
    profile.key_version + 1` (or, for a v1 account, `!= 2`).
-4. Verify `continuity_signature` against the current
+6. Verify `continuity_signature` against the current
    `profile.auth_public_key`. On failure, return `403 bad_continuity`.
-5. Build the new `profile.json` from the request fields plus the
+7. Build the new `profile.json` from the request fields plus the
    unchanged `user_id`, `handle`, and `created_at`; preserve any
    `display_name` / `avatar_url` / `last_active`. Set the new
    `key_version`.
-6. `PUT` the new `profile.json` to S3 with `If-Match: <prior ETag>`.
-   On a `412` from S3, return `409 key_version_stale` — another
-   device just rotated.
-7. Also write `handles/{handle}.json` (the resolve projection) with
+8. `PUT` the new `profile.json` (unconditional). The mutex held
+   since step 2 serializes the GET-VERIFY-WRITE sequence for this
+   `user_id` — no conditional write is used; see
+   [ops.md — Object storage constraints](../ops.md#object-storage-constraints).
+9. Also write `handles/{handle}.json` (the resolve projection) with
    the new public fields.
-8. Issue a new v2 bearer token to the rotating device, bound to the
-   new `key_version`.
+10. Record the outcome under `users/{user_id}/rotation-records/{request_id}.json`
+    (TTL 24h, swept by the cleanup routine).
+11. Issue a new v2 bearer token to the rotating device, bound to the
+    new `key_version`. Release the mutex.
 
 The device record `users/{user_id}/devices/{device_id}.json` is **not
 touched**. The rotating device keeps its `device_id` and existing
@@ -882,7 +941,19 @@ Output:
 
 `GET /v1/resolve/{handle}`
 
-Output:
+Three response states for v2 (custom-handle) accounts:
+
+| Status | Meaning | Body |
+|---|---|---|
+| 200 | Handle is live | Full projection (see below) |
+| 404 | Handle was never registered (or charset-invalid) | `{ "error": "not_found" }` |
+| 410 | Handle is in 30-day cooldown after account deletion | `{ "released_at": "...", "available_at": "..." }` |
+
+The 410 case is what makes the client's registration UI able to
+distinguish "this handle is unavailable but coming back" from
+"this handle was never used."
+
+200 body (live handle):
 
 - `user_id`
 - `sharing_public_key`
@@ -895,6 +966,10 @@ Output:
 `salt`, `kdf`, and `key_version` are public per-user values: they are
 not secrets, and senders ignore them. Only the account holder's
 login flow consumes them.
+
+The registration UI uses this endpoint debounced (~300 ms) for
+real-time availability checking — no separate availability endpoint
+exists.
 
 ### Send
 
@@ -932,9 +1007,27 @@ Server reads `profile.json`, merges fields, writes `profile.json` then
 
 `DELETE /v1/profile`
 
-Deletes all user data: `users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`,
-`media/{uid}/`, and `handles/{handle}.json`. Token is implicitly invalidated.
-See [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md).
+Deletes all per-user data: `users/{uid}/`, `inbox/{uid}/`,
+`keys/{uid}/`, `media/{uid}/`. Token is implicitly invalidated.
+
+The handle file `handles/{handle}.json` is **not deleted**. Instead,
+the server rewrites it as a tombstone carrying only a `released_at`
+timestamp:
+
+```jsonc
+{ "released_at": "2026-06-25T10:30:00Z" }
+```
+
+`GET /v1/resolve/{handle}` returns `410 Gone` until
+`released_at + 30 days`. After that the cleanup routine sweeps the
+tombstone, freeing the handle for re-registration. This prevents
+immediate handle takeover (impersonation against the prior owner's
+contacts) while keeping the namespace from growing indefinitely.
+
+The cooldown is symmetric — the prior owner does not get
+preferential re-claim during the 30 days. The server does not
+remember who owned a handle after deletion. See
+[ADR-0013](../decisions/adr-0013-user-chosen-handles.md).
 
 ### Saved Messages
 
