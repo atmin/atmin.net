@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
+import { useChatScroll } from '@/hooks/useChatScroll';
 import { useMedia } from '@/hooks/useMedia';
 import type { Session } from '@/lib/auth';
 import type { MediaFile } from '@/lib/media';
@@ -43,6 +44,8 @@ export default function ChatRoute({
         session.token,
     );
 
+    const scroll = useChatScroll(messages, handle ?? '');
+
     return (
         <ChatView
             chatTitle={chatTitle}
@@ -57,6 +60,9 @@ export default function ChatRoute({
             onMediaRetry={onMediaRetry}
             onSend={sendMessage}
             onSendMedia={sendMedia}
+            scrollContainerRef={scroll.setScrollEl}
+            showJumpToBottom={scroll.showJumpToBottom}
+            onJumpToBottom={scroll.jumpToBottom}
         />
     );
 }

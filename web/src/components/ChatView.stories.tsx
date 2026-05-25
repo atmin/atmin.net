@@ -96,6 +96,32 @@ export const Sending: Story = {
     },
 };
 
+export const WithScrolledUpIndicator: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'Older message',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: false,
+            },
+            {
+                id: '2',
+                text: 'Newer message — user has scrolled up so a jump indicator is visible',
+                timestamp: new Date('2024-01-15T10:31:00Z'),
+                sent: false,
+            },
+        ],
+        loading: false,
+        sending: false,
+        showJumpToBottom: true,
+        onJumpToBottom: fn(),
+    },
+};
+
 export const Offline: Story = {
     args: {
         chatTitle: 'copper-falcon',

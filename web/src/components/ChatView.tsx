@@ -3,6 +3,7 @@ import type { Message } from '@/hooks/useChat';
 import type { MediaState } from '@/hooks/useMedia';
 import BackButton from './BackButton';
 import ChatMessage from './ChatMessage';
+import { JumpToBottomButton } from './JumpToBottomButton';
 import Layout from './Layout';
 
 interface Props {
@@ -18,6 +19,9 @@ interface Props {
     onMediaRetry?: (url: string) => void;
     onSend: (text: string) => void;
     onSendMedia?: (file: File) => void;
+    scrollContainerRef?: (el: HTMLDivElement | null) => void;
+    showJumpToBottom?: boolean;
+    onJumpToBottom?: () => void;
 }
 
 export default function ChatView({
@@ -33,6 +37,9 @@ export default function ChatView({
     onMediaRetry = () => {},
     onSend,
     onSendMedia,
+    scrollContainerRef,
+    showJumpToBottom = false,
+    onJumpToBottom,
 }: Props) {
     const [inputValue, setInputValue] = useState('');
 
@@ -56,45 +63,55 @@ export default function ChatView({
     return (
         <Layout fullHeight topBar={topBar}>
             {/* Messages area */}
-            <div className="flex-1 overflow-y-auto">
-                <div className="mx-auto max-w-2xl px-4 pb-4 pt-14">
-                    {loading ? (
-                        <div className="flex h-96 items-center justify-center text-muted-foreground">
-                            <div className="text-center">
-                                <p>Loading messages...</p>
+            <div className="relative flex flex-1 flex-col overflow-hidden">
+                <div
+                    ref={scrollContainerRef}
+                    className="flex-1 overflow-y-auto"
+                >
+                    <div className="mx-auto max-w-2xl px-4 pb-4 pt-14">
+                        {loading ? (
+                            <div className="flex h-96 items-center justify-center text-muted-foreground">
+                                <div className="text-center">
+                                    <p>Loading messages...</p>
+                                </div>
                             </div>
-                        </div>
-                    ) : messages.length === 0 ? (
-                        <div className="flex h-96 items-center justify-center rounded border border-dashed border-border text-center text-muted-foreground">
-                            <div>
-                                <p className="mb-2">No messages yet</p>
-                                <p className="text-xs">
-                                    {isSaved
-                                        ? 'Send yourself notes and reminders'
-                                        : `Start a conversation with ${handle}`}
-                                </p>
+                        ) : messages.length === 0 ? (
+                            <div className="flex h-96 items-center justify-center rounded border border-dashed border-border text-center text-muted-foreground">
+                                <div>
+                                    <p className="mb-2">No messages yet</p>
+                                    <p className="text-xs">
+                                        {isSaved
+                                            ? 'Send yourself notes and reminders'
+                                            : `Start a conversation with ${handle}`}
+                                    </p>
+                                </div>
                             </div>
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
-                            {messages.map((msg) => (
-                                <ChatMessage
-                                    key={msg.id}
-                                    text={msg.text}
-                                    timestamp={msg.timestamp}
-                                    sent={msg.sent}
-                                    media={msg.media}
-                                    mediaState={
-                                        msg.media
-                                            ? mediaStates[msg.media.url]
-                                            : undefined
-                                    }
-                                    onMediaRetry={onMediaRetry}
-                                />
-                            ))}
-                        </div>
-                    )}
+                        ) : (
+                            <div className="space-y-3">
+                                {messages.map((msg) => (
+                                    <ChatMessage
+                                        key={msg.id}
+                                        text={msg.text}
+                                        timestamp={msg.timestamp}
+                                        sent={msg.sent}
+                                        media={msg.media}
+                                        mediaState={
+                                            msg.media
+                                                ? mediaStates[msg.media.url]
+                                                : undefined
+                                        }
+                                        onMediaRetry={onMediaRetry}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
                 </div>
+                {showJumpToBottom && (
+                    <JumpToBottomButton
+                        onClick={onJumpToBottom ?? (() => {})}
+                    />
+                )}
             </div>
 
             {/* Message input */}

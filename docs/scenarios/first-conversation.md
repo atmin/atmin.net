@@ -299,3 +299,8 @@ keys/bob01/live/S1             ← Bob's own session key
 - Key shares arrive before messages (ULID ordering).
 - Self-copies appear in sender's inbox.
 - Key backups are written for both own and received session keys.
+- Opening a chat lands at the newest message (no manual scroll required),
+  and a chat that already fits in the viewport never surfaces the
+  "jump to latest" indicator. A long chat (≥20 messages) re-opened from
+  the chats list still opens scrolled to the bottom — the oldest message
+  must be out of view.

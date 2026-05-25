@@ -1,8 +1,9 @@
 # Virtualize message list with @tanstack/react-virtual
 
 > **Status: parked.** Pick this up only when there is evidence of real perf
-> degradation (jank on a real device, not a synthetic benchmark) **and**
-> after [scroll-to-bottom](scroll-to-bottom.md) has landed. See
+> degradation (jank on a real device, not a synthetic benchmark). The
+> scroll-to-bottom prerequisite has already landed in
+> [useChatScroll.ts](../web/src/hooks/useChatScroll.ts). See
 > [tasks/README.md](README.md) for priority.
 
 ## When to pick this up
@@ -24,11 +25,11 @@ the virtualization complexity (see "non-trivial sub-problems" below).
 
 ## Prerequisites
 
-- **[scroll-to-bottom](scroll-to-bottom.md) must ship first.** Naïve
-  virtualization makes the open-at-oldest bug worse, because the
-  translated absolute-positioned inner container doesn't even have a
-  useful default `scrollTop`. The scroll-anchor hook is the integration
-  point that virtualization plugs into.
+- The scroll-anchor hook ([useChatScroll.ts](../web/src/hooks/useChatScroll.ts))
+  has already landed. It is the integration point that virtualization
+  plugs into — naïve virtualization without it makes the open-at-oldest
+  bug worse, because the translated absolute-positioned inner container
+  doesn't even have a useful default `scrollTop`.
 
 ## Current state
 
@@ -37,9 +38,9 @@ the virtualization complexity (see "non-trivial sub-problems" below).
   message in the DOM.
 - `@tanstack/react-virtual` is not installed. Verified absent from
   [web/package.json](../web/package.json).
-- Once [scroll-to-bottom](scroll-to-bottom.md) lands, `ChatView` will
-  receive a callback ref + indicator props from `useChatScroll`. This
-  task replaces the inner render branch but keeps that contract.
+- `ChatView` already receives a callback ref + indicator props from
+  [useChatScroll](../web/src/hooks/useChatScroll.ts). This task replaces
+  the inner render branch but keeps that contract.
 
 ## Non-trivial sub-problems
 
@@ -169,9 +170,9 @@ Accept an optional `virtualizer` argument; when provided, replace direct
 public return shape (`setScrollEl`, `showJumpToBottom`, `jumpToBottom`)
 unchanged so the component contract is stable.
 
-Re-run the existing `useChatScroll.test.ts` cases (from
-[scroll-to-bottom.md](scroll-to-bottom.md)) plus new cases for the
-virtualized branch.
+Re-run the existing
+[useChatScroll.test.ts](../web/src/hooks/useChatScroll.test.ts) cases
+plus new cases for the virtualized branch.
 
 ### 4. `web/src/components/ChatView.tsx` — virtualized rendering
 
