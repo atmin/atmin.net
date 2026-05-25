@@ -35,14 +35,27 @@ the design.
 
 6. **[custom-handles](custom-handles.md)** — User-typed handle at registration with charset/length validation, reserved-list check, atomic claim via per-handle in-server mutex (same backend constraint as task 2 — see [ops.md](../docs/ops.md#object-storage-constraints)), 30-day cooldown after account deletion, `/@{handle}` URL prefix for PWA routes, "Surprise me" client-side BIP39 button. Adds a small cleanup-routine sweep to GC expired tombstones — that part depends on the cleanup-routine task below.
 
+## Message amendments (edit + delete)
+
+Adds the two most-requested messenger affordances (edit and
+delete) via a single primitive: an "amendment envelope" referring
+to a prior `msg_id`. Soft delete by design (inbox archives are
+append-only; we can't modify what recipients have already
+synced), hard delete for the underlying media blob since it lives
+in its own S3 object. See
+[ADR-0014](../docs/decisions/adr-0014-message-amendments.md) for
+the design.
+
+7. **[message-amendments](message-amendments.md)** — New inner-plaintext `type: 'amendment'` carrying `target_msg_id` + `action: edit|delete` + optional `body`. Two-pass materializer applies the chain at chat-view assembly time. "(edited)" tag with timestamp delta; "[deleted]" placeholder preserves reply context. Media delete also fires `DELETE /v1/store/object`. No protocol changes server-side beyond reusing the existing inbox + media-delete endpoints. Independent of all other open tasks.
+
 ## Other active tasks
 
-7. **[server-cleanup-routine](server-cleanup-routine.md)** — Automated S3 cleanup for inactive and abandoned accounts plus expired handle tombstones (new sweep target added by custom-handles). The `last_active` tracking prerequisite is already in place; this is the production-health item most at risk of being deferred indefinitely.
+8. **[server-cleanup-routine](server-cleanup-routine.md)** — Automated S3 cleanup for inactive and abandoned accounts plus expired handle tombstones (new sweep target added by custom-handles). The `last_active` tracking prerequisite is already in place; this is the production-health item most at risk of being deferred indefinitely.
 
-8. **[draft-persist](draft-persist.md)** — Persist unsent message drafts to localStorage across reloads. Small and self-contained; also unblocks the SW update path in `SWUpdateToast`, which suppresses auto-reload while a draft exists but has nothing to check yet.
+9. **[draft-persist](draft-persist.md)** — Persist unsent message drafts to localStorage across reloads. Small and self-contained; also unblocks the SW update path in `SWUpdateToast`, which suppresses auto-reload while a draft exists but has nothing to check yet.
 
-9. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform.
+10. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform.
 
-10. **[storage-indicator](storage-indicator.md)** — `GET /v1/store/usage` endpoint backed by the existing quota cache, surfaced as a "X MB / 1 GB" line in settings with a warning at 90%. Straightforward now that media upload has landed and the quota infrastructure is in place.
+11. **[storage-indicator](storage-indicator.md)** — `GET /v1/store/usage` endpoint backed by the existing quota cache, surfaced as a "X MB / 1 GB" line in settings with a warning at 90%. Straightforward now that media upload has landed and the quota infrastructure is in place.
 
-11. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+12. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.

@@ -332,6 +332,66 @@ Media reference (inside Megolm-encrypted plaintext):
 
 See [Media](#media) for size limits, rendering rules, lifecycle, and failure handling.
 
+Amendment to a prior message (inside Megolm-encrypted plaintext):
+
+```json
+{
+  "type": "amendment",
+  "target_msg_id": "01HWQA...",
+  "action": "edit",
+  "body": "Hey Alice, fixed the typo"
+}
+```
+
+```json
+{
+  "type": "amendment",
+  "target_msg_id": "01HWQA...",
+  "action": "delete"
+}
+```
+
+An amendment is a regular `megolm.message` envelope whose
+decrypted plaintext refers to a prior message by `target_msg_id`.
+The amendment is encrypted with the sender's *current* Megolm
+session (not the original's session) and addressed to the same
+recipients as the original — including a self-copy for the
+sender's other devices.
+
+`target_msg_id` lives inside the encrypted plaintext, so the
+server never learns which message is being amended.
+
+`action`:
+
+- `"edit"` — `body` is the replacement text. For a media
+  message with a caption, only the caption changes; the media
+  reference is unchanged. For a pure-media message (no
+  caption), `action: "edit"` is malformed and ignored by the
+  recipient's materializer.
+- `"delete"` — recipient renders the original as a
+  `[deleted]` placeholder. The sender additionally issues
+  `DELETE /v1/store/object` on the underlying
+  `media/{uid}/{ulid}` blob if the original was a media
+  message; the recipient drops any local IDB cache of the
+  decrypted blob.
+
+Authorization is enforced by the recipient at materialization
+time: an amendment is applied only if its `from_user` matches
+the original's `from_user`. Megolm session integrity provides
+the cryptographic proof; no additional signature is needed.
+
+There is no edit/delete time window. Amendments work for the
+life of the conversation. The UI tags edits with the
+amendment's `sent_at` so long-after edits read visually loud.
+
+Clients that encounter an amendment with an unrecognized
+`action` value drop the envelope silently from materialization
+(forward compatibility for future amendment kinds).
+
+See [ADR-0014](../decisions/adr-0014-message-amendments.md) for
+the full design, including the two-pass materializer and the
+edit-chain storage model.
+
 **`megolm.key_share`** — ECIES-encrypted Megolm session key:
 
 ```json
@@ -1117,6 +1177,34 @@ Server behavior:
 4. If a message can't be decrypted (unknown session key from a sibling device),
    sync key backup (`store/list` on `keys/{user_id}/`) for new keys, retry.
 
+### Materialization (chat-view assembly)
+
+After sync writes decrypted envelopes to IDB, the chat-view
+hook materializes the messages for display in a **two-pass walk**:
+
+1. **First pass — partition.** Iterate the conversation's
+   envelopes. Separate into originals (inner `type: "text"` or
+   `"media"`) and amendments (inner `type: "amendment"`).
+   Collect amendments into `Map<target_msg_id, Amendment[]>`,
+   ordered by `msg_id` (chronological via ULID).
+2. **Second pass — apply.** Walk the originals. For each, look
+   up its amendment list and apply in order:
+   - Verify each amendment's `from_user` equals the original's
+     `from_user`. Mismatch → drop the amendment, log.
+   - `action: "edit"` → replace the materialized body; tag with
+     `edited_at` from the amendment.
+   - `action: "delete"` → mark the materialized message as
+     deleted; drop body and media references. Terminal — no
+     further amendments are processed for this `target_msg_id`.
+   - Unknown `action` → drop the amendment silently.
+3. **Orphans.** Amendments whose `target_msg_id` is not yet in
+   IDB are queued (kept in IDB with a "pending" flag) and
+   re-attempted on each subsequent materialization. They land
+   naturally as the original arrives via live sync, archive
+   walk-back, or key-backup-driven decryption.
+
+See [ADR-0014](../decisions/adr-0014-message-amendments.md).
+
 Realtime hint:
 
 - SSE connection (`GET /v1/events`) receives `new_message` events; client then syncs.
@@ -1195,3 +1283,26 @@ Realtime hint:
       before any network request.
     - Download variant: a small binary with no image magic renders as a
       download link, not an `<img>`.
+- Amendments (edit/delete):
+    - Alice sends "Hi Bob"; Bob sees it via SSE.
+    - Alice edits to "Hello Bob". Bob's view updates to "Hello Bob"
+      with an `(edited)` tag; the original "Hi Bob" is not visible
+      in the chat view (chain stored, not displayed in v0.1).
+    - Alice edits again to "Hey Bob". Bob sees "Hey Bob" with the
+      `(edited)` tag carrying the latest amendment's `sent_at`.
+    - Alice deletes the message. Bob's view shows `[deleted]` at
+      the original position with the original timestamp. Further
+      amendments after a delete have no visible effect.
+    - Out-of-order: Bob is offline, Alice sends a message and
+      immediately edits it. Bob comes online; Bob sees the edited
+      body, no flicker of the original.
+    - Self-copy: Alice's other device sees the same edit/delete
+      state (amendment lands in her inbox too).
+    - Media delete: Alice sends a photo, then deletes it. Bob's
+      view shows `[deleted]`; a fresh browser context fetching
+      `media/{alice}/{ulid}` gets 404; Bob's in-flight local
+      blob cache is dropped.
+    - Authorization: a synthetic amendment with `from_user`
+      different from the original's sender is dropped by the
+      materializer (test-only — no legitimate client path
+      produces this).
