@@ -92,14 +92,24 @@ var reservedHandles map[string]bool
 
 func init() {
     reservedHandles = map[string]bool{}
-    for _, line := range strings.Split(strings.TrimSpace(reservedRaw), "\n") {
-        h := strings.ToLower(strings.TrimSpace(line))
-        if h != "" {
-            reservedHandles[h] = true
+    for _, line := range strings.Split(reservedRaw, "\n") {
+        // Format rules (test-pinned):
+        //  - trim whitespace
+        //  - skip empty lines
+        //  - skip lines starting with `#` (comments)
+        //  - lowercase (any uppercase is normalised, not rejected)
+        line = strings.TrimSpace(line)
+        if line == "" || strings.HasPrefix(line, "#") {
+            continue
         }
+        reservedHandles[strings.ToLower(line)] = true
     }
 }
 ```
+
+Format rules above are pinned by the *Reserved-handles test*
+in the verify section so an operator-edited file behaves
+predictably.
 
 `RESERVED_HANDLES_PATH` env var, read at server start, replaces
 the embedded list when set (the embedded list is the fallback /
@@ -198,11 +208,13 @@ use a per-call extras helper analogous to the `current` field on
 
 The 10-retry random-generator loop ([handlers.go:42-54](../server/handlers.go#L42))
 is **deleted**. The server no longer chooses handles. The legacy
-`generateHandle` function survives in `server/handle.go` because
-the **client** uses it via a separate client-side BIP39 generator
-(see step 8 — "Surprise me"), and `server/handle.go` is also where
-the new validation logic lives. If the client-side generator
-proves sufficient, `generateHandle` can be deleted in a follow-up.
+`generateHandle` function and the embedded `bip39_english.txt`
+wordlist are also deleted from `server/`: the client now owns
+random handle generation (step 8), and `server/handle.go` is
+repurposed to host validation + the reserved-list loader. Go
+won't lint a kept-but-unused function as dead code, so leaving
+it as "we might need it later" risks rot — pull it out now and
+restore from git history if a server-side need ever appears.
 
 ### 6. Resolve handler rewrite
 
@@ -285,6 +297,24 @@ mnemonic login autodetect).
   / `409 handle_in_cooldown` / `503 registration_unavailable` to
   user-facing messages.
 
+### 9a. Login form: handle normalization
+
+[web/src/components/LoginForm.tsx](../web/src/components/LoginForm.tsx)
+and [web/src/hooks/useLogin.ts](../web/src/hooks/useLogin.ts):
+
+Handles are lowercase ASCII. A user typing `Alice-Test` (e.g.
+because a friend wrote the handle as a name) submits to a
+server that returns `404 not_found` from `resolve` — which
+surfaces as "no account with that handle," misleading them into
+thinking they typo'd.
+
+Normalize at the form layer: `value.trim().toLowerCase()` before
+calling `resolve`. The visible input value is also lowercased
+on `onChange` so the user sees what's actually being submitted.
+
+Add inline hint text under the field: *"handles are lowercase."*
+Cheap UX clarification that costs nothing.
+
 ### 10. URL routing prefix
 
 [web/src/routes/app.tsx](../web/src/routes/app.tsx):
@@ -324,8 +354,44 @@ export type ResolveResult =
 ```
 
 The wrapper dispatches on HTTP status (200 / 404 / 410) and returns
-the discriminated union; callers (`useRegister`, `useLogin`,
-contact resolution) switch on `status`.
+the discriminated union; callers switch on `status`.
+
+### 11a. Update all existing `resolve()` call sites
+
+The return-type change is **breaking**. Every existing call site
+needs an update plus a regression test. Today's call sites:
+
+- [useChat.ts:128](../web/src/hooks/useChat.ts#L128) — chat-open
+  path resolves a handle to find the recipient's `user_id` and
+  `sharing_public_key`. Today catches `TypeError` for offline
+  fallback to IDB-cached contacts. New behaviour:
+  - `status: 'live'` → existing happy path (set `convId`).
+  - `status: 'not_found'` → currently surfaces a console error;
+    keep that. The IDB-cached-contact offline-fallback path stays
+    triggered by `TypeError` from the underlying fetch, not by
+    the resolved-but-`not_found` case.
+  - `status: 'released'` → log + treat as `not_found` for the
+    chat-open path (we can't chat with a deleted account); UI
+    could surface "this account was deleted" but that's a
+    polish follow-up.
+- [useLogin.ts:28](../web/src/hooks/useLogin.ts#L28) — login flow
+  resolves the user-typed handle to get the `user_id` for the
+  add-device call.
+  - `status: 'live'` → existing happy path.
+  - `status: 'not_found'` → surface "no account with that
+    handle" (clearer than the current generic auth error).
+  - `status: 'released'` → surface "that account was deleted
+    on YYYY-MM-DD"; do not proceed with login.
+- [useChatSend.ts:36](../web/src/hooks/useChatSend.ts#L36) —
+  send flow resolves the recipient to get the sharing pubkey.
+  - `status: 'live'` → existing happy path.
+  - `status: 'not_found'` → throw `Recipient unknown`; the
+    send-attempt error path already exists.
+  - `status: 'released'` → throw `Recipient deleted`; same
+    error path.
+
+Each update lands with a Vitest regression covering the three
+status branches at that call site (see *Verify > Vitest*).
 
 ### 12. Cleanup routine extension
 
@@ -343,6 +409,23 @@ Both passes are append-only / idempotent; safe to re-run.
 
 This step requires the server-cleanup-routine task; add a
 dependency note in [tasks/README.md](README.md).
+
+**Interaction with the registration flow.** The cleanup routine
+and the registration flow run independently and don't share the
+handle-claim mutex. The two safely interleave because:
+
+- Cleanup only deletes tombstones whose `released_at + 30d` is
+  in the past — i.e. handles the registration flow already
+  considers free.
+- Registration acquires the per-handle mutex before its
+  `GET handles/{handle}.json`. If the cleanup routine deletes
+  the stale tombstone between the GET (saw tombstone) and the
+  registration's own DeleteObject (no-op now), the unconditional
+  PutObject still succeeds, and the GET-side branch ran the same
+  logic the cleanup did. Race-safe by construction.
+
+No coordination is required between the two; document this rather
+than add cross-feature locking.
 
 ## Out of scope
 
@@ -391,6 +474,29 @@ dependency note in [tasks/README.md](README.md).
 - **Different handles do not serialize**: fire concurrent
   registrations for *different* handles; both succeed in parallel
   (regression guard for per-handle, not global, mutex).
+- **Crash recovery (handle-claimed, profile write fails)**: inject
+  a `MemStore` failure on the `profile.json` write step. Assert:
+  the register handler returns the underlying error (5xx),
+  `handles/{handle}.json` is gone (server best-effort deleted it),
+  and a subsequent registration of the same handle succeeds. The
+  user_id generated in the failed attempt is abandoned (it never
+  reached the client). Validates the orphan-cleanup branch on
+  the happy-failure path.
+- **Crash recovery (orphan persists)**: inject failures on *both*
+  the profile write AND the best-effort delete. Assert the
+  handle projection survives pointing at a non-existent
+  `user_id`; `GET /v1/resolve/{handle}` returns 200 with the
+  live shape but the recipient's `user_id` resolves to a missing
+  profile downstream. Documents the orphan state the cleanup
+  routine is responsible for sweeping (see task 12 cross-ref).
+- **Legacy handle compatibility**: load the BIP39 wordlist
+  (already embedded for the credential-overhaul work), generate
+  N=1000 random `word1-word2` pairs, assert every one passes
+  `validateHandle` and is not in the reserved list. Regression
+  guard: confirms the new charset rules don't accidentally
+  invalidate any existing auto-generated handle from the
+  pre-launch period, in case a future BIP39 wordlist tweak
+  introduces a violating word.
 - Authorization: the register endpoint is unauthenticated; no auth
   test needed beyond the PoW+Turnstile path covered by ADR-0007's
   task.
@@ -427,6 +533,12 @@ dependency note in [tasks/README.md](README.md).
 - Embedded list loads at init with the expected count.
 - `RESERVED_HANDLES_PATH=/tmp/custom.txt` overrides the embedded
   list.
+- **File format**: a test fixture with blank lines, leading /
+  trailing whitespace per line, `#`-prefixed comments, and
+  uppercase entries loads into the reserved set with the
+  expected normalised contents (lowercase, no blanks, no
+  comments). Pins the parser behaviour so an operator-edited
+  file is predictable.
 
 **Vitest:**
 
@@ -436,11 +548,50 @@ dependency note in [tasks/README.md](README.md).
   200 / 404 / 410.
 - `useRegister` posts the handle and surfaces the right error code
   for each 4xx path.
+- **`resolve()` call-site regressions** — three small Vitest
+  files, one per consumer (see *Change 11a*):
+  - `useChat.test.ts` (extend): the chat-open path handles
+    `status: 'live'` (existing happy path), `status: 'not_found'`
+    (no convId set, error logged), and `status: 'released'`
+    (treated as not_found for chat-open purposes). The
+    `TypeError`-on-fetch path still falls through to the
+    IDB-cached contact lookup.
+  - `useLogin.test.ts` (extend): `status: 'not_found'` surfaces
+    "no account with that handle"; `status: 'released'`
+    surfaces "that account was deleted." Login does not
+    proceed in either case.
+  - `useChatSend.test.ts` (extend): `not_found` and `released`
+    both throw and surface a send-failure error.
+- **Login handle normalization** (`useLogin.test.ts`):
+  `'Alice-Test'` and `'  alice-test  '` both normalise to
+  `'alice-test'` before being passed to `resolve`. The form
+  input value is lowercased on `onChange` (assert via
+  controlled-input snapshot).
+- **RegisterForm availability debounce**: mock `resolve`,
+  type rapidly into the handle field (8 char changes within
+  100 ms each), advance fake timers, assert `resolve` was
+  called exactly once with the final value. Confirms the
+  300 ms debounce window is respected.
+- **RegisterForm gating**: the Register button's
+  `disabled` state is `true` for: empty handle, invalid
+  charset, `409 handle_taken`, `409 handle_in_cooldown`,
+  pending availability check. The button is `false`
+  (enabled) only when the handle is valid + available AND
+  the password fields are valid + the acknowledgement
+  checkbox is checked. Table-driven test on the form-state
+  hook.
 
 **Storybook:**
 
 - `RegisterForm` with handle field: empty, valid, invalid charset,
   taken, in-cooldown, available, "Surprise me" filled.
+- `RegisterForm > Gating`: dedicated story exercising the
+  Register-button disabled states (empty handle, invalid handle,
+  taken, pending check, all-valid). Useful both as documentation
+  and as a regression guard for the gating logic.
+- `LoginForm` with the new "handles are lowercase" hint line and
+  a sample uppercase input demonstrating the on-the-fly
+  lowercasing.
 
 **Playwright e2e (`web/e2e/custom-handles.spec.ts`):**
 
@@ -458,6 +609,22 @@ dependency note in [tasks/README.md](README.md).
    "✗ reserved."
 7. Try registration with invalid handles (`Alice`, `al ice`,
    `--bad`, `a`) → form shows charset error.
+8. **`/saved` regression**: after registering, navigate to
+   `/saved`. Saved Messages view renders (not 404 or the chat
+   route capturing the path). Regression guard for the
+   `path="/@:handle"` change.
+9. **`/@me` reserved-handle navigation**: directly load
+   `app.atmin.net/@me` while logged in as Alice. The route
+   resolves to a "user not found" empty state (since `me` is
+   reserved and unregistered, `resolve` returns 404). Asserts
+   the reserved-list semantics propagate sanely to the PWA
+   routing layer.
+10. **Login handle normalization**: logged-out browser. Type
+    `ALICE-TEST` (uppercase) into the login handle field. The
+    input value lowercases in real time (assert the DOM value).
+    Submit; login proceeds with handle `alice-test`. Without
+    normalization the user would have seen a misleading
+    "account not found" error.
 
 **Manual:**
 
