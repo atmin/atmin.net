@@ -109,6 +109,30 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 | `SCW_CONTAINER_ID` | Serverless Container ID (production) |
 | `SCW_STAGING_CONTAINER_ID` | Serverless Container ID (staging) |
 
+### Server runtime env vars
+
+Set on the Scaleway Serverless Container (separately for
+staging and production):
+
+| Variable | Description |
+|----------|-------------|
+| `LISTEN_ADDR` | optional, defaults to `:8080` |
+| `SERVER_SECRET` | HMAC secret for token signing |
+| `S3_ENDPOINT` | S3-compatible endpoint URL |
+| `S3_PUBLIC_ENDPOINT` | optional override for presigned-URL host |
+| `S3_BUCKET` | bucket name |
+| `S3_REGION` | region (default `auto`) |
+| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | bucket credentials |
+| `VAPID_PUBLIC_KEY` | Web Push public key (base64url-encoded). See [ADR-0015](decisions/adr-0015-web-push.md). |
+| `VAPID_PRIVATE_KEY` | Web Push private key (base64url-encoded) |
+| `VAPID_SUBJECT` | RFC 8292 contact, e.g. `mailto:admin@atmin.net` |
+
+Generate the VAPID keypair once per environment with
+`webpush-go`'s `vapid.GenerateVAPIDKeys()` helper or any
+RFC 8292-compatible tool. Staging and production should have
+distinct pairs so a leaked staging key doesn't enable spoofed
+production push.
+
 ## Deployment
 
 ### One-time Scaleway setup
