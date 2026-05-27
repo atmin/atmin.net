@@ -4,12 +4,14 @@ import { describe, expect, it } from 'vitest';
 import {
     backupDecrypt,
     backupEncrypt,
+    canonicalizeForSign,
     deriveKeys,
     eciesDecrypt,
     eciesEncrypt,
     generateBackupSecret,
     importSharingPublicKey,
     signAuthProof,
+    signAuthProofV2,
     verifyAuthProof,
 } from './crypto.js';
 
@@ -119,6 +121,82 @@ describe('Web Crypto', () => {
                 keys2.auth.publicKey,
                 payload,
                 sig,
+            );
+            expect(valid).toBe(false);
+        });
+    });
+
+    describe('JCS canonicalization (RFC 8785)', () => {
+        it('sorts object keys lexicographically with no whitespace', () => {
+            const bytes = canonicalizeForSign({ b: 1, a: 2 });
+            expect(new TextDecoder().decode(bytes)).toBe('{"a":2,"b":1}');
+        });
+
+        it('sorts nested keys but preserves array order', () => {
+            const bytes = canonicalizeForSign({
+                z: [3, 1, 2],
+                a: { d: 4, c: 5 },
+            });
+            expect(new TextDecoder().decode(bytes)).toBe(
+                '{"a":{"c":5,"d":4},"z":[3,1,2]}',
+            );
+        });
+
+        it('orders the auth-proof payload deterministically regardless of insertion order', () => {
+            const payload = {
+                user_id: 'u1',
+                device_id: 'd1',
+                timestamp: '2025-01-15T10:30:00Z',
+                key_version: 2,
+            };
+            expect(new TextDecoder().decode(canonicalizeForSign(payload))).toBe(
+                '{"device_id":"d1","key_version":2,"timestamp":"2025-01-15T10:30:00Z","user_id":"u1"}',
+            );
+        });
+    });
+
+    describe('v2 auth proof (signAuthProofV2)', () => {
+        it('round-trips against a manual verifier over the canonical bytes', async () => {
+            const keys = await deriveKeys(generateBackupSecret());
+            const payload = {
+                user_id: 'u1',
+                device_id: 'd1',
+                timestamp: '2025-01-15T10:30:00Z',
+                key_version: 2,
+            };
+
+            const sig = await signAuthProofV2(keys.auth.privateKey, payload);
+            expect(sig).toHaveLength(64);
+
+            const data = canonicalizeForSign(payload);
+            const valid = await crypto.subtle.verify(
+                { name: 'Ed25519' },
+                keys.auth.publicKey,
+                sig as unknown as BufferSource,
+                data as unknown as BufferSource,
+            );
+            expect(valid).toBe(true);
+        });
+
+        it('signature does not verify against a different key_version', async () => {
+            const keys = await deriveKeys(generateBackupSecret());
+            const payload = {
+                user_id: 'u1',
+                device_id: 'd1',
+                timestamp: '2025-01-15T10:30:00Z',
+                key_version: 2,
+            };
+            const sig = await signAuthProofV2(keys.auth.privateKey, payload);
+
+            const tampered = canonicalizeForSign({
+                ...payload,
+                key_version: 3,
+            });
+            const valid = await crypto.subtle.verify(
+                { name: 'Ed25519' },
+                keys.auth.publicKey,
+                sig as unknown as BufferSource,
+                tampered as unknown as BufferSource,
             );
             expect(valid).toBe(false);
         });

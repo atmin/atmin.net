@@ -5,7 +5,7 @@ import {
     loginUser,
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     sendMessage,
     waitForMessage,
 } from './helpers';
@@ -68,9 +68,9 @@ test.describe('Session Rotation', () => {
         const alice = await aliceContext.newPage();
         const bob = await bobContext.newPage();
 
-        // ── 1. Register both users (Alice with mnemonic for multi-device) ──
-        const { handle: aliceHandle, mnemonic: aliceMnemonic } =
-            await registerUserWithMnemonic(alice);
+        // ── 1. Register both users (Alice keeps her password for multi-device) ──
+        const { handle: aliceHandle, password: alicePassword } =
+            await registerUserWithPassword(alice);
         const bobHandle = await registerUser(bob);
 
         // Get Alice's userId from localStorage (prefixed with 'atmin:')
@@ -101,10 +101,10 @@ test.describe('Session Rotation', () => {
         }, aliceUserId!);
         expect(archiveKeys.length).toBeGreaterThan(0);
 
-        // ── 5. Alice's new device logs in with mnemonic ──────────────
+        // ── 5. Alice's new device logs in with her password ──────────
         const phoneContext = await browser.newContext();
         const phone = await phoneContext.newPage();
-        await loginUser(phone, aliceHandle, aliceMnemonic);
+        await loginUser(phone, aliceHandle, alicePassword);
 
         // ── 6. New device opens chat → reads archives ────────────────
         await openChat(phone, bobHandle);

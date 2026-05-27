@@ -1,23 +1,28 @@
-import { mnemonicToEntropy } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useCallback, useEffect, useState } from 'react';
 import {
     type DeviceInfo,
     listDevices,
     type RevokeDeviceRequest,
     revokeDevice,
+    storeGet,
 } from '@/lib/api';
+import {
+    type CredentialParams,
+    deriveSecretFromCredential,
+    isLegacyMnemonic,
+} from '@/lib/credential';
 import { base64UrlEncode, deriveKeys, signAuthProof } from '@/lib/crypto';
+import { path } from '@/lib/paths';
 
 export interface DevicesState {
     devices: DeviceInfo[];
     loading: boolean;
     error: string | null;
     revoking: string | null;
-    mnemonicInput: string;
+    secretInput: string;
     revokeError: string | null;
     setRevoking: (deviceId: string | null) => void;
-    setMnemonicInput: (value: string) => void;
+    setSecretInput: (value: string) => void;
     handleRevoke: (deviceId: string) => Promise<void>;
 }
 
@@ -26,7 +31,7 @@ export function useDevices(token: string, userId: string): DevicesState {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [revoking, setRevokingRaw] = useState<string | null>(null);
-    const [mnemonicInput, setMnemonicInput] = useState('');
+    const [secretInput, setSecretInput] = useState('');
     const [revokeError, setRevokeError] = useState<string | null>(null);
 
     const fetchDevices = useCallback(async () => {
@@ -49,15 +54,31 @@ export function useDevices(token: string, userId: string): DevicesState {
     const setRevoking = (deviceId: string | null) => {
         setRevokingRaw(deviceId);
         setRevokeError(null);
-        setMnemonicInput('');
+        setSecretInput('');
     };
 
     const handleRevoke = async (deviceId: string) => {
         setRevokeError(null);
         try {
-            const entropy = mnemonicToEntropy(mnemonicInput.trim(), wordlist);
-            const keys = await deriveKeys(new Uint8Array(entropy));
+            // v2 accounts need their stored Argon2id params; read them from
+            // the caller's own profile.json. Legacy mnemonics skip this.
+            let params: CredentialParams = {};
+            if (!isLegacyMnemonic(secretInput)) {
+                const blob = await storeGet(token, path.profile(userId));
+                const profile = JSON.parse(
+                    new TextDecoder().decode(blob),
+                ) as CredentialParams;
+                params = { salt: profile.salt, kdf: profile.kdf };
+            }
 
+            const secret = await deriveSecretFromCredential(
+                secretInput,
+                params,
+            );
+            const keys = await deriveKeys(secret);
+
+            // key_version is 1 for every account until rotation ships
+            // (ADR-0012, task 2), so the v1 auth proof is correct here.
             const payload = {
                 user_id: userId,
                 device_id: deviceId,
@@ -78,7 +99,7 @@ export function useDevices(token: string, userId: string): DevicesState {
 
             await revokeDevice(token, req);
             setRevokingRaw(null);
-            setMnemonicInput('');
+            setSecretInput('');
             await fetchDevices();
         } catch (e) {
             setRevokeError(
@@ -92,10 +113,10 @@ export function useDevices(token: string, userId: string): DevicesState {
         loading,
         error,
         revoking,
-        mnemonicInput,
+        secretInput,
         revokeError,
         setRevoking,
-        setMnemonicInput,
+        setSecretInput,
         handleRevoke,
     };
 }

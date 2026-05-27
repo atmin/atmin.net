@@ -5,6 +5,7 @@
  */
 
 import type {
+    derive_secret,
     MegolmInbound,
     MegolmOutbound,
 } from '../../crypto/pkg/atmin_crypto';
@@ -12,6 +13,7 @@ import type {
 export interface WasmModule {
     MegolmOutbound: typeof MegolmOutbound;
     MegolmInbound: typeof MegolmInbound;
+    derive_secret: typeof derive_secret;
 }
 
 let cached: WasmModule | null = null;

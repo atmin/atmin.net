@@ -4,13 +4,13 @@ import {
     loginUser,
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     sendMessage,
     waitForMessage,
 } from './helpers';
 
 test.describe('Key backup restore', () => {
-    test('New device login with mnemonic decrypts historical messages', async ({
+    test('New device login with password decrypts historical messages', async ({
         browser,
     }) => {
         const device1Ctx = await browser.newContext();
@@ -19,8 +19,8 @@ test.describe('Key backup restore', () => {
         const bob = await bobCtx.newPage();
 
         // ── 1. Alice registers on device 1, Bob registers ────────
-        const { handle: aliceHandle, mnemonic } =
-            await registerUserWithMnemonic(device1);
+        const { handle: aliceHandle, password } =
+            await registerUserWithPassword(device1);
         const bobHandle = await registerUser(bob);
 
         // ── 2. Bob sends Alice a message ──────────────────────────
@@ -40,10 +40,10 @@ test.describe('Key backup restore', () => {
         // Bob confirms delivery
         await waitForMessage(bob, 'Reply from Alice');
 
-        // ── 4. Alice logs in on a fresh device with only her mnemonic
+        // ── 4. Alice logs in on a fresh device with only her password
         const device2Ctx = await browser.newContext();
         const device2 = await device2Ctx.newPage();
-        await loginUser(device2, aliceHandle, mnemonic);
+        await loginUser(device2, aliceHandle, password);
 
         // ── 5. Device 2 opens the chat ────────────────────────────
         // restoreSessionKeys runs before setSessionManager, so inbound

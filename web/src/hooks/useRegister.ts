@@ -1,52 +1,58 @@
-import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
 import { register } from '@/lib/api';
+import { argonStretch } from '@/lib/argon2-worker.client';
 import { type Session, saveSession } from '@/lib/auth';
 import {
     base64UrlEncode,
+    DEFAULT_KDF,
     deriveKeys,
-    generateBackupSecret,
+    generateSalt,
 } from '@/lib/crypto';
 import { detectDeviceLabel } from '@/lib/utils';
 
-export type RegisterStep = 'generate' | 'registering' | 'done';
+export type RegisterStep = 'enter' | 'deriving' | 'registering' | 'done';
 
 export interface RegisterState {
     step: RegisterStep;
-    mnemonic: string;
+    password: string;
+    confirm: string;
+    acknowledged: boolean;
     error: string;
+    setPassword: (value: string) => void;
+    setConfirm: (value: string) => void;
+    setAcknowledged: (value: boolean) => void;
     handleRegister: () => Promise<void>;
 }
 
 export function useRegister(
     onSuccess: (session: Session) => void,
 ): RegisterState {
-    const [step, setStep] = useState<RegisterStep>('generate');
-    const [mnemonic, setMnemonic] = useState('');
+    const [step, setStep] = useState<RegisterStep>('enter');
+    const [password, setPassword] = useState('');
+    const [confirm, setConfirm] = useState('');
+    const [acknowledged, setAcknowledged] = useState(false);
     const [error, setError] = useState('');
 
-    // Generate mnemonic on first render
-    if (!mnemonic) {
-        const secret = generateBackupSecret();
-        const m = entropyToMnemonic(secret, wordlist);
-        setMnemonic(m);
-    }
-
     const handleRegister = async () => {
-        setStep('registering');
         setError('');
+        setStep('deriving');
 
         try {
-            const entropy = mnemonicToEntropy(mnemonic, wordlist);
-            const keys = await deriveKeys(new Uint8Array(entropy));
+            // Argon2id stretch (~3-4s on a mid-tier device, off the main
+            // thread) → 16-byte secret → existing HKDF chain.
+            const salt = generateSalt();
+            const secret = await argonStretch(password, salt, DEFAULT_KDF);
+            const keys = await deriveKeys(secret);
 
+            setStep('registering');
             const res = await register({
                 device_label: detectDeviceLabel(),
                 auth_public_key: base64UrlEncode(keys.auth.publicKeyBytes),
                 sharing_public_key: base64UrlEncode(
                     keys.sharing.publicKeyBytes,
                 ),
+                salt: base64UrlEncode(salt),
+                kdf: DEFAULT_KDF,
             });
 
             const session: Session = {
@@ -64,9 +70,19 @@ export function useRegister(
             setStep('done');
         } catch (e) {
             setError(`Registration failed: ${e}`);
-            setStep('generate');
+            setStep('enter');
         }
     };
 
-    return { step, mnemonic, error, handleRegister };
+    return {
+        step,
+        password,
+        confirm,
+        acknowledged,
+        error,
+        setPassword,
+        setConfirm,
+        setAcknowledged,
+        handleRegister,
+    };
 }

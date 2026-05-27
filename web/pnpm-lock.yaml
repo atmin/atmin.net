@@ -17,6 +17,18 @@ importers:
       '@storybook/addon-themes':
         specifier: ^10.2.10
         version: 10.3.4(storybook@10.3.4(@testing-library/dom@10.4.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))
+      '@zxcvbn-ts/core':
+        specifier: ^3.0.4
+        version: 3.0.4
+      '@zxcvbn-ts/language-en':
+        specifier: ^3.0.2
+        version: 3.0.2
+      '@zxcvbn-ts/matcher-pwned':
+        specifier: ^3.0.4
+        version: 3.0.4
+      canonicalize:
+        specifier: ^3.0.0
+        version: 3.0.0
       cbor-x:
         specifier: ^1.6.0
         version: 1.6.4
@@ -2752,6 +2764,15 @@ packages:
   '@webcontainer/env@1.1.1':
     resolution: {integrity: sha512-6aN99yL695Hi9SuIk1oC88l9o0gmxL1nGWWQ/kNy81HigJ0FoaoTXpytCj6ItzgyCEwA9kF1wixsTuv5cjsgng==}
 
+  '@zxcvbn-ts/core@3.0.4':
+    resolution: {integrity: sha512-aQeiT0F09FuJaAqNrxynlAwZ2mW/1MdXakKWNmGM1Qp/VaY6CnB/GfnMS2T8gB2231Esp1/maCWd8vTG4OuShw==}
+
+  '@zxcvbn-ts/language-en@3.0.2':
+    resolution: {integrity: sha512-Zp+zL+I6Un2Bj0tRXNs6VUBq3Djt+hwTwUz4dkt2qgsQz47U0/XthZ4ULrT/RxjwJRl5LwiaKOOZeOtmixHnjg==}
+
+  '@zxcvbn-ts/matcher-pwned@3.0.4':
+    resolution: {integrity: sha512-7BY6/IfY0Eb9HjTQGbDPIMceiBR6jZtQTOQfA3X3XREAZZ29GQ2XAm9dwZ76wF35XOajszGoXQ+L/fYh8DpkMg==}
+
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
     engines: {node: '>= 0.6'}
@@ -2935,6 +2956,11 @@ packages:
 
   caniuse-lite@1.0.30001784:
     resolution: {integrity: sha512-WU346nBTklUV9YfUl60fqRbU5ZqyXlqvo1SgigE1OAXK5bFL8LL9q1K7aap3N739l4BvNqnkm3YrGHiY9sfUQw==}
+
+  canonicalize@3.0.0:
+    resolution: {integrity: sha512-yYLfHyDMIXRyRqsKBRLX023riFLpXY2YOfdtqKXZRZy9qsfOJ9U+4F9YZL7MEzL5+ziN2x2nlBvY/Voi3EBljA==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   cbor-extract@2.2.2:
     resolution: {integrity: sha512-hlSxxI9XO2yQfe9g6msd3g4xCfDqK5T5P0fRMLuaLHhxn4ViPrm+a+MUfhrvH2W962RGxcBwEGzLQyjbDG1gng==}
@@ -3335,6 +3361,10 @@ packages:
   fast-xml-parser@5.5.8:
     resolution: {integrity: sha512-Z7Fh2nVQSb2d+poDViM063ix2ZGt9jmY1nWhPfHBOK2Hgnb/OW3P4Et3P/81SEej0J7QbWtJqxO05h8QYfK7LQ==}
     hasBin: true
+
+  fastest-levenshtein@1.0.16:
+    resolution: {integrity: sha512-eRnCtTTtGZFpQCwhJiUOuxPQWRXVKYDn0b2PeHfXL6/Zi53SLAzAHfVhVWK2AryC/WH05kGfxhFIPvTF0SXQzg==}
+    engines: {node: '>= 4.9.1'}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -8320,6 +8350,16 @@ snapshots:
 
   '@webcontainer/env@1.1.1': {}
 
+  '@zxcvbn-ts/core@3.0.4':
+    dependencies:
+      fastest-levenshtein: 1.0.16
+
+  '@zxcvbn-ts/language-en@3.0.2': {}
+
+  '@zxcvbn-ts/matcher-pwned@3.0.4':
+    dependencies:
+      '@zxcvbn-ts/core': 3.0.4
+
   accepts@2.0.0:
     dependencies:
       mime-types: 3.0.2
@@ -8501,6 +8541,8 @@ snapshots:
   callsites@3.1.0: {}
 
   caniuse-lite@1.0.30001784: {}
+
+  canonicalize@3.0.0: {}
 
   cbor-extract@2.2.2:
     dependencies:
@@ -8954,6 +8996,8 @@ snapshots:
       fast-xml-builder: 1.1.4
       path-expression-matcher: 1.2.1
       strnum: 2.2.2
+
+  fastest-levenshtein@1.0.16: {}
 
   fastq@1.20.1:
     dependencies:

@@ -117,8 +117,10 @@ GET /v1/store/list?prefix=users/alice01/devices/
 → ["users/alice01/devices/adev01.json", "users/alice01/devices/adev02.json"]
 ```
 
-Alice revokes the phone. She enters her 12-word mnemonic to derive the auth key
-and sign the revocation proof:
+Alice revokes the phone. She enters her credential — her password (v2) or, for
+a legacy account, her 12-word mnemonic — which is autodetected and re-derives
+the auth key to sign the revocation proof (see
+[ADR-0011](../decisions/adr-0011-credential-derivation.md)):
 
 ```
 POST /v1/devices/revoke

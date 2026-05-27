@@ -15,6 +15,7 @@
  */
 
 import { p256 } from '@noble/curves/nist.js';
+import canonicalize from 'canonicalize';
 
 const enc = new TextEncoder();
 
@@ -54,6 +55,33 @@ export function base64UrlDecode(s: string): Uint8Array {
 // ── Backup secret ───────────────────────────────────────────────────
 
 export function generateBackupSecret(): Uint8Array {
+    return crypto.getRandomValues(new Uint8Array(16));
+}
+
+// ── Argon2id credential stretching (v2) ─────────────────────────────
+//
+// v2 accounts stretch a user-typed password through Argon2id into the
+// 16-byte secret that feeds the HKDF chain below. The params are
+// per-account and stored on profile.json; DEFAULT_KDF is the floor for
+// new accounts (ADR-0011). The stretch itself runs in a Web Worker —
+// see argon2-worker.client.ts. deriveKeys is unchanged: it still takes
+// 16 bytes and runs HKDF, so the Argon2id stage composes one level up.
+
+export interface KdfParams {
+    type: 'argon2id';
+    m: number; // memory cost, KiB
+    t: number; // iterations
+    p: number; // parallelism
+}
+
+export const DEFAULT_KDF: KdfParams = {
+    type: 'argon2id',
+    m: 65536,
+    t: 3,
+    p: 1,
+};
+
+export function generateSalt(): Uint8Array {
     return crypto.getRandomValues(new Uint8Array(16));
 }
 
@@ -185,6 +213,37 @@ export async function signAuthProof(
     const data = enc.encode(JSON.stringify(payload));
     return new Uint8Array(
         await crypto.subtle.sign({ name: 'Ed25519' }, privateKey, data),
+    );
+}
+
+// ── JCS canonicalization + v2 auth proof ────────────────────────────
+//
+// v2 auth proofs (rotated accounts, key_version > 1) and the rotation
+// continuity signature are signed over their RFC 8785 (JCS) canonical
+// bytes rather than JSON.stringify's insertion-order output, so the
+// client and the Go server agree on the exact byte sequence regardless
+// of key ordering. The v1 signAuthProof above is frozen on the wire and
+// kept only for legacy-mnemonic logins.
+
+export function canonicalizeForSign(obj: Record<string, unknown>): Uint8Array {
+    const canonical = canonicalize(obj);
+    if (canonical === undefined)
+        throw new Error('canonicalize returned undefined');
+    return enc.encode(canonical);
+}
+
+export async function signAuthProofV2(
+    privateKey: CryptoKey,
+    payload: {
+        user_id: string;
+        device_id: string;
+        timestamp: string;
+        key_version: number;
+    },
+): Promise<Uint8Array> {
+    const data = canonicalizeForSign(payload);
+    return new Uint8Array(
+        await crypto.subtle.sign({ name: 'Ed25519' }, privateKey, buf(data)),
     );
 }
 

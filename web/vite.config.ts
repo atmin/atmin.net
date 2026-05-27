@@ -26,6 +26,9 @@ const dirname =
 const apiUrl = process.env.VITE_API_URL || 'http://localhost:8080';
 
 export default defineConfig({
+    // The Argon2id worker dynamic-imports the WASM module, so it must build
+    // as an ES module — the default 'iife' worker format can't code-split.
+    worker: { format: 'es' },
     plugins: [
         react(),
         tailwindcss(),

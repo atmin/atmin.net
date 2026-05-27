@@ -18,11 +18,11 @@ export default function SettingsRoute({ session }: Props) {
                 loading={devicesState.loading}
                 error={devicesState.error}
                 revoking={devicesState.revoking}
-                mnemonicInput={devicesState.mnemonicInput}
+                secretInput={devicesState.secretInput}
                 revokeError={devicesState.revokeError}
                 onStartRevoke={devicesState.setRevoking}
                 onCancelRevoke={() => devicesState.setRevoking(null)}
-                onMnemonicChange={devicesState.setMnemonicInput}
+                onSecretChange={devicesState.setSecretInput}
                 onConfirmRevoke={devicesState.handleRevoke}
             />
         </ProfileSettings>

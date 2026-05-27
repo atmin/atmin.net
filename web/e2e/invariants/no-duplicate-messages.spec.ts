@@ -11,7 +11,7 @@ import { expect, test } from '@playwright/test';
 import {
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     sendMessage,
 } from '../helpers';
 import {
@@ -46,7 +46,7 @@ test.describe('I1 — no duplicate visible messages', () => {
         const bob = await bobCtx.newPage();
 
         // ── 1. Register ───────────────────────────────────────────
-        const { handle: aliceHandle } = await registerUserWithMnemonic(alice);
+        const { handle: aliceHandle } = await registerUserWithPassword(alice);
         const aliceUid = await getCurrentUserId(alice);
         const bobHandle = await registerUser(bob);
         const bobUid = await getCurrentUserId(bob);
@@ -135,7 +135,7 @@ test.describe('I1 — no duplicate visible messages', () => {
         const bob = await bobCtx.newPage();
 
         // ── 1. Register ───────────────────────────────────────────
-        const { handle: aliceHandle } = await registerUserWithMnemonic(alice);
+        const { handle: aliceHandle } = await registerUserWithPassword(alice);
         const aliceUid = await getCurrentUserId(alice);
         const bobHandle = await registerUser(bob);
         const bobUid = await getCurrentUserId(bob);

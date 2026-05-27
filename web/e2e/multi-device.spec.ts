@@ -4,7 +4,7 @@ import {
     loginUser,
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     resyncChat,
     sendMessage,
     waitForMessage,
@@ -20,8 +20,8 @@ test.describe('Multi-Device', () => {
         const bob = await bobCtx.newPage();
 
         // ── 1. Alice registers on laptop, Bob registers ──────────
-        const { handle: aliceHandle, mnemonic } =
-            await registerUserWithMnemonic(laptop);
+        const { handle: aliceHandle, password } =
+            await registerUserWithPassword(laptop);
         const bobHandle = await registerUser(bob);
 
         // ── 2. Bob sends "Hey Alice" ─────────────────────────────
@@ -39,7 +39,7 @@ test.describe('Multi-Device', () => {
         // ── 4. Alice adds her phone (second device) ─────────────
         const phoneCtx = await browser.newContext();
         const phone = await phoneCtx.newPage();
-        await loginUser(phone, aliceHandle, mnemonic);
+        await loginUser(phone, aliceHandle, password);
 
         // ── 5. Phone opens chat and sees full history ────────────
         await openChat(phone, bobHandle);

@@ -1,17 +1,24 @@
-import { mnemonicToEntropy } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ulid } from 'ulid';
 import { addDevice, resolve } from '@/lib/api';
 import { type Session, saveSession } from '@/lib/auth';
-import { base64UrlEncode, deriveKeys, signAuthProof } from '@/lib/crypto';
+import { deriveSecretFromCredential } from '@/lib/credential';
+import {
+    base64UrlEncode,
+    deriveKeys,
+    signAuthProof,
+    signAuthProofV2,
+} from '@/lib/crypto';
 import { detectDeviceLabel } from '@/lib/utils';
+
+// Re-exported for tests; the canonical definition lives in lib/credential.
+export { isLegacyMnemonic } from '@/lib/credential';
 
 export interface LoginState {
     loading: boolean;
     error: string;
-    handleLogin: (handle: string, mnemonic: string) => Promise<void>;
+    handleLogin: (handle: string, secret: string) => Promise<void>;
 }
 
 export function useLogin(onSuccess: (session: Session) => void): LoginState {
@@ -19,34 +26,46 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const handleLogin = async (handle: string, mnemonic: string) => {
+    const handleLogin = async (handle: string, secretInput: string) => {
         setLoading(true);
         setError('');
 
         try {
-            // Resolve handle to get user_id
             const resolveRes = await resolve(handle.trim());
             const userId = resolveRes.user_id;
 
-            // Derive keys from mnemonic
-            const entropy = mnemonicToEntropy(mnemonic.trim(), wordlist);
-            const keys = await deriveKeys(new Uint8Array(entropy));
+            const derivedSecret = await deriveSecretFromCredential(
+                secretInput,
+                {
+                    salt: resolveRes.salt,
+                    kdf: resolveRes.kdf,
+                },
+            );
+            const profileKeyVersion = resolveRes.key_version ?? 1;
 
-            // Generate new device ID
+            const keys = await deriveKeys(derivedSecret);
+
             const deviceId = ulid();
 
-            // Create and sign auth proof
+            // v2 auth proof (JCS-canonicalized, carries key_version) only
+            // once an account has rotated; v2 accounts still at key_version 1
+            // match v1's implicit kv=1, so v1 is correct there too.
             const payload = {
                 user_id: userId,
                 device_id: deviceId,
                 timestamp: new Date().toISOString(),
+                ...(profileKeyVersion > 1
+                    ? { key_version: profileKeyVersion }
+                    : {}),
             };
-            const signature = await signAuthProof(
-                keys.auth.privateKey,
-                payload,
-            );
+            const signature =
+                profileKeyVersion > 1
+                    ? await signAuthProofV2(keys.auth.privateKey, {
+                          ...payload,
+                          key_version: profileKeyVersion,
+                      })
+                    : await signAuthProof(keys.auth.privateKey, payload);
 
-            // Add device
             const deviceRes = await addDevice({
                 user_id: userId,
                 device_label: detectDeviceLabel(),
@@ -56,7 +75,6 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
                 },
             });
 
-            // Save session
             const session: Session = {
                 token: deviceRes.token,
                 userId,
@@ -70,14 +88,13 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
             await saveSession(session);
             onSuccess(session);
 
-            // Redirect to home
             navigate('/');
         } catch (e) {
             if (e instanceof Error) {
                 setError(e.message);
             } else {
                 setError(
-                    'Login failed. Please check your handle and recovery phrase.',
+                    'Login failed. Please check your handle and password.',
                 );
             }
             setLoading(false);

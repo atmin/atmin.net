@@ -1,6 +1,7 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    derive_secret,
     MegolmInbound,
     MegolmOutbound,
 } from '../../crypto/pkg-node/atmin_crypto.js';
@@ -56,6 +57,7 @@ function mockArrayBufferResponse(buffer: ArrayBuffer): unknown {
 const wasm: WasmModule = {
     MegolmOutbound: MegolmOutbound as unknown as WasmModule['MegolmOutbound'],
     MegolmInbound: MegolmInbound as unknown as WasmModule['MegolmInbound'],
+    derive_secret,
 };
 
 describe('messaging - Megolm send/receive', () => {

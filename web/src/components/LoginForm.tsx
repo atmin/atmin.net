@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import PasswordInput from '@/components/PasswordInput';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,16 +13,16 @@ import {
 interface Props {
     loading: boolean;
     error: string;
-    onLogin: (handle: string, mnemonic: string) => void;
+    onLogin: (handle: string, secret: string) => void;
 }
 
 export default function LoginForm({ loading, error, onLogin }: Props) {
     const [handle, setHandle] = useState('');
-    const [mnemonic, setMnemonic] = useState('');
+    const [secret, setSecret] = useState('');
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onLogin(handle, mnemonic);
+        onLogin(handle, secret);
     };
 
     return (
@@ -37,7 +38,8 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                     <CardHeader>
                         <CardTitle>Sign In</CardTitle>
                         <CardDescription>
-                            Restore your account using your recovery phrase
+                            Restore your account with your password or recovery
+                            phrase
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -62,24 +64,21 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
 
                             <div>
                                 <label
-                                    htmlFor="mnemonic"
+                                    htmlFor="secret"
                                     className="mb-1 block text-sm font-medium"
                                 >
-                                    Recovery Phrase
+                                    Password or recovery phrase
                                 </label>
-                                <textarea
-                                    id="mnemonic"
-                                    value={mnemonic}
-                                    onChange={(e) =>
-                                        setMnemonic(e.target.value)
-                                    }
-                                    placeholder="word1 word2 word3 ... word12"
-                                    required
-                                    rows={3}
-                                    className="w-full rounded border border-input bg-background px-3 py-2 font-mono text-sm"
+                                <PasswordInput
+                                    id="secret"
+                                    value={secret}
+                                    onChange={setSecret}
+                                    placeholder="Password or recovery phrase"
+                                    autoComplete="current-password"
                                 />
                                 <p className="mt-1 text-xs text-muted-foreground">
-                                    Enter your 12-word recovery phrase
+                                    Enter your password, or your legacy 12-word
+                                    recovery phrase.
                                 </p>
                             </div>
 
@@ -92,7 +91,7 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
 
                             <Button
                                 type="submit"
-                                disabled={loading || !handle || !mnemonic}
+                                disabled={loading || !handle || !secret}
                                 className="w-full"
                             >
                                 {loading ? 'Signing in...' : 'Sign In'}

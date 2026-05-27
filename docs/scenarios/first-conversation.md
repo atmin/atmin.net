@@ -51,31 +51,36 @@ sequenceDiagram
 
 ## 1. Alice registers
 
-Client generates a 128-bit backup secret (displayed as a 12-word BIP39 mnemonic),
-derives three keys via HKDF-SHA256 (auth Ed25519, sharing ECDH P-256, backup AES-256-GCM),
-displays the mnemonic for Alice to save in her password manager.
+Alice picks a password (with a strength meter; warn-not-block). The client
+generates a random 16-byte salt, stretches the password through Argon2id in
+a Web Worker to a 16-byte backup secret, then derives three keys via
+HKDF-SHA256 (auth Ed25519, sharing ECDH P-256, backup AES-256-GCM). The salt
+and KDF params are sent alongside the public keys; the password itself never
+leaves the device. See [ADR-0011](../decisions/adr-0011-credential-derivation.md).
 
 ```
 POST /v1/register
 {
   "device_label": "Alice's laptop",
   "auth_public_key": "<alice_auth_pub>",
-  "sharing_public_key": "<alice_sharing_pub>"
+  "sharing_public_key": "<alice_sharing_pub>",
+  "salt": "<base64url, 16 bytes>",
+  "kdf": { "type": "argon2id", "m": 65536, "t": 3, "p": 1 }
 }
 → { "user_id": "alice01", "device_id": "adev01", "token": "tok_a1", "handle": "alice-xyz" }
 ```
 
 S3 writes:
-- `users/alice01/profile.json` — `{ user_id, handle, auth_public_key, sharing_public_key, created_at }`
+- `users/alice01/profile.json` — `{ user_id, handle, auth_public_key, sharing_public_key, salt, kdf, key_version: 1, created_at }`
 - `users/alice01/devices/adev01.json` — `{ device_label: "Alice's laptop" }`
-- `handles/alice-xyz.json` — `{ user_id, sharing_public_key }`
+- `handles/alice-xyz.json` — `{ user_id, sharing_public_key, salt, kdf, key_version }`
 
 Client stores in IndexedDB:
 - sharing private key (for decrypting key shares)
 - backup encryption key (for key backup writes)
 - device token
 
-Backup secret is discarded from memory.
+Backup secret (and the password) are discarded from memory.
 
 ## 2. Bob registers
 

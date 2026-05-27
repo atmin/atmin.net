@@ -5,6 +5,9 @@ use vodozemac::megolm::{
     SessionConfig,
 };
 
+mod argon2;
+pub use argon2::derive_secret;
+
 /// Megolm sending session. Creates encrypted messages.
 #[wasm_bindgen]
 pub struct MegolmOutbound {

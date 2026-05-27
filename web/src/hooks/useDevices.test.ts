@@ -5,6 +5,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/api', () => ({
     listDevices: vi.fn(),
     revokeDevice: vi.fn().mockResolvedValue(undefined),
+    storeGet: vi.fn().mockResolvedValue(
+        new TextEncoder().encode(
+            JSON.stringify({
+                salt: 'c2FsdA',
+                kdf: { type: 'argon2id', m: 65536, t: 3, p: 1 },
+            }),
+        ),
+    ),
+}));
+
+vi.mock('@/lib/credential', () => ({
+    isLegacyMnemonic: vi.fn().mockReturnValue(false),
+    deriveSecretFromCredential: vi
+        .fn()
+        .mockResolvedValue(new Uint8Array(16).fill(5)),
 }));
 
 vi.mock('@/lib/crypto', () => ({
@@ -22,12 +37,6 @@ vi.mock('@/lib/crypto', () => ({
     }),
     signAuthProof: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
 }));
-
-vi.mock('@scure/bip39', () => ({
-    mnemonicToEntropy: vi.fn().mockReturnValue(new Uint8Array(16)),
-}));
-
-vi.mock('@scure/bip39/wordlists/english.js', () => ({ wordlist: [] }));
 
 const fakeDevices = [
     { device_id: 'dev1', device_label: 'iPhone', created_at: '2024-01-01' },
@@ -57,9 +66,15 @@ describe('useDevices', () => {
         expect(result.current.loading).toBe(false);
     });
 
-    it('handleRevoke with valid mnemonic calls revokeDevice and refreshes', async () => {
-        const { listDevices, revokeDevice } = await import('@/lib/api');
+    it('v2 password revoke reads profile params, derives, and revokes', async () => {
+        const { listDevices, revokeDevice, storeGet } = await import(
+            '@/lib/api'
+        );
+        const { deriveSecretFromCredential, isLegacyMnemonic } = await import(
+            '@/lib/credential'
+        );
         vi.mocked(listDevices).mockResolvedValue(fakeDevices);
+        vi.mocked(isLegacyMnemonic).mockReturnValue(false);
 
         const { useDevices } = await import('./useDevices');
         const { result } = renderHook(() => useDevices('tok', 'user1'));
@@ -69,49 +84,76 @@ describe('useDevices', () => {
         });
 
         act(() => {
-            result.current.setMnemonicInput(
-                'word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12',
-            );
+            result.current.setSecretInput('my-strong-password');
         });
 
         await act(async () => {
             await result.current.handleRevoke('dev1');
         });
 
+        // v2 path read the caller's own profile.json for salt/kdf
+        expect(storeGet).toHaveBeenCalledWith(
+            'tok',
+            'users/user1/profile.json',
+        );
+        expect(deriveSecretFromCredential).toHaveBeenCalledWith(
+            'my-strong-password',
+            { salt: 'c2FsdA', kdf: { type: 'argon2id', m: 65536, t: 3, p: 1 } },
+        );
         expect(revokeDevice).toHaveBeenCalledWith(
             'tok',
             expect.objectContaining({ device_id: 'dev1' }),
         );
-        // refreshes: listDevices called a second time
         expect(listDevices).toHaveBeenCalledTimes(2);
         expect(result.current.revokeError).toBeNull();
     });
 
-    it('handleRevoke with bad mnemonic sets revokeError and does not call revokeDevice', async () => {
-        const { listDevices, revokeDevice } = await import('@/lib/api');
+    it('legacy mnemonic revoke skips the profile read', async () => {
+        const { listDevices, storeGet } = await import('@/lib/api');
+        const { isLegacyMnemonic } = await import('@/lib/credential');
         vi.mocked(listDevices).mockResolvedValue(fakeDevices);
-
-        const bip39 = await import('@scure/bip39');
-        vi.mocked(bip39.mnemonicToEntropy).mockImplementationOnce(() => {
-            throw new Error('Invalid mnemonic');
-        });
+        vi.mocked(isLegacyMnemonic).mockReturnValue(true);
 
         const { useDevices } = await import('./useDevices');
         const { result } = renderHook(() => useDevices('tok', 'user1'));
-
         await act(async () => {
             await new Promise((r) => setTimeout(r, 0));
         });
 
         act(() => {
-            result.current.setMnemonicInput('bad mnemonic here');
+            result.current.setSecretInput('twelve word mnemonic here');
+        });
+        await act(async () => {
+            await result.current.handleRevoke('dev1');
         });
 
+        expect(storeGet).not.toHaveBeenCalled();
+    });
+
+    it('surfaces a revokeError and does not call revokeDevice when derivation fails', async () => {
+        const { listDevices, revokeDevice } = await import('@/lib/api');
+        const { deriveSecretFromCredential } = await import('@/lib/credential');
+        vi.mocked(listDevices).mockResolvedValue(fakeDevices);
+        vi.mocked(deriveSecretFromCredential).mockRejectedValueOnce(
+            new Error('Recovery phrase required for legacy account.'),
+        );
+
+        const { useDevices } = await import('./useDevices');
+        const { result } = renderHook(() => useDevices('tok', 'user1'));
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        act(() => {
+            result.current.setSecretInput('not-a-mnemonic');
+        });
         await act(async () => {
             await result.current.handleRevoke('dev1');
         });
 
         expect(revokeDevice).not.toHaveBeenCalled();
-        expect(result.current.revokeError).toBe('Invalid mnemonic');
+        expect(result.current.revokeError).toContain(
+            'Recovery phrase required',
+        );
     });
 });

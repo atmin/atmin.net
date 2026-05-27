@@ -3,7 +3,7 @@ import {
     loginUser,
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     sendMessage,
     waitForMessage,
 } from './helpers';
@@ -17,9 +17,9 @@ test.describe('Invalid token (401)', () => {
         const alice = await aliceCtx.newPage();
         const bob = await bobCtx.newPage();
 
-        // 1. Register Alice with mnemonic, Bob normally
-        const { handle: aliceHandle, mnemonic: aliceMnemonic } =
-            await registerUserWithMnemonic(alice);
+        // 1. Register Alice (capturing her password for re-login), Bob normally
+        const { handle: aliceHandle, password: alicePassword } =
+            await registerUserWithPassword(alice);
         const bobHandle = await registerUser(bob);
 
         // 2. Bob opens chat with Alice, sends 'Hello before 401'
@@ -59,7 +59,7 @@ test.describe('Invalid token (401)', () => {
         expect(count).toBeGreaterThan(0);
 
         // 8. Alice logs in again
-        await loginUser(alice, aliceHandle, aliceMnemonic);
+        await loginUser(alice, aliceHandle, alicePassword);
 
         // 9. Alice opens chat with Bob — 'Hello before 401' visible immediately from IndexedDB
         await openChat(alice, bobHandle);
@@ -77,8 +77,8 @@ test.describe('Invalid token (401)', () => {
         const alice = await aliceCtx.newPage();
         const bob = await bobCtx.newPage();
 
-        // 1. Register Alice with mnemonic, Bob normally
-        await registerUserWithMnemonic(alice);
+        // 1. Register Alice and Bob
+        await registerUserWithPassword(alice);
         const bobHandle = await registerUser(bob);
 
         // 2. Bob opens chat with Alice's handle (resolved from Alice's registration)

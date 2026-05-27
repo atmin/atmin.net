@@ -2,68 +2,67 @@ import { expect, type Page } from '@playwright/test';
 
 const MSG_SELECTOR = '[data-testid="message"]';
 
+// Shared password for e2e v2 (password-based) registrations. Long enough
+// to clear the strength meter; the meter never blocks submit anyway.
+export const E2E_PASSWORD = 'correct-horse-battery-staple-7';
+
 /**
  * Register a new user via the UI and return their handle.
  * Assumes the page is not logged in.
  */
 export async function registerUser(page: Page): Promise<string> {
-    const { handle } = await registerUserWithMnemonic(page);
+    const { handle } = await registerUserWithPassword(page);
     return handle;
 }
 
 /**
- * Register a new user via the UI and return both their handle
- * and recovery mnemonic (needed for multi-device login).
+ * Register a new user via the password UI and return both their handle
+ * and the password (needed for multi-device login and revoke re-auth).
+ * Argon2id derivation runs client-side, so allow a generous timeout.
  */
-export async function registerUserWithMnemonic(
+export async function registerUserWithPassword(
     page: Page,
-): Promise<{ handle: string; mnemonic: string }> {
+    password: string = E2E_PASSWORD,
+): Promise<{ handle: string; password: string }> {
     await page.goto('/register');
 
-    // Wait for mnemonic to be generated
-    await page.waitForSelector('.font-mono');
+    await page.fill('#password', password);
+    await page.fill('#confirm', password);
 
-    // Capture the mnemonic before completing registration
-    const mnemonic = await page.locator('.font-mono').textContent();
-    if (!mnemonic) throw new Error('Could not extract mnemonic');
-
-    // Check both required checkboxes
+    // Acknowledge the no-reset warning, then submit.
     await page.locator('label', { hasText: 'I understand' }).click();
-    await page.locator('label', { hasText: 'I have stored' }).click();
-
-    // Click Register
     await page.getByRole('button', { name: 'Register' }).click();
 
-    // Wait for redirect to home page
+    // Wait for redirect to home page (Argon2id + registration).
     await page.waitForSelector('text=Your handle', {
-        timeout: 15_000,
+        timeout: 30_000,
     });
 
-    // Extract handle
     const handle = await page.locator('.text-lg').textContent();
     if (!handle) throw new Error('Could not extract handle');
 
-    return { handle: handle.trim(), mnemonic: mnemonic.trim() };
+    return { handle: handle.trim(), password };
 }
 
 /**
- * Log in on a second device using an existing user's handle
- * and recovery mnemonic. Assumes the page is not logged in.
+ * Log in on a second device using an existing user's handle and
+ * credential (password for v2 accounts, or a legacy recovery phrase).
+ * Assumes the page is not logged in.
  */
 export async function loginUser(
     page: Page,
     handle: string,
-    mnemonic: string,
+    secret: string,
 ): Promise<void> {
     await page.goto('/login');
 
     await page.fill('#handle', handle);
-    await page.fill('#mnemonic', mnemonic);
+    await page.fill('#secret', secret);
     await page.getByRole('button', { name: 'Sign In' }).click();
 
-    // Wait for redirect to home page
+    // Wait for redirect to home page (Argon2id + add-device).
     await page.waitForSelector('text=Your handle', {
-        timeout: 15_000,
+        timeout: 30_000,
     });
 }
 

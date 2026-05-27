@@ -1,4 +1,5 @@
 import RegisterForm from '@/components/RegisterForm';
+import { usePasswordStrength } from '@/hooks/usePasswordStrength';
 import { useRegister } from '@/hooks/useRegister';
 import type { Session } from '@/lib/auth';
 
@@ -7,14 +8,21 @@ interface Props {
 }
 
 export default function RegisterRoute({ onSuccess }: Props) {
-    const { step, mnemonic, error, handleRegister } = useRegister(onSuccess);
+    const reg = useRegister(onSuccess);
+    const strength = usePasswordStrength(reg.password);
 
     return (
         <RegisterForm
-            step={step}
-            mnemonic={mnemonic}
-            error={error}
-            onRegister={handleRegister}
+            step={reg.step}
+            password={reg.password}
+            confirm={reg.confirm}
+            acknowledged={reg.acknowledged}
+            error={reg.error}
+            strength={strength}
+            onPasswordChange={reg.setPassword}
+            onConfirmChange={reg.setConfirm}
+            onAcknowledgedChange={reg.setAcknowledged}
+            onRegister={reg.handleRegister}
         />
     );
 }

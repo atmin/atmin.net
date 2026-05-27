@@ -15,7 +15,7 @@ import {
     loginUser,
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     sendMedia,
     waitForMediaDownload,
     waitForMediaImage,
@@ -185,8 +185,8 @@ test.describe('Media', () => {
         const bob = await bobCtx.newPage();
 
         const aliceHandle = await registerUser(alice);
-        const { handle: bobHandle, mnemonic: bobMnemonic } =
-            await registerUserWithMnemonic(bob);
+        const { handle: bobHandle, password: bobPassword } =
+            await registerUserWithPassword(bob);
 
         await openChat(alice, bobHandle);
 
@@ -246,7 +246,7 @@ test.describe('Media', () => {
                 }),
         );
 
-        await loginUser(bobFresh, bobHandle, bobMnemonic);
+        await loginUser(bobFresh, bobHandle, bobPassword);
         await openChat(bobFresh, aliceHandle);
 
         const attach = bobFresh

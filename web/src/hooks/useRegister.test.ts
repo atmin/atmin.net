@@ -10,6 +10,10 @@ vi.mock('@/lib/auth', () => ({
     saveSession: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@/lib/argon2-worker.client', () => ({
+    argonStretch: vi.fn().mockResolvedValue(new Uint8Array(16).fill(5)),
+}));
+
 vi.mock('@/lib/crypto', () => ({
     base64UrlEncode: vi.fn().mockReturnValue('encoded'),
     deriveKeys: vi.fn().mockResolvedValue({
@@ -23,50 +27,31 @@ vi.mock('@/lib/crypto', () => ({
         },
         backupKey: {} as CryptoKey,
     }),
-    generateBackupSecret: vi.fn().mockReturnValue(new Uint8Array(16)),
+    generateSalt: vi.fn().mockReturnValue(new Uint8Array(16).fill(7)),
+    DEFAULT_KDF: { type: 'argon2id', m: 65536, t: 3, p: 1 },
 }));
 
 vi.mock('@/lib/utils', () => ({
     detectDeviceLabel: vi.fn().mockReturnValue('test-device'),
 }));
 
-vi.mock('@scure/bip39', () => ({
-    entropyToMnemonic: vi
-        .fn()
-        .mockReturnValue(
-            'word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12',
-        ),
-    mnemonicToEntropy: vi.fn().mockReturnValue(new Uint8Array(16)),
-}));
-
-vi.mock('@scure/bip39/wordlists/english.js', () => ({ wordlist: [] }));
-
 describe('useRegister', () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
-    it('generates a 12-word mnemonic on first render and does not regenerate on re-render', async () => {
-        const { generateBackupSecret } = await import('@/lib/crypto');
-        const { entropyToMnemonic } = await import('@scure/bip39');
-
+    it('starts on the enter step with empty credentials', async () => {
         const { useRegister } = await import('./useRegister');
-        const onSuccess = vi.fn();
-        const { result, rerender } = renderHook(() => useRegister(onSuccess));
+        const { result } = renderHook(() => useRegister(vi.fn()));
 
-        expect(generateBackupSecret).toHaveBeenCalledOnce();
-        expect(result.current.mnemonic).toBe(
-            'word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12',
-        );
-
-        // Re-render should not regenerate
-        rerender();
-        expect(generateBackupSecret).toHaveBeenCalledOnce();
-        expect(entropyToMnemonic).toHaveBeenCalledOnce();
+        expect(result.current.step).toBe('enter');
+        expect(result.current.password).toBe('');
+        expect(result.current.acknowledged).toBe(false);
     });
 
-    it('handleRegister calls register, saves session, calls onSuccess, advances step to done', async () => {
+    it('stretches the password through Argon2id and registers with salt + kdf', async () => {
         const { register } = await import('@/lib/api');
+        const { argonStretch } = await import('@/lib/argon2-worker.client');
         const { saveSession } = await import('@/lib/auth');
         vi.mocked(register).mockResolvedValue({
             user_id: 'new-user',
@@ -79,15 +64,50 @@ describe('useRegister', () => {
         const { useRegister } = await import('./useRegister');
         const { result } = renderHook(() => useRegister(onSuccess));
 
-        expect(result.current.step).toBe('generate');
+        act(() => {
+            result.current.setPassword('hunter2-strong');
+            result.current.setConfirm('hunter2-strong');
+            result.current.setAcknowledged(true);
+        });
 
         await act(async () => {
             await result.current.handleRegister();
         });
 
-        expect(register).toHaveBeenCalled();
+        expect(argonStretch).toHaveBeenCalledWith(
+            'hunter2-strong',
+            new Uint8Array(16).fill(7),
+            { type: 'argon2id', m: 65536, t: 3, p: 1 },
+        );
+
+        const payload = vi.mocked(register).mock.calls[0][0];
+        expect(payload).toMatchObject({
+            salt: 'encoded',
+            kdf: { type: 'argon2id', m: 65536, t: 3, p: 1 },
+        });
+        expect(payload.auth_public_key).toBeDefined();
+        expect(payload.sharing_public_key).toBeDefined();
+
         expect(saveSession).toHaveBeenCalled();
         expect(onSuccess).toHaveBeenCalled();
         expect(result.current.step).toBe('done');
+    });
+
+    it('returns to the enter step and surfaces an error if derivation fails', async () => {
+        const { argonStretch } = await import('@/lib/argon2-worker.client');
+        vi.mocked(argonStretch).mockRejectedValueOnce(new Error('worker died'));
+
+        const { useRegister } = await import('./useRegister');
+        const { result } = renderHook(() => useRegister(vi.fn()));
+
+        act(() => {
+            result.current.setPassword('hunter2-strong');
+        });
+        await act(async () => {
+            await result.current.handleRegister();
+        });
+
+        expect(result.current.step).toBe('enter');
+        expect(result.current.error).toContain('worker died');
     });
 });

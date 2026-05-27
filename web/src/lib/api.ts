@@ -1,4 +1,5 @@
 import { ulid } from 'ulid';
+import type { KdfParams } from './crypto';
 import type { Envelope } from './envelope';
 import { path } from './paths';
 
@@ -66,6 +67,9 @@ export interface RegisterRequest {
     device_label: string;
     auth_public_key: string;
     sharing_public_key: string;
+    // v2 accounts send both; v1 (legacy mnemonic) omits both.
+    salt?: string;
+    kdf?: KdfParams;
 }
 
 export interface RegisterResponse {
@@ -80,6 +84,10 @@ export interface ResolveResponse {
     sharing_public_key: string;
     display_name?: string;
     avatar_url?: string;
+    // v2 accounts only — consumed by the login fork to re-derive keys.
+    salt?: string;
+    kdf?: KdfParams;
+    key_version?: number;
 }
 
 export interface ProfileUpdateRequest {

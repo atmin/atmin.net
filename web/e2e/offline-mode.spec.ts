@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     sendMessage,
     waitForMessage,
 } from './helpers';
@@ -16,10 +16,10 @@ test.describe('Offline mode', () => {
         const alice = await aliceCtx.newPage();
         const bob = await bobCtx.newPage();
 
-        // Register both. Alice uses mnemonic flow so she could log back in
-        // after a reload if needed.
+        // Register both. Alice captures her password so she could log back
+        // in after a reload if needed.
         const { handle: aliceHandle } =
-            await registerUserWithMnemonic(alice);
+            await registerUserWithPassword(alice);
         const bobHandle = await registerUser(bob);
 
         // Bob sends a message while both are online; Alice receives.

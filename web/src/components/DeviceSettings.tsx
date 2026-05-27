@@ -6,11 +6,11 @@ interface Props {
     loading: boolean;
     error: string | null;
     revoking: string | null;
-    mnemonicInput: string;
+    secretInput: string;
     revokeError: string | null;
     onStartRevoke: (deviceId: string) => void;
     onCancelRevoke: () => void;
-    onMnemonicChange: (value: string) => void;
+    onSecretChange: (value: string) => void;
     onConfirmRevoke: (deviceId: string) => void;
 }
 
@@ -20,11 +20,11 @@ export default function DeviceSettings({
     loading,
     error,
     revoking,
-    mnemonicInput,
+    secretInput,
     revokeError,
     onStartRevoke,
     onCancelRevoke,
-    onMnemonicChange,
+    onSecretChange,
     onConfirmRevoke,
 }: Props) {
     return (
@@ -82,22 +82,22 @@ export default function DeviceSettings({
                                 {revoking === device.device_id && (
                                     <div className="mt-3 space-y-2">
                                         <label
-                                            htmlFor={`mnemonic-${device.device_id}`}
+                                            htmlFor={`secret-${device.device_id}`}
                                             className="block text-xs text-muted-foreground"
                                         >
-                                            Enter your recovery phrase to
-                                            confirm:
+                                            Enter your password or recovery
+                                            phrase to confirm:
                                         </label>
                                         <input
-                                            id={`mnemonic-${device.device_id}`}
-                                            type="text"
-                                            value={mnemonicInput}
+                                            id={`secret-${device.device_id}`}
+                                            type="password"
+                                            value={secretInput}
                                             onChange={(e) =>
-                                                onMnemonicChange(e.target.value)
+                                                onSecretChange(e.target.value)
                                             }
-                                            placeholder="12-word recovery phrase"
+                                            placeholder="Password or recovery phrase"
                                             className="w-full rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-                                            data-testid="mnemonic-input"
+                                            data-testid="credential-input"
                                         />
                                         <div className="flex gap-2">
                                             <button
@@ -107,7 +107,7 @@ export default function DeviceSettings({
                                                         device.device_id,
                                                     )
                                                 }
-                                                disabled={!mnemonicInput.trim()}
+                                                disabled={!secretInput.trim()}
                                                 className="rounded bg-destructive px-3 py-1 text-xs text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
                                                 data-testid="confirm-revoke"
                                             >

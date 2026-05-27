@@ -3,7 +3,7 @@ import {
     loginUser,
     openChat,
     registerUser,
-    registerUserWithMnemonic,
+    registerUserWithPassword,
     resyncChat,
     sendMessage,
     waitForMessage,
@@ -18,9 +18,9 @@ test.describe('Stolen Device', () => {
         const laptop = await laptopCtx.newPage();
         const bob = await bobCtx.newPage();
 
-        // ── 1. Alice registers on laptop (with mnemonic), Bob registers ──
-        const { handle: aliceHandle, mnemonic } =
-            await registerUserWithMnemonic(laptop);
+        // ── 1. Alice registers on laptop (keeps password), Bob registers ──
+        const { handle: aliceHandle, password } =
+            await registerUserWithPassword(laptop);
         const bobHandle = await registerUser(bob);
 
         // ── 2. Alice adds her phone (second device) ─────────────────────
@@ -31,7 +31,7 @@ test.describe('Stolen Device', () => {
                 r.url().endsWith('/v1/devices') &&
                 r.request().method() === 'POST',
         );
-        await loginUser(phone, aliceHandle, mnemonic);
+        await loginUser(phone, aliceHandle, password);
         expect((await addDeviceResp).status(), 'phone addDevice').toBe(200);
 
         // ── 3. Bob sends "Hey Alice", phone syncs and sees it ────────────
@@ -52,7 +52,7 @@ test.describe('Stolen Device', () => {
         // Verify "this device" indicator is shown
         await expect(laptop.locator('text=(this device)')).toBeVisible();
 
-        // ── 5. Alice clicks "Revoke" on the phone, enters mnemonic, confirms ──
+        // ── 5. Alice clicks "Revoke" on the phone, enters password, confirms ──
         // Find the device item that does NOT have "(this device)" and click its Revoke button
         const otherDevice = deviceItems.filter({
             hasNot: laptop.locator('text=(this device)'),
@@ -61,8 +61,8 @@ test.describe('Stolen Device', () => {
             .locator('[data-testid="revoke-button"]')
             .click();
 
-        // Enter mnemonic and confirm
-        await laptop.fill('[data-testid="mnemonic-input"]', mnemonic);
+        // Enter credential (password) and confirm
+        await laptop.fill('[data-testid="credential-input"]', password);
         await laptop.click('[data-testid="confirm-revoke"]');
 
         // ── 6. Device list now shows only the laptop ─────────────────────

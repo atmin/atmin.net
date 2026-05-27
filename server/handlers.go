@@ -22,15 +22,30 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 func handleRegister(store Store, cfg Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			DeviceLabel      string `json:"device_label"`
-			AuthPublicKey    string `json:"auth_public_key"`
-			SharingPublicKey string `json:"sharing_public_key"`
+			DeviceLabel      string     `json:"device_label"`
+			AuthPublicKey    string     `json:"auth_public_key"`
+			SharingPublicKey string     `json:"sharing_public_key"`
+			Salt             string     `json:"salt"`
+			KDF              *KDFParams `json:"kdf"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, errBadRequest)
 			return
 		}
 		if req.DeviceLabel == "" || req.AuthPublicKey == "" || req.SharingPublicKey == "" {
+			writeError(w, errBadRequest)
+			return
+		}
+
+		// Credential params: both present (v2) or both absent (v1).
+		// A partial set, or malformed v2 params, is a bad request.
+		hasSalt := req.Salt != ""
+		hasKDF := req.KDF != nil
+		if hasSalt != hasKDF {
+			writeError(w, errBadRequest)
+			return
+		}
+		if hasKDF && !validKDFParams(req.Salt, req.KDF) {
 			writeError(w, errBadRequest)
 			return
 		}
@@ -61,6 +76,12 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			SharingPublicKey: req.SharingPublicKey,
 			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
 		}
+		if hasKDF {
+			// v2 account: rotation counter starts at 1.
+			p.Salt = req.Salt
+			p.KDF = req.KDF
+			p.KeyVersion = 1
+		}
 		if err := putProfile(r.Context(), store, p); err != nil {
 			internalError(w, "Failed to write profile")
 			return
@@ -89,6 +110,31 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			"handle":    handle,
 		})
 	}
+}
+
+// validKDFParams checks a v2 account's Argon2id parameters and salt. The
+// server does not set the security floor (the client picks reasonable
+// params) but it refuses values that would brick the account or pin
+// unrealistic cost: m in [8 KiB, 1 GiB], t in [1, 16], p in [1, 8], and
+// a salt that decodes to exactly 16 bytes.
+func validKDFParams(salt string, kdf *KDFParams) bool {
+	if kdf.Type != "argon2id" {
+		return false
+	}
+	if kdf.M < 8 || kdf.M > 1048576 {
+		return false
+	}
+	if kdf.T < 1 || kdf.T > 16 {
+		return false
+	}
+	if kdf.P < 1 || kdf.P > 8 {
+		return false
+	}
+	saltBytes, err := b64url.DecodeString(salt)
+	if err != nil || len(saltBytes) != 16 {
+		return false
+	}
+	return true
 }
 
 // errAuthProofInvalid is returned by fetchAndVerifyAuthProof when the key is
@@ -231,10 +277,19 @@ func handleResolve(store Store) http.HandlerFunc {
 		var h publicHandleData
 		json.Unmarshal(handleData, &h)
 
-		// Fallback: if handle file lacks sharing_public_key, read from profile
-		if h.SharingPublicKey == "" {
+		// Fallback: if the handle projection predates a field (e.g. an
+		// older projection without the v2 credential params), backfill
+		// from profile.json so the login fork still gets salt + kdf.
+		if h.SharingPublicKey == "" || (h.Salt == "" && h.KDF == nil) {
 			if p, err := getProfile(r.Context(), store, h.UserID); err == nil {
-				h.SharingPublicKey = p.SharingPublicKey
+				if h.SharingPublicKey == "" {
+					h.SharingPublicKey = p.SharingPublicKey
+				}
+				if h.Salt == "" && h.KDF == nil {
+					h.Salt = p.Salt
+					h.KDF = p.KDF
+					h.KeyVersion = p.KeyVersion
+				}
 			}
 		}
 

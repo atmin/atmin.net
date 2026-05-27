@@ -2,6 +2,7 @@ import { encode as cborEncode } from 'cbor-x';
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    derive_secret,
     MegolmInbound,
     MegolmOutbound,
 } from '../../crypto/pkg-node/atmin_crypto.js';
@@ -25,6 +26,7 @@ vi.mock('./api', async () => {
 const wasm: WasmModule = {
     MegolmOutbound: MegolmOutbound as unknown as WasmModule['MegolmOutbound'],
     MegolmInbound: MegolmInbound as unknown as WasmModule['MegolmInbound'],
+    derive_secret,
 };
 
 const token = 'test-token';

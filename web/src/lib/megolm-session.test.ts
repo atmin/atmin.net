@@ -1,6 +1,7 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    derive_secret,
     MegolmInbound,
     MegolmOutbound,
 } from '../../crypto/pkg-node/atmin_crypto.js';
@@ -16,6 +17,7 @@ import type { WasmModule } from './wasm';
 const wasm: WasmModule = {
     MegolmOutbound: MegolmOutbound as unknown as WasmModule['MegolmOutbound'],
     MegolmInbound: MegolmInbound as unknown as WasmModule['MegolmInbound'],
+    derive_secret,
 };
 
 beforeEach(() => {
