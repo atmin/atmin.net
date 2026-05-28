@@ -14,8 +14,15 @@ import Register from '@/routes/register';
 import Settings from '@/routes/settings';
 
 export default function App() {
-    const { session, sessionManager, loading, handleLogin, handleLogout } =
-        useSession();
+    const {
+        session,
+        sessionManager,
+        loading,
+        notice,
+        handleLogin,
+        handleLogout,
+        clearNotice,
+    } = useSession();
     useInboxSync(session, sessionManager);
     const online = useOnlineStatus();
     const [chatSending, setChatSending] = useState(false);
@@ -43,7 +50,11 @@ export default function App() {
                         session ? (
                             <Navigate to="/" replace />
                         ) : (
-                            <Login onSuccess={handleLogin} />
+                            <Login
+                                onSuccess={handleLogin}
+                                notice={notice}
+                                onDismissNotice={clearNotice}
+                            />
                         )
                     }
                 />

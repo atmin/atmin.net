@@ -158,6 +158,87 @@ describe('useSession', () => {
         expect(result.current.session).toBeNull();
     });
 
+    it('key_version_stale auth event clears session, wipes IDB, sets notice', async () => {
+        const { loadSession, clearSession } = await import('@/lib/auth');
+        const { onAuthEvent } = await import('@/lib/api');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        const staleCb = vi
+            .mocked(onAuthEvent)
+            .mock.calls.find(([type]) => type === 'key_version_stale')?.[1];
+        expect(staleCb).toBeDefined();
+
+        await act(async () => {
+            if (staleCb) await (staleCb as () => Promise<void>)();
+        });
+
+        // Full wipe (not clearToken): post-rotation IDB state is encrypted
+        // under a key the server no longer accepts; keeping it around buys
+        // nothing.
+        expect(clearSession).toHaveBeenCalled();
+        expect(result.current.session).toBeNull();
+        expect(result.current.notice).toBe('rotated_elsewhere');
+    });
+
+    it('handleLogin clears any pending notice', async () => {
+        const { loadSession } = await import('@/lib/auth');
+        const { onAuthEvent } = await import('@/lib/api');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        const staleCb = vi
+            .mocked(onAuthEvent)
+            .mock.calls.find(([type]) => type === 'key_version_stale')?.[1];
+        await act(async () => {
+            if (staleCb) await (staleCb as () => Promise<void>)();
+        });
+        expect(result.current.notice).toBe('rotated_elsewhere');
+
+        act(() => {
+            result.current.handleLogin(fakeSession);
+        });
+        expect(result.current.notice).toBeNull();
+    });
+
+    it('clearNotice clears the notice explicitly', async () => {
+        const { loadSession } = await import('@/lib/auth');
+        const { onAuthEvent } = await import('@/lib/api');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        const staleCb = vi
+            .mocked(onAuthEvent)
+            .mock.calls.find(([type]) => type === 'key_version_stale')?.[1];
+        await act(async () => {
+            if (staleCb) await (staleCb as () => Promise<void>)();
+        });
+        expect(result.current.notice).toBe('rotated_elsewhere');
+
+        act(() => {
+            result.current.clearNotice();
+        });
+        expect(result.current.notice).toBeNull();
+    });
+
     it('unmount removes onAuthEvent listeners', async () => {
         const { loadSession } = await import('@/lib/auth');
         const { onAuthEvent } = await import('@/lib/api');
@@ -175,8 +256,9 @@ describe('useSession', () => {
 
         unmount();
 
-        // Both unsubscribe functions should have been called
-        expect(unsub).toHaveBeenCalledTimes(2);
+        // All three unsubscribe functions should have been called
+        // (device_revoked, unauthorized, key_version_stale).
+        expect(unsub).toHaveBeenCalledTimes(3);
     });
 
     it('StrictMode double-mount does not set sessionManager concurrently', async () => {

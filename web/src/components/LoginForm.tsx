@@ -10,19 +10,41 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 
+export type LoginFormNotice = 'rotated_elsewhere' | null;
+
 interface Props {
     loading: boolean;
     error: string;
+    notice?: LoginFormNotice;
+    onDismissNotice?: () => void;
     onLogin: (handle: string, secret: string) => void;
 }
 
-export default function LoginForm({ loading, error, onLogin }: Props) {
+const NOTICE_TEXT: Record<
+    NonNullable<Exclude<LoginFormNotice, null>>,
+    string
+> = {
+    rotated_elsewhere:
+        'This account was rotated on another device. Please sign in with your new password.',
+};
+
+export default function LoginForm({
+    loading,
+    error,
+    notice = null,
+    onDismissNotice,
+    onLogin,
+}: Props) {
     const [handle, setHandle] = useState('');
     const [secret, setSecret] = useState('');
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         onLogin(handle, secret);
+    };
+
+    const dismissNoticeOnInput = () => {
+        if (notice) onDismissNotice?.();
     };
 
     return (
@@ -43,6 +65,14 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
+                        {notice && (
+                            <p
+                                className="mb-4 text-sm text-muted-foreground"
+                                data-testid="login-notice"
+                            >
+                                {NOTICE_TEXT[notice]}
+                            </p>
+                        )}
                         <form onSubmit={handleSubmit} className="space-y-4">
                             <div>
                                 <label
@@ -55,7 +85,10 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                                     id="handle"
                                     type="text"
                                     value={handle}
-                                    onChange={(e) => setHandle(e.target.value)}
+                                    onChange={(e) => {
+                                        setHandle(e.target.value);
+                                        dismissNoticeOnInput();
+                                    }}
                                     placeholder="copper-falcon"
                                     required
                                     className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
@@ -72,7 +105,10 @@ export default function LoginForm({ loading, error, onLogin }: Props) {
                                 <PasswordInput
                                     id="secret"
                                     value={secret}
-                                    onChange={setSecret}
+                                    onChange={(v) => {
+                                        setSecret(v);
+                                        dismissNoticeOnInput();
+                                    }}
                                     placeholder="Password or recovery phrase"
                                     autoComplete="current-password"
                                 />

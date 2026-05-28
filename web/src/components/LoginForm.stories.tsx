@@ -33,3 +33,12 @@ export const WithError: Story = {
         error: 'Invalid recovery phrase. Please check your words and try again.',
     },
 };
+
+export const RotatedElsewhere: Story = {
+    args: {
+        loading: false,
+        error: '',
+        notice: 'rotated_elsewhere',
+        onDismissNotice: fn(),
+    },
+};

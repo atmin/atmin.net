@@ -27,7 +27,7 @@ export class KeyVersionStaleError extends Error {
     }
 }
 
-type AuthEvent = 'device_revoked' | 'unauthorized';
+type AuthEvent = 'device_revoked' | 'unauthorized' | 'key_version_stale';
 const authEvents = new EventTarget();
 
 export function onAuthEvent(type: AuthEvent, cb: () => void): () => void {
@@ -38,6 +38,29 @@ export function onAuthEvent(type: AuthEvent, cb: () => void): () => void {
 
 function emitAuth(type: AuthEvent): void {
     authEvents.dispatchEvent(new Event(type));
+}
+
+// Shared between request() and storeGet() so both API entry points
+// classify error responses identically. Always throws.
+async function throwForErrorResponse(res: Response): Promise<never> {
+    const err = await res.json().catch(() => ({
+        error: 'unknown',
+        message: res.statusText,
+    }));
+    if (err.error === 'key_version_stale') {
+        // Emit before throw so global subscribers (useSession, SSE)
+        // can clear local state even when the immediate caller doesn't
+        // catch the typed error. rotateKeys catches it locally to
+        // distinguish 401 (forced re-login) from 409 (race-lost retry).
+        emitAuth('key_version_stale');
+        throw new KeyVersionStaleError(
+            typeof err.current === 'number' ? err.current : -1,
+        );
+    }
+    if (res.status === 403 && err.error === 'device_revoked')
+        emitAuth('device_revoked');
+    else if (res.status === 401) emitAuth('unauthorized');
+    throw new APIError(res.status, err.error, err.message);
 }
 
 async function request<T>(
@@ -55,23 +78,7 @@ async function request<T>(
         body: opts?.body ? JSON.stringify(opts.body) : undefined,
     });
 
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({
-            error: 'unknown',
-            message: res.statusText,
-        }));
-        if (err.error === 'key_version_stale') {
-            // Typed throw so the caller can branch on staleness (forced
-            // re-login on most endpoints; race-lost retry on rotate-keys).
-            throw new KeyVersionStaleError(
-                typeof err.current === 'number' ? err.current : -1,
-            );
-        }
-        if (res.status === 403 && err.error === 'device_revoked')
-            emitAuth('device_revoked');
-        if (res.status === 401) emitAuth('unauthorized');
-        throw new APIError(res.status, err.error, err.message);
-    }
+    if (!res.ok) await throwForErrorResponse(res);
 
     if (
         res.status === 200 &&
@@ -261,16 +268,7 @@ export async function storeGet(
         `/v1/store/object?${new URLSearchParams({ key })}`,
         { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({
-            error: 'fetch_error',
-            message: res.statusText,
-        }));
-        if (res.status === 403 && err.error === 'device_revoked')
-            emitAuth('device_revoked');
-        if (res.status === 401) emitAuth('unauthorized');
-        throw new APIError(res.status, err.error, err.message);
-    }
+    if (!res.ok) await throwForErrorResponse(res);
     return res.arrayBuffer();
 }
 

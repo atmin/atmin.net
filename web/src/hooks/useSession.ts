@@ -10,17 +10,22 @@ import { restoreContacts } from '@/lib/contact-backup';
 import { restoreSessionKeys } from '@/lib/key-backup';
 import type { SessionManager } from '@/lib/megolm-session';
 
+export type LoginNotice = 'rotated_elsewhere' | null;
+
 export interface SessionState {
     session: Session | null;
     sessionManager: SessionManager | null;
     loading: boolean;
+    notice: LoginNotice;
     handleLogin: (session: Session) => void;
     handleLogout: () => Promise<void>;
+    clearNotice: () => void;
 }
 
 export function useSession(): SessionState {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
+    const [notice, setNotice] = useState<LoginNotice>(null);
     const [sessionManager, setSessionManager] = useState<SessionManager | null>(
         null,
     );
@@ -139,16 +144,47 @@ export function useSession(): SessionState {
         clearToken();
     }, []);
 
+    // Another device rotated the credential; this device's token is bound
+    // to a superseded key_version. Wipe local IDB (its keys no longer
+    // decrypt the server-side cipher anyway) and surface a calm notice
+    // on /login. See docs/scenarios/credential-multi-device-cutoff.md.
+    const handleKeyVersionStale = useCallback(async () => {
+        setSessionManager((prev) => {
+            prev?.destroy();
+            return null;
+        });
+        setSession(null);
+        await new Promise((r) => setTimeout(r, 0));
+        await clearSession();
+        setNotice('rotated_elsewhere');
+    }, []);
+
     useEffect(() => {
         const u1 = onAuthEvent('device_revoked', handleLogout);
         const u2 = onAuthEvent('unauthorized', handleUnauthorized);
+        const u3 = onAuthEvent('key_version_stale', handleKeyVersionStale);
         return () => {
             u1();
             u2();
+            u3();
         };
-    }, [handleLogout, handleUnauthorized]);
+    }, [handleLogout, handleUnauthorized, handleKeyVersionStale]);
 
-    const handleLogin = (s: Session) => setSession(s);
+    const handleLogin = (s: Session) => {
+        setSession(s);
+        // A fresh sign-in is the natural acknowledgement of the cutoff
+        // notice — clear it so the next view of /login isn't stale.
+        setNotice(null);
+    };
+    const clearNotice = () => setNotice(null);
 
-    return { session, sessionManager, loading, handleLogin, handleLogout };
+    return {
+        session,
+        sessionManager,
+        loading,
+        notice,
+        handleLogin,
+        handleLogout,
+        clearNotice,
+    };
 }

@@ -102,8 +102,9 @@ persisted as extractable.
 Other devices keep working until their next authenticated request,
 which returns `401 key_version_stale { current: kv+1 }`. They wipe
 local state, route to `/login`, and the user re-enters the new
-password. See the dedicated multi-device-cutoff scenario for the
-client-side flow.
+password. See
+[credential-multi-device-cutoff](./credential-multi-device-cutoff.md)
+for the client-side flow.
 
 ## S3 state after rotation
 

@@ -579,6 +579,112 @@ describe('api - unauthorized (401)', () => {
     });
 });
 
+describe('api - key_version_stale event', () => {
+    let unsub: (() => void) | undefined;
+
+    beforeEach(() => {
+        resetFetchMock();
+    });
+
+    afterEach(() => {
+        unsub?.();
+        unsub = undefined;
+    });
+
+    it('emits key_version_stale on 401 key_version_stale (request path)', async () => {
+        const onStale = vi.fn();
+        const onUnauth = vi.fn();
+        unsub = onAuthEvent('key_version_stale', onStale);
+        const unsubUnauth = onAuthEvent('unauthorized', onUnauth);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'key_version_stale',
+                message: 'stale',
+                current: 4,
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toBeInstanceOf(
+            KeyVersionStaleError,
+        );
+
+        expect(onStale).toHaveBeenCalledOnce();
+        // Generic unauthorized listeners must NOT fire — staleness has its
+        // own remediation path and would otherwise double-trigger cleanup.
+        expect(onUnauth).not.toHaveBeenCalled();
+        unsubUnauth();
+    });
+
+    it('emits key_version_stale from storeGet() path too', async () => {
+        const onStale = vi.fn();
+        unsub = onAuthEvent('key_version_stale', onStale);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'key_version_stale',
+                message: 'stale',
+                current: 4,
+            }),
+        } as Response);
+
+        await expect(
+            storeGet('stale-token', 'some/key'),
+        ).rejects.toBeInstanceOf(KeyVersionStaleError);
+
+        expect(onStale).toHaveBeenCalledOnce();
+    });
+
+    it('emits key_version_stale on 409 key_version_stale (race on rotate-keys)', async () => {
+        const onStale = vi.fn();
+        unsub = onAuthEvent('key_version_stale', onStale);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 409,
+            statusText: 'Conflict',
+            json: async () => ({
+                error: 'key_version_stale',
+                message: 'race',
+                current: 3,
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toBeInstanceOf(
+            KeyVersionStaleError,
+        );
+
+        expect(onStale).toHaveBeenCalledOnce();
+    });
+
+    it('does NOT emit key_version_stale on a generic 401', async () => {
+        const onStale = vi.fn();
+        unsub = onAuthEvent('key_version_stale', onStale);
+
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'unauthorized',
+                message: 'no token',
+            }),
+        } as Response);
+
+        await expect(resolve('any-handle')).rejects.toMatchObject({
+            status: 401,
+        });
+
+        expect(onStale).not.toHaveBeenCalled();
+    });
+});
+
 describe('api - rotateKeys()', () => {
     const baseReq: RotateKeysRequest = {
         request_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
