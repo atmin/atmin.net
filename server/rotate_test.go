@@ -224,6 +224,36 @@ func TestRotateKeys_BadContinuitySignature(t *testing.T) {
 	}
 }
 
+// The continuity signature must verify against the *current* (pre-rotation)
+// auth_public_key. A signature by the new key — even one that perfectly
+// matches `req.auth_public_key` — must be rejected, otherwise an attacker
+// who can forge a rotation request needs only to know any keypair, not
+// the account's old credential.
+func TestRotateKeys_ContinuitySignatureFromNewKeyRejected(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUserV2(t, mux, "Alice")
+
+	newPub, newPriv, _ := ed25519.GenerateKey(nil)
+	// Body is well-formed and the signature is over the exact JCS-canonical
+	// form of it — but signed with newPriv instead of alice.AuthPriv.
+	body := buildRotateKeys(t, newPriv, rotationParams{
+		requestID: freshUUID(t), newKV: 2, newAuthPub: newPub,
+	})
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, rotateRequest(t, alice.Token, body))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body = %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Error string `json:"error"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Error != "bad_continuity" {
+		t.Fatalf("error = %q, want bad_continuity", resp.Error)
+	}
+}
+
 func TestRotateKeys_KeyVersionMismatch(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUserV2(t, mux, "Alice")

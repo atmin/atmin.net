@@ -166,6 +166,45 @@ describe('resolveBackupKey', () => {
         expect(new TextDecoder().decode(decrypted)).toBe('hello v1 (deep)');
     });
 
+    it('walks three steps (current=4, target=1) — payloads at every prior kv decrypt', async () => {
+        // Four consecutive rotations → three chain links. A device joining
+        // at kv=4 must recover keys[0..2] in order to read history written
+        // at kv=1, kv=2, and kv=3. Catches an off-by-one in the walker
+        // that would silently work for 2-hop and fail beyond.
+        const { keys, chain } = await makeChain([
+            generateBackupSecret(),
+            generateBackupSecret(),
+            generateBackupSecret(),
+            generateBackupSecret(),
+        ]);
+
+        const payloads = ['era-1', 'era-2', 'era-3'];
+        const encrypted = await Promise.all(
+            payloads.map((p, i) =>
+                backupEncrypt(keys[i], new TextEncoder().encode(p)),
+            ),
+        );
+
+        for (let target = 1; target <= 3; target++) {
+            const recovered = await resolveBackupKey(
+                userId,
+                keys[3],
+                4,
+                target,
+                chain,
+            );
+            const enc = encrypted[target - 1];
+            const decrypted = new Uint8Array(
+                await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv: enc.iv as Uint8Array<ArrayBuffer> },
+                    recovered,
+                    enc.ciphertext as Uint8Array<ArrayBuffer>,
+                ),
+            );
+            expect(new TextDecoder().decode(decrypted)).toBe(`era-${target}`);
+        }
+    });
+
     it('memoizes the resolved key in IDB; second call hits the memo', async () => {
         const { keys, chain } = await makeChain([
             generateBackupSecret(),
