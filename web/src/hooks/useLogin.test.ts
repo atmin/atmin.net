@@ -105,6 +105,7 @@ describe('useLogin', () => {
     it('legacy mnemonic login decodes directly and emits a v1 auth proof', async () => {
         const { resolve } = await import('@/lib/api');
         vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
             user_id: 'user-resolved',
             sharing_public_key: 'pk',
         });
@@ -122,6 +123,7 @@ describe('useLogin', () => {
     it('v2 password login at key_version 1 stretches and emits a v1 auth proof', async () => {
         const { resolve } = await import('@/lib/api');
         vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
             user_id: 'user-resolved',
             sharing_public_key: 'pk',
             salt: 'c2FsdA',
@@ -141,6 +143,7 @@ describe('useLogin', () => {
     it('v2 password login at key_version > 1 emits a v2 auth proof with key_version', async () => {
         const { resolve, addDevice } = await import('@/lib/api');
         vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
             user_id: 'user-resolved',
             sharing_public_key: 'pk',
             salt: 'c2FsdA',
@@ -165,6 +168,7 @@ describe('useLogin', () => {
     it('password login against a legacy (v1) account asks for the recovery phrase', async () => {
         const { resolve } = await import('@/lib/api');
         vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
             user_id: 'user-resolved',
             sharing_public_key: 'pk',
         });
@@ -172,5 +176,50 @@ describe('useLogin', () => {
         const { result } = await runLogin('a-password-not-a-mnemonic');
         expect(result.current.error).toContain('Recovery phrase required');
         expect(result.current.loading).toBe(false);
+    });
+
+    it('resolve returns not_found → surfaces "No account with that handle"', async () => {
+        const { resolve } = await import('@/lib/api');
+        vi.mocked(resolve).mockResolvedValue({ status: 'not_found' });
+
+        const { result } = await runLogin('any-password');
+        expect(result.current.error).toMatch(/No account with that handle/);
+        expect(result.current.loading).toBe(false);
+    });
+
+    it('resolve returns released → surfaces deletion date', async () => {
+        const { resolve } = await import('@/lib/api');
+        vi.mocked(resolve).mockResolvedValue({
+            status: 'released',
+            released_at: '2026-05-01T00:00:00Z',
+            available_at: '2026-05-31T00:00:00Z',
+        });
+
+        const { result } = await runLogin('any-password');
+        expect(result.current.error).toMatch(/deleted on 2026-05-01/);
+        expect(result.current.loading).toBe(false);
+    });
+
+    it('handle is normalised to lowercase + trimmed before resolve', async () => {
+        const { resolve, addDevice } = await import('@/lib/api');
+        const { useNavigate } = await import('react-router-dom');
+        vi.mocked(useNavigate).mockReturnValue(vi.fn());
+        vi.mocked(addDevice).mockResolvedValue({
+            device_id: 'd',
+            token: 't',
+        });
+        vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
+            user_id: 'u',
+            sharing_public_key: 'pk',
+        });
+
+        const { useLogin } = await import('./useLogin');
+        const { result } = renderHook(() => useLogin(vi.fn()));
+        await act(async () => {
+            await result.current.handleLogin('  ALICE-Test  ', VALID_MNEMONIC);
+        });
+
+        expect(resolve).toHaveBeenCalledWith('alice-test');
     });
 });

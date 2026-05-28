@@ -6,6 +6,16 @@ const MSG_SELECTOR = '[data-testid="message"]';
 // to clear the strength meter; the meter never blocks submit anyway.
 export const E2E_PASSWORD = 'correct-horse-battery-staple-7';
 
+// e2e tests run in parallel; the handle suffix keeps registrations from
+// colliding on the per-handle uniqueness check. ULID-shaped lowercase
+// alphanumerics, hyphenated, regex-valid.
+let handleCounter = 0;
+function nextHandle(prefix = 'tester'): string {
+    handleCounter += 1;
+    const rand = Math.random().toString(36).slice(2, 8);
+    return `${prefix}-${rand}-${handleCounter}`;
+}
+
 /**
  * Register a new user via the UI and return their handle.
  * Assumes the page is not logged in.
@@ -23,8 +33,17 @@ export async function registerUser(page: Page): Promise<string> {
 export async function registerUserWithPassword(
     page: Page,
     password: string = E2E_PASSWORD,
+    handle: string = nextHandle(),
 ): Promise<{ handle: string; password: string }> {
     await page.goto('/register');
+
+    // Handle field is server-validated; wait for the availability check to
+    // settle before submitting so the button gating goes through ✓ available.
+    await page.fill('#handle', handle);
+    await expect(page.getByTestId('handle-availability')).toHaveText(
+        /Available/,
+        { timeout: 10_000 },
+    );
 
     await page.fill('#password', password);
     await page.fill('#confirm', password);
@@ -42,10 +61,7 @@ export async function registerUserWithPassword(
         timeout: 30_000,
     });
 
-    const handle = await page.locator('.text-lg').textContent();
-    if (!handle) throw new Error('Could not extract handle');
-
-    return { handle: handle.trim(), password };
+    return { handle, password };
 }
 
 /**
@@ -76,7 +92,7 @@ export async function loginUser(
 export async function openChat(page: Page, handle: string): Promise<void> {
     await page.fill('input[placeholder="Enter a handle..."]', handle);
     await page.getByRole('button', { name: 'Chat' }).click();
-    await page.waitForURL(`**/${handle}`);
+    await page.waitForURL(`**/@${handle}`);
 }
 
 /**

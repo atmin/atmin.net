@@ -16,15 +16,21 @@ func (e APIError) Error() string {
 }
 
 var (
-	errBadRequest      = APIError{http.StatusBadRequest, "bad_request", "Malformed input"}
-	errUnauthorized    = APIError{http.StatusUnauthorized, "unauthorized", "Missing or invalid token"}
-	errKeyVersionStale = APIError{http.StatusUnauthorized, "key_version_stale", "Token or auth proof bound to a superseded key_version"}
-	errDeviceRevoked   = APIError{http.StatusForbidden, "device_revoked", "Device has been revoked"}
-	errBadContinuity   = APIError{http.StatusForbidden, "bad_continuity", "Continuity signature did not verify"}
-	errForbidden       = APIError{http.StatusForbidden, "forbidden", "Access denied"}
-	errNotFound        = APIError{http.StatusNotFound, "not_found", "Not found"}
-	errQuotaExceeded   = APIError{http.StatusRequestEntityTooLarge, "quota_exceeded", "Storage quota exceeded"}
-	errTooLarge        = APIError{http.StatusRequestEntityTooLarge, "too_large", "Payload exceeds size limit"}
+	errBadRequest              = APIError{http.StatusBadRequest, "bad_request", "Malformed input"}
+	errUnauthorized            = APIError{http.StatusUnauthorized, "unauthorized", "Missing or invalid token"}
+	errKeyVersionStale         = APIError{http.StatusUnauthorized, "key_version_stale", "Token or auth proof bound to a superseded key_version"}
+	errDeviceRevoked           = APIError{http.StatusForbidden, "device_revoked", "Device has been revoked"}
+	errBadContinuity           = APIError{http.StatusForbidden, "bad_continuity", "Continuity signature did not verify"}
+	errForbidden               = APIError{http.StatusForbidden, "forbidden", "Access denied"}
+	errNotFound                = APIError{http.StatusNotFound, "not_found", "Not found"}
+	errHandleInvalid           = APIError{http.StatusBadRequest, "handle_invalid", "Handle does not match the required format"}
+	errHandleReserved          = APIError{http.StatusBadRequest, "handle_reserved", "Handle is reserved"}
+	errHandleTaken             = APIError{http.StatusConflict, "handle_taken", "Handle is already registered"}
+	errHandleInCooldown        = APIError{http.StatusConflict, "handle_in_cooldown", "Handle is in 30-day cooldown after deletion"}
+	errHandleReleased          = APIError{http.StatusGone, "released", "Handle was deleted; in cooldown"}
+	errRegistrationUnavailable = APIError{http.StatusServiceUnavailable, "registration_unavailable", "Registration is temporarily unavailable for this handle"}
+	errQuotaExceeded           = APIError{http.StatusRequestEntityTooLarge, "quota_exceeded", "Storage quota exceeded"}
+	errTooLarge                = APIError{http.StatusRequestEntityTooLarge, "too_large", "Payload exceeds size limit"}
 )
 
 func internalError(w http.ResponseWriter, msg string) {

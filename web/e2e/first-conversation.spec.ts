@@ -19,11 +19,9 @@ test.describe('First Conversation', () => {
 
         // ── 1. Alice registers ───────────────────────────────────
         const aliceHandle = await registerUser(alice);
-        expect(aliceHandle).toMatch(/^[a-z]+-[a-z]+$/);
 
         // ── 2. Bob registers ─────────────────────────────────────
         const bobHandle = await registerUser(bob);
-        expect(bobHandle).toMatch(/^[a-z]+-[a-z]+$/);
         expect(bobHandle).not.toBe(aliceHandle);
 
         // ── 3. Bob opens chat with Alice and sends "Hey Alice" ───

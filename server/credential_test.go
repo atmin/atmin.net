@@ -24,6 +24,7 @@ func registerV2(t *testing.T, mux http.Handler, salt string, kdf map[string]any)
 	t.Helper()
 	pub, _, _ := ed25519.GenerateKey(nil)
 	body := map[string]any{
+		"handle":             nextTestHandle(),
 		"device_label":       "v2 device",
 		"auth_public_key":    b64url.EncodeToString(pub),
 		"sharing_public_key": b64url.EncodeToString([]byte("sharing-key-placeholder-32bytes!")),

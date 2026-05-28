@@ -31,7 +31,25 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
         setError('');
 
         try {
-            const resolveRes = await resolve(handle.trim());
+            // Handles are lowercase ASCII (ADR-0013); normalise here so a
+            // user typing "Alice-Test" doesn't hit a misleading 404.
+            const normalisedHandle = handle.trim().toLowerCase();
+            const resolveRes = await resolve(normalisedHandle);
+            if (resolveRes.status === 'not_found') {
+                setError('No account with that handle.');
+                setLoading(false);
+                return;
+            }
+            if (resolveRes.status === 'released') {
+                const date = resolveRes.released_at
+                    ? new Date(resolveRes.released_at)
+                          .toISOString()
+                          .slice(0, 10)
+                    : 'recently';
+                setError(`That account was deleted on ${date}.`);
+                setLoading(false);
+                return;
+            }
             const userId = resolveRes.user_id;
 
             const derivedSecret = await deriveSecretFromCredential(
@@ -79,7 +97,7 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
                 token: deviceRes.token,
                 userId,
                 deviceId: deviceRes.device_id,
-                handle: handle.trim(),
+                handle: normalisedHandle,
                 sharingPrivateKey: keys.sharing.privateKey,
                 sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,

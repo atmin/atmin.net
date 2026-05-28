@@ -160,7 +160,7 @@ test.describe('I1 — no duplicate visible messages', () => {
         // The sync will find 0 new objects (cursor already advanced),
         // so IDB should remain at exactly BURST rows.
         await alice.reload();
-        await alice.waitForURL(`**/${bobHandle}`, { timeout: 15_000 });
+        await alice.waitForURL(`**/@${bobHandle}`, { timeout: 15_000 });
         await expect(
             alice.locator('[data-testid="message"]'),
         ).toHaveCount(BURST, { timeout: 30_000 });

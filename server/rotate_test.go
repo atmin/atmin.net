@@ -27,6 +27,7 @@ func registerTestUserV2(t *testing.T, mux http.Handler, label string) testUserIn
 	pubB64 := b64url.EncodeToString(pub)
 
 	body, _ := json.Marshal(map[string]any{
+		"handle":             nextTestHandle(),
 		"device_label":       label,
 		"auth_public_key":    pubB64,
 		"sharing_public_key": b64url.EncodeToString(make([]byte, 65)),

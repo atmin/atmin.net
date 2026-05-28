@@ -27,7 +27,9 @@ export default function ChatsRoute({
             contacts={contacts}
             displayNames={displayNames}
             userId={session.userId}
-            onNewChat={(handle) => navigate(`/${encodeURIComponent(handle)}`)}
+            onNewChat={(handle) =>
+                navigate(`/@${encodeURIComponent(handle.trim().toLowerCase())}`)
+            }
             onLogout={onLogout}
         />
     );

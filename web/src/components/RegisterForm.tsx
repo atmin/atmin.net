@@ -10,36 +10,58 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
+import type { HandleAvailability } from '@/hooks/useHandleAvailability';
 import type { PasswordStrength } from '@/hooks/usePasswordStrength';
 import type { RegisterStep } from '@/hooks/useRegister';
 
 interface Props {
     step: RegisterStep;
+    handle: string;
     password: string;
     confirm: string;
     acknowledged: boolean;
     error: string;
     strength: PasswordStrength;
+    availability: HandleAvailability;
+    onHandleChange: (value: string) => void;
+    onSurpriseMe: () => void;
     onPasswordChange: (value: string) => void;
     onConfirmChange: (value: string) => void;
     onAcknowledgedChange: (value: boolean) => void;
     onRegister: () => void;
 }
 
+const AVAILABILITY_COLORS: Record<HandleAvailability['status'], string> = {
+    idle: 'text-muted-foreground',
+    invalid: 'text-destructive',
+    checking: 'text-muted-foreground',
+    available: 'text-green-600',
+    taken: 'text-destructive',
+    released: 'text-destructive',
+    error: 'text-destructive',
+};
+
 export default function RegisterForm({
     step,
+    handle,
     password,
     confirm,
     acknowledged,
     error,
     strength,
+    availability,
+    onHandleChange,
+    onSurpriseMe,
     onPasswordChange,
     onConfirmChange,
     onAcknowledgedChange,
     onRegister,
 }: Props) {
     const canSubmit =
-        password.length > 0 && password === confirm && acknowledged;
+        availability.status === 'available' &&
+        password.length > 0 &&
+        password === confirm &&
+        acknowledged;
 
     if (step === 'deriving') {
         return (
@@ -71,6 +93,55 @@ export default function RegisterForm({
 
                 {step === 'enter' && (
                     <>
+                        <Card className="mb-6">
+                            <CardHeader>
+                                <CardTitle>Pick a handle</CardTitle>
+                                <CardDescription>
+                                    Other people will use this to find you. 3–32
+                                    lowercase letters, digits, or hyphens.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                                <label htmlFor="handle" className="sr-only">
+                                    Handle
+                                </label>
+                                <div className="flex items-center gap-2">
+                                    <span className="select-none text-muted-foreground">
+                                        @
+                                    </span>
+                                    <input
+                                        id="handle"
+                                        type="text"
+                                        value={handle}
+                                        onChange={(e) =>
+                                            onHandleChange(
+                                                e.target.value.toLowerCase(),
+                                            )
+                                        }
+                                        autoComplete="username"
+                                        placeholder="alice-test"
+                                        className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        onClick={onSurpriseMe}
+                                        data-testid="surprise-me"
+                                    >
+                                        Surprise me
+                                    </Button>
+                                </div>
+                                {availability.message && (
+                                    <p
+                                        className={`text-xs ${AVAILABILITY_COLORS[availability.status]}`}
+                                        data-testid="handle-availability"
+                                    >
+                                        {availability.message}
+                                    </p>
+                                )}
+                            </CardContent>
+                        </Card>
+
                         <Card className="mb-6">
                             <CardHeader>
                                 <CardTitle>Choose a password</CardTitle>

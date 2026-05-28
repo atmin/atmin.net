@@ -11,11 +11,14 @@ import (
 
 // MemStore is an in-memory Store for unit tests.
 // Set headErr to a non-nil error to make HeadObject always return that error
-// (used to simulate storage failures in middleware tests).
+// (used to simulate storage failures in middleware tests). Set putErr to a
+// function returning a non-nil error for keys the test wants PutObject to
+// fail on (used to simulate partial write failures in the register flow).
 type MemStore struct {
 	mu      sync.RWMutex
 	objects map[string][]byte
 	headErr error
+	putErr  func(key string) error
 }
 
 func NewMemStore() *MemStore {
@@ -35,6 +38,11 @@ func (m *MemStore) GetObject(_ context.Context, key string) ([]byte, error) {
 func (m *MemStore) PutObject(_ context.Context, key string, data []byte, _ string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.putErr != nil {
+		if err := m.putErr(key); err != nil {
+			return err
+		}
+	}
 	m.objects[key] = append([]byte(nil), data...) // store a copy
 	return nil
 }

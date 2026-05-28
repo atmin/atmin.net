@@ -109,6 +109,7 @@ describe('useChatSend', () => {
         const { base64UrlDecode } = await import('@/lib/crypto');
         const { sendTextMessage } = await import('@/lib/messaging');
         vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
             user_id: 'peer-user',
             sharing_public_key: 'peer-key-b64',
         });
@@ -142,6 +143,7 @@ describe('useChatSend', () => {
         const { sendTextMessage } = await import('@/lib/messaging');
         const { syncAndPublish } = await import('@/lib/inbox-sync');
         vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
             user_id: 'peer-user',
             sharing_public_key: 'peer-key-b64',
         });
@@ -175,7 +177,11 @@ describe('useChatSend', () => {
         vi.mocked(resolve).mockReturnValueOnce(
             new Promise((res) => {
                 resolveResolve = () =>
-                    res({ user_id: 'peer', sharing_public_key: 'k' });
+                    res({
+                        status: 'live',
+                        user_id: 'peer',
+                        sharing_public_key: 'k',
+                    });
             }),
         );
 

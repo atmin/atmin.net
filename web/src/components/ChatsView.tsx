@@ -144,7 +144,7 @@ export default function ChatsView({
                         return (
                             <Link
                                 key={conv.conversationId}
-                                to={`/${encodeURIComponent(handle)}`}
+                                to={`/@${encodeURIComponent(handle)}`}
                                 className="block rounded border border-border bg-card p-4 hover:bg-accent"
                             >
                                 <div className="flex items-center gap-3">

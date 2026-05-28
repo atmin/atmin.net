@@ -92,6 +92,7 @@ async function request<T>(
 // --- Types ---
 
 export interface RegisterRequest {
+    handle: string;
     device_label: string;
     auth_public_key: string;
     sharing_public_key: string;
@@ -107,7 +108,10 @@ export interface RegisterResponse {
     handle: string;
 }
 
-export interface ResolveResponse {
+// Shape of the handle projection at handles/{handle}.json when it's a
+// live (registered) account. Returned as the body of `resolve()` when
+// status === 'live'.
+export interface ResolveLiveData {
     user_id: string;
     sharing_public_key: string;
     display_name?: string;
@@ -117,6 +121,19 @@ export interface ResolveResponse {
     kdf?: KdfParams;
     key_version?: number;
 }
+
+/**
+ * `resolve()` returns a discriminated union over the three handle states
+ * (ADR-0013):
+ *  - `live` — the handle is registered; live projection is in `data`.
+ *  - `not_found` — the handle has never been registered (or its cooldown
+ *    tombstone has elapsed and been swept).
+ *  - `released` — the handle was deleted; in cooldown until `available_at`.
+ */
+export type ResolveResult =
+    | ({ status: 'live' } & ResolveLiveData)
+    | { status: 'not_found' }
+    | { status: 'released'; released_at: string; available_at: string };
 
 export interface ProfileUpdateRequest {
     display_name?: string;
@@ -242,8 +259,31 @@ export function updateProfile(
     return request('PUT', '/v1/profile', { token, body: req });
 }
 
-export function resolve(handle: string): Promise<ResolveResponse> {
-    return request('GET', `/v1/resolve/${encodeURIComponent(handle)}`);
+/**
+ * Resolve a handle to its current state (live / not_found / released).
+ * Dispatches on HTTP status:
+ *   200 → live projection
+ *   404 → never-registered or post-cooldown
+ *   410 → in 30-day cooldown after deletion ({released_at, available_at})
+ * Other 4xx/5xx surface as APIError, same as elsewhere.
+ */
+export async function resolve(handle: string): Promise<ResolveResult> {
+    const res = await fetch(`/v1/resolve/${encodeURIComponent(handle)}`);
+    if (res.status === 404) return { status: 'not_found' };
+    if (res.status === 410) {
+        const body = (await res.json().catch(() => ({}))) as {
+            released_at?: string;
+            available_at?: string;
+        };
+        return {
+            status: 'released',
+            released_at: body.released_at ?? '',
+            available_at: body.available_at ?? '',
+        };
+    }
+    if (!res.ok) await throwForErrorResponse(res);
+    const data = (await res.json()) as ResolveLiveData;
+    return { status: 'live', ...data };
 }
 
 export function send(token: string, envelopes: Envelope[]): Promise<void> {

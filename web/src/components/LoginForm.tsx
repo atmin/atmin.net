@@ -86,13 +86,20 @@ export default function LoginForm({
                                     type="text"
                                     value={handle}
                                     onChange={(e) => {
-                                        setHandle(e.target.value);
+                                        // Lowercase on input so the user sees
+                                        // exactly what'll be submitted —
+                                        // handles are lowercase ASCII per
+                                        // ADR-0013.
+                                        setHandle(e.target.value.toLowerCase());
                                         dismissNoticeOnInput();
                                     }}
-                                    placeholder="copper-falcon"
+                                    placeholder="alice-test"
                                     required
                                     className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
                                 />
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    Handles are lowercase.
+                                </p>
                             </div>
 
                             <div>

@@ -22,9 +22,16 @@ func handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /v1/register
-func handleRegister(store Store, cfg Config) http.HandlerFunc {
+//
+// The client picks the handle (ADR-0013); the server validates, takes the
+// per-handle mutex, claims atomically against an optional cooldown
+// tombstone, then writes profile + device + handle projection. On any
+// write failure after the handle has been claimed, the handle projection
+// is best-effort cleaned up so the namespace doesn't leak.
+func handleRegister(store Store, cfg Config, handleMu *handleMutexMap) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
+			Handle           string     `json:"handle"`
 			DeviceLabel      string     `json:"device_label"`
 			AuthPublicKey    string     `json:"auth_public_key"`
 			SharingPublicKey string     `json:"sharing_public_key"`
@@ -35,8 +42,15 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			writeError(w, errBadRequest)
 			return
 		}
-		if req.DeviceLabel == "" || req.AuthPublicKey == "" || req.SharingPublicKey == "" {
+		if req.Handle == "" || req.DeviceLabel == "" || req.AuthPublicKey == "" || req.SharingPublicKey == "" {
 			writeError(w, errBadRequest)
+			return
+		}
+
+		// Handle validation: charset / length first (cheap), then reserved
+		// list (also cheap, but with distinct error code for the client).
+		if err := validateHandle(req.Handle); err != nil {
+			writeError(w, err.(APIError))
 			return
 		}
 
@@ -53,6 +67,61 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			return
 		}
 
+		// Atomically claim the handle. The mutex serialises against any
+		// concurrent registration of the same handle on this instance.
+		release, err := handleMu.acquire(req.Handle, 500*time.Millisecond)
+		if err != nil {
+			writeError(w, errRegistrationUnavailable)
+			return
+		}
+		defer release()
+
+		// GET-then-PUT inside the mutex. Three branches on the GET:
+		//
+		//   - 404 → handle is free, proceed.
+		//   - 200 live projection → 409 handle_taken.
+		//   - 200 tombstone with released_at in the future → 409 handle_in_cooldown.
+		//   - 200 tombstone with released_at in the past → stale tombstone,
+		//     delete it and proceed.
+		existing, getErr := store.GetObject(r.Context(), keyHandle(req.Handle))
+		if getErr != nil && !errors.Is(getErr, ErrNotFound) {
+			internalError(w, "Failed to read handle")
+			return
+		}
+		if getErr == nil {
+			var h publicHandleData
+			if err := json.Unmarshal(existing, &h); err != nil {
+				internalError(w, "Failed to parse handle projection")
+				return
+			}
+			if h.ReleasedAt != "" {
+				releasedAt, parseErr := time.Parse(time.RFC3339, h.ReleasedAt)
+				if parseErr != nil {
+					// Corrupt tombstone — treat as live to be safe; an
+					// operator can investigate the offending key.
+					writeError(w, errHandleTaken)
+					return
+				}
+				availableAt := releasedAt.Add(handleCooldown)
+				if time.Now().UTC().Before(availableAt) {
+					writeErrorStatus(w, errHandleInCooldown, http.StatusConflict, map[string]any{
+						"released_at":  h.ReleasedAt,
+						"available_at": availableAt.UTC().Format(time.RFC3339),
+					})
+					return
+				}
+				// Stale tombstone: cleanup hasn't gotten here yet. Delete
+				// in-band so the unconditional PUT below replaces it cleanly.
+				if err := store.DeleteObject(r.Context(), keyHandle(req.Handle)); err != nil && !errors.Is(err, ErrNotFound) {
+					internalError(w, "Failed to clear stale tombstone")
+					return
+				}
+			} else {
+				writeError(w, errHandleTaken)
+				return
+			}
+		}
+
 		userID := ulid.Make().String()
 		deviceID := ulid.Make().String()
 		// New accounts always start at key_version 1; the token is v2-format
@@ -60,24 +129,9 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 		// differs between v1 and v2 there.
 		token := generateToken(cfg.ServerSecret, userID, deviceID, 1)
 
-		// Generate handle, retry on collision
-		var handle string
-		for i := 0; i < 10; i++ {
-			candidate := generateHandle()
-			handleKey := keyHandle(candidate)
-			if err := store.HeadObject(r.Context(), handleKey); errors.Is(err, ErrNotFound) {
-				handle = candidate
-				break
-			}
-		}
-		if handle == "" {
-			internalError(w, "Failed to generate handle")
-			return
-		}
-
 		p := &Profile{
 			UserID:           userID,
-			Handle:           handle,
+			Handle:           req.Handle,
 			AuthPublicKey:    req.AuthPublicKey,
 			SharingPublicKey: req.SharingPublicKey,
 			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
@@ -88,24 +142,32 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			p.KDF = req.KDF
 			p.KeyVersion = 1
 		}
+
+		// Order: handle projection FIRST (claims the name under the mutex),
+		// then profile + device. If a later write fails, best-effort delete
+		// the projection so the handle returns to the free pool. The
+		// user_id was never returned, so its abandonment is invisible.
+		if err := putHandleProjection(r.Context(), store, p); err != nil {
+			internalError(w, "Failed to write handle")
+			return
+		}
 		if err := putProfile(r.Context(), store, p); err != nil {
+			// Best-effort cleanup; if even the delete fails the cleanup
+			// routine will sweep this orphan (handle pointing at a missing
+			// profile) on its next pass.
+			store.DeleteObject(r.Context(), keyHandle(req.Handle))
 			internalError(w, "Failed to write profile")
 			return
 		}
-
-		// Write device
 		device, _ := json.Marshal(map[string]string{
 			"device_id":    deviceID,
 			"device_label": req.DeviceLabel,
 			"created_at":   time.Now().UTC().Format(time.RFC3339),
 		})
 		if err := store.PutObject(r.Context(), keyDevice(userID, deviceID), device, "application/json"); err != nil {
+			store.DeleteObject(r.Context(), keyHandle(req.Handle))
+			store.DeleteObject(r.Context(), keyProfile(userID))
 			internalError(w, "Failed to write device")
-			return
-		}
-
-		if err := putHandleProjection(r.Context(), store, p); err != nil {
-			internalError(w, "Failed to write handle")
 			return
 		}
 
@@ -113,7 +175,7 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 			"user_id":   userID,
 			"device_id": deviceID,
 			"token":     token,
-			"handle":    handle,
+			"handle":    req.Handle,
 		})
 	}
 }
@@ -302,6 +364,14 @@ func handleRevokeDevice(store Store, cfg Config, cache *deviceCache) http.Handle
 }
 
 // GET /v1/resolve/{handle}
+//
+// Three outcomes:
+//   - 200 with the live projection (handle is currently registered).
+//   - 410 Gone with { released_at, available_at } when the handle is in
+//     post-deletion cooldown — distinguishable from 404 so clients can
+//     render "deleted, available on YYYY-MM-DD".
+//   - 404 for both never-registered and stale tombstones (cleanup
+//     routine hasn't swept yet but the handle is logically free).
 func handleResolve(store Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		handle := r.PathValue("handle")
@@ -321,7 +391,32 @@ func handleResolve(store Store) http.HandlerFunc {
 		}
 
 		var h publicHandleData
-		json.Unmarshal(handleData, &h)
+		if err := json.Unmarshal(handleData, &h); err != nil {
+			internalError(w, "Failed to parse handle projection")
+			return
+		}
+
+		if h.ReleasedAt != "" {
+			releasedAt, parseErr := time.Parse(time.RFC3339, h.ReleasedAt)
+			if parseErr != nil {
+				// Corrupt tombstone — surface a 404 rather than leak the
+				// malformed value to clients.
+				writeError(w, errNotFound)
+				return
+			}
+			availableAt := releasedAt.Add(handleCooldown)
+			if time.Now().UTC().Before(availableAt) {
+				writeErrorStatus(w, errHandleReleased, http.StatusGone, map[string]any{
+					"released_at":  h.ReleasedAt,
+					"available_at": availableAt.UTC().Format(time.RFC3339),
+				})
+				return
+			}
+			// Stale tombstone: cooldown elapsed, cleanup pending. Logically
+			// free → 404.
+			writeError(w, errNotFound)
+			return
+		}
 
 		// Fallback: if the handle projection predates a field (e.g. an
 		// older projection without the v2 credential params), backfill
@@ -392,7 +487,12 @@ func handleProfile(store Store) http.HandlerFunc {
 }
 
 // DELETE /v1/profile
-func handleDeleteProfile(store Store) http.HandlerFunc {
+//
+// Replaces the handle projection with a tombstone (ADR-0013) so the
+// handle remains reserved for 30 days. Acquires the per-handle mutex to
+// serialise against any in-flight registration of the same handle —
+// rare, but possible if the deletion races a takeover attempt.
+func handleDeleteProfile(store Store, handleMu *handleMutexMap) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := userIDFrom(r.Context())
 
@@ -427,9 +527,28 @@ func handleDeleteProfile(store Store) http.HandlerFunc {
 			}
 		}
 
-		// Delete handle file
+		// Rewrite the handle as a tombstone so it stays reserved for the
+		// cooldown window. The mutex acquisition serialises against any
+		// in-flight registration on the same handle.
 		if p.Handle != "" {
-			store.DeleteObject(r.Context(), keyHandle(p.Handle))
+			release, err := handleMu.acquire(p.Handle, 500*time.Millisecond)
+			if err != nil {
+				// Contended: registration is racing the delete. The
+				// account contents are already gone; surface 503 so the
+				// caller can retry the delete to install the tombstone.
+				writeError(w, errRegistrationUnavailable)
+				return
+			}
+			tombstone := publicHandleData{
+				ReleasedAt: time.Now().UTC().Format(time.RFC3339),
+			}
+			data, _ := json.Marshal(tombstone)
+			err = store.PutObject(r.Context(), keyHandle(p.Handle), data, "application/json")
+			release()
+			if err != nil {
+				internalError(w, "Failed to write handle tombstone")
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)

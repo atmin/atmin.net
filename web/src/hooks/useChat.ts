@@ -127,6 +127,17 @@ export function useChat(
 
         resolve(handle)
             .then(async (res) => {
+                // The chat-open path only proceeds for live accounts;
+                // not_found and released (post-deletion cooldown) both
+                // log and fall through — there's no live counterparty
+                // to message. UI surfacing of the distinction is a
+                // polish follow-up.
+                if (res.status !== 'live') {
+                    console.error(
+                        `cannot open chat: handle "${handle}" is ${res.status}`,
+                    );
+                    return;
+                }
                 if (res.display_name) setChatTitle(res.display_name);
                 await saveContact(res.user_id, handle);
                 uploadContacts(

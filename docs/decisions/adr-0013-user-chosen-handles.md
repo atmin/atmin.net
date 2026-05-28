@@ -230,8 +230,21 @@ The `@` is **UI-only**:
 
 The `@` is added at URL-construction sites in
 [ChatsView.tsx](../../web/src/components/ChatsView.tsx) and
-[chats.tsx](../../web/src/routes/chats.tsx); the React Router
-pattern becomes `path="/@:handle"`.
+[chats.tsx](../../web/src/routes/chats.tsx).
+
+**Routing implementation note.** The intended React Router pattern
+was `path="/@:handle"`, but React Router v7 (current version: v7.13)
+does not support partial-segment dynamic patterns — `:`-prefixed
+parameters must own a whole URL segment, so `/@:handle` never
+matches `/@alice-test`. The actual implementation in
+[app.tsx](../../web/src/routes/app.tsx) uses a splat route
+(`path="*"`) at the end of the route list and discriminates inside a
+wrapper component: paths starting with `/@` whose suffix passes
+`validateHandleShape` render the chat, `/saved` renders Saved
+Messages, everything else renders a 404. User-visible URLs are
+unchanged. If/when React Router gains partial-segment support, the
+splat can be replaced with the original `path="/@:handle"` form
+without a URL change.
 
 ### "Surprise me"
 

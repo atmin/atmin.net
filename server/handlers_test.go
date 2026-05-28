@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,12 +38,28 @@ type testUserInfo struct {
 	AuthPriv ed25519.PrivateKey
 }
 
+// testHandleCounter generates unique, regex-valid handles for the
+// test fixtures. The client picks the handle now (ADR-0013), so every
+// register call needs one distinct enough to avoid cross-test collisions.
+var testHandleCounter atomic.Int64
+
+func nextTestHandle() string {
+	n := testHandleCounter.Add(1)
+	return fmt.Sprintf("test-user-%06d", n)
+}
+
 func registerTestUser(t *testing.T, mux http.Handler, label string) testUserInfo {
+	t.Helper()
+	return registerTestUserWithHandle(t, mux, label, nextTestHandle())
+}
+
+func registerTestUserWithHandle(t *testing.T, mux http.Handler, label, handle string) testUserInfo {
 	t.Helper()
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	pubB64 := b64url.EncodeToString(pub)
 
 	body, _ := json.Marshal(map[string]string{
+		"handle":             handle,
 		"device_label":       label,
 		"auth_public_key":    pubB64,
 		"sharing_public_key": b64url.EncodeToString([]byte("sharing-key-placeholder-32bytes!")),
@@ -52,7 +70,7 @@ func registerTestUser(t *testing.T, mux http.Handler, label string) testUserInfo
 	mux.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("register %s: status = %d; body = %s", label, w.Code, w.Body.String())
+		t.Fatalf("register %s (%s): status = %d; body = %s", label, handle, w.Code, w.Body.String())
 	}
 
 	var resp struct {
@@ -118,12 +136,12 @@ func TestHealthz(t *testing.T) {
 
 func TestRegisterAndResolve(t *testing.T) {
 	store, mux, _ := testServer(t)
-	alice := registerTestUser(t, mux, "Alice's laptop")
+	alice := registerTestUserWithHandle(t, mux, "Alice's laptop", "alice-laptop")
 
-	// Handle should be two words
-	parts := strings.Split(alice.Handle, "-")
-	if len(parts) != 2 {
-		t.Fatalf("handle = %q, want two-word format", alice.Handle)
+	// The handle the client requested is what comes back in the response
+	// and what's projected into S3.
+	if alice.Handle != "alice-laptop" {
+		t.Fatalf("handle = %q, want %q", alice.Handle, "alice-laptop")
 	}
 
 	// Verify profile.json contains handle
@@ -298,10 +316,21 @@ func TestDeleteProfile(t *testing.T) {
 		t.Fatal("profile still exists after delete")
 	}
 
-	// Handle should be gone
-	_, err = store.GetObject(context.Background(), "handles/"+alice.Handle+".json")
-	if err == nil {
-		t.Fatal("handle still exists after delete")
+	// Handle remains as a tombstone (ADR-0013): same key, body has only
+	// released_at, all other fields stripped.
+	handleData, err := store.GetObject(context.Background(), "handles/"+alice.Handle+".json")
+	if err != nil {
+		t.Fatalf("handle should remain as tombstone after delete: %v", err)
+	}
+	var tomb publicHandleData
+	if err := json.Unmarshal(handleData, &tomb); err != nil {
+		t.Fatalf("tombstone parse: %v", err)
+	}
+	if tomb.ReleasedAt == "" {
+		t.Fatal("tombstone missing released_at")
+	}
+	if tomb.UserID != "" || tomb.SharingPublicKey != "" {
+		t.Fatalf("tombstone should strip user_id/sharing_public_key, got %+v", tomb)
 	}
 
 	// Inbox should be gone
@@ -310,11 +339,24 @@ func TestDeleteProfile(t *testing.T) {
 		t.Fatalf("inbox still has %d objects after delete", len(keys))
 	}
 
-	// Resolve should 404
+	// Resolve returns 410 Gone with released_at + available_at while the
+	// cooldown window is open.
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/resolve/"+alice.Handle, nil))
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("resolve after delete: status = %d, want 404", w.Code)
+	if w.Code != http.StatusGone {
+		t.Fatalf("resolve after delete: status = %d, want 410", w.Code)
+	}
+	var resp struct {
+		Error       string `json:"error"`
+		ReleasedAt  string `json:"released_at"`
+		AvailableAt string `json:"available_at"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Error != "released" {
+		t.Fatalf("resolve error = %q, want released", resp.Error)
+	}
+	if resp.ReleasedAt == "" || resp.AvailableAt == "" {
+		t.Fatalf("missing cooldown timestamps: %+v", resp)
 	}
 }
 
@@ -1233,9 +1275,10 @@ func TestRegisterMissingFields(t *testing.T) {
 		name string
 		body map[string]string
 	}{
-		{"missing device_label", map[string]string{"auth_public_key": "abc", "sharing_public_key": "def"}},
-		{"missing auth_public_key", map[string]string{"device_label": "phone", "sharing_public_key": "def"}},
-		{"missing sharing_public_key", map[string]string{"device_label": "phone", "auth_public_key": "abc"}},
+		{"missing handle", map[string]string{"device_label": "phone", "auth_public_key": "abc", "sharing_public_key": "def"}},
+		{"missing device_label", map[string]string{"handle": nextTestHandle(), "auth_public_key": "abc", "sharing_public_key": "def"}},
+		{"missing auth_public_key", map[string]string{"handle": nextTestHandle(), "device_label": "phone", "sharing_public_key": "def"}},
+		{"missing sharing_public_key", map[string]string{"handle": nextTestHandle(), "device_label": "phone", "auth_public_key": "abc"}},
 	}
 
 	for _, tc := range tests {

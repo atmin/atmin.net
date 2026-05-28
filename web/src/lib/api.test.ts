@@ -35,7 +35,7 @@ function mockJsonResponse(data: unknown): unknown {
 }
 
 describe('api - resolve()', () => {
-    it('resolves a valid handle to user info', async () => {
+    it('resolves a valid handle to a live discriminated-union result', async () => {
         const mockResponse = {
             user_id: '01TESTUSER123',
             sharing_public_key: 'base64url-encoded-public-key',
@@ -45,18 +45,46 @@ describe('api - resolve()', () => {
             mockJsonResponse(mockResponse) as Response,
         );
 
-        const result = await resolve('copper-falcon');
+        const result = await resolve('alice-test');
 
-        expect(fetchMock).toHaveBeenCalledWith(
-            '/v1/resolve/copper-falcon',
-            expect.objectContaining({
-                method: 'GET',
-            }),
-        );
+        expect(fetchMock).toHaveBeenCalledWith('/v1/resolve/alice-test');
 
-        expect(result).toEqual(mockResponse);
+        expect(result.status).toBe('live');
+        if (result.status !== 'live') throw new Error('discriminator narrow');
         expect(result.user_id).toBe('01TESTUSER123');
         expect(result.sharing_public_key).toBe('base64url-encoded-public-key');
+    });
+
+    it('returns { status: "not_found" } on 404', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 404,
+            statusText: 'Not Found',
+            json: async () => ({ error: 'not_found' }),
+        } as Response);
+
+        const result = await resolve('nobody');
+        expect(result).toEqual({ status: 'not_found' });
+    });
+
+    it('returns { status: "released", ... } on 410 with cooldown timestamps', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 410,
+            statusText: 'Gone',
+            json: async () => ({
+                error: 'released',
+                released_at: '2026-05-01T00:00:00Z',
+                available_at: '2026-05-31T00:00:00Z',
+            }),
+        } as Response);
+
+        const result = await resolve('rip-handle');
+        expect(result).toEqual({
+            status: 'released',
+            released_at: '2026-05-01T00:00:00Z',
+            available_at: '2026-05-31T00:00:00Z',
+        });
     });
 
     it('URL-encodes special characters in handle', async () => {
@@ -73,26 +101,7 @@ describe('api - resolve()', () => {
 
         expect(fetchMock).toHaveBeenCalledWith(
             '/v1/resolve/test%20handle%20with%20spaces',
-            expect.anything(),
         );
-    });
-
-    it('throws APIError when handle not found (404)', async () => {
-        fetchMock.mockResolvedValueOnce({
-            ok: false,
-            status: 404,
-            statusText: 'Not Found',
-            json: async () => ({
-                error: 'not_found',
-                message: 'Handle not found',
-            }),
-        } as Response);
-
-        await expect(resolve('nonexistent-handle')).rejects.toMatchObject({
-            status: 404,
-            code: 'not_found',
-            message: 'Handle not found',
-        });
     });
 
     it('throws APIError on server error (500)', async () => {
@@ -141,10 +150,7 @@ describe('api - resolve()', () => {
 
         await resolve('');
 
-        expect(fetchMock).toHaveBeenCalledWith(
-            '/v1/resolve/',
-            expect.anything(),
-        );
+        expect(fetchMock).toHaveBeenCalledWith('/v1/resolve/');
     });
 });
 
@@ -166,6 +172,7 @@ describe('api - register()', () => {
         );
 
         const request: RegisterRequest = {
+            handle: 'alice-test',
             device_label: 'My Phone',
             auth_public_key: 'auth-key-base64url',
             sharing_public_key: 'sharing-key-base64url',
@@ -206,6 +213,7 @@ describe('api - register()', () => {
         } as Response);
 
         const invalidRequest: RegisterRequest = {
+            handle: 'alice-test',
             device_label: '',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
@@ -230,6 +238,7 @@ describe('api - register()', () => {
         } as Response);
 
         const invalidRequest: RegisterRequest = {
+            handle: 'alice-test',
             device_label: 'My Device',
             auth_public_key: 'not-valid-base64url!!!',
             sharing_public_key: 'also-invalid!!!',
@@ -254,6 +263,7 @@ describe('api - register()', () => {
         } as Response);
 
         const request: RegisterRequest = {
+            handle: 'alice-test',
             device_label: 'My Device',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
@@ -276,6 +286,7 @@ describe('api - register()', () => {
         } as unknown as Response);
 
         const request: RegisterRequest = {
+            handle: 'alice-test',
             device_label: 'My Device',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
@@ -300,6 +311,7 @@ describe('api - register()', () => {
         } as Response);
 
         const request: RegisterRequest = {
+            handle: 'alice-test',
             device_label: 'My Device',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',

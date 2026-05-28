@@ -8,8 +8,11 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 	// Health check
 	mux.HandleFunc("GET /healthz", handleHealthz)
 
+	// In-process coordination (single-instance — see ADR-0012, ADR-0013).
+	handleMu := newHandleMutexMap()
+
 	// Public endpoints
-	mux.HandleFunc("POST /v1/register", handleRegister(store, cfg))
+	mux.HandleFunc("POST /v1/register", handleRegister(store, cfg, handleMu))
 	mux.HandleFunc("GET /v1/resolve/{handle}", handleResolve(store))
 	mux.HandleFunc("POST /v1/devices", handleAddDevice(store, cfg))
 
@@ -29,7 +32,7 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 		return requireAuth(h, store, cfg, devCache, profCache, false)
 	}
 	mux.HandleFunc("PUT /v1/profile", auth(handleProfile(store)))
-	mux.HandleFunc("DELETE /v1/profile", auth(handleDeleteProfile(store)))
+	mux.HandleFunc("DELETE /v1/profile", auth(handleDeleteProfile(store, handleMu)))
 	mux.HandleFunc("DELETE /v1/devices", auth(handleDeleteDevice(store, devCache)))
 	mux.HandleFunc("POST /v1/devices/revoke", auth(handleRevokeDevice(store, cfg, devCache)))
 	mux.HandleFunc("POST /v1/rotate-keys", authNoKV(handleRotateKeys(store, cfg, profCache, rotationMu)))

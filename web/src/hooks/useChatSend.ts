@@ -34,6 +34,13 @@ export function useChatSend(
         }
         if (!handle) throw new Error('No recipient handle');
         const res = await resolve(handle);
+        if (res.status === 'not_found') {
+            throw new Error('Recipient unknown');
+        }
+        if (res.status === 'released') {
+            throw new Error('Recipient deleted');
+        }
+        // res.status === 'live'
         return {
             recipientUserId: res.user_id,
             recipientPubKeyBytes: base64UrlDecode(res.sharing_public_key),

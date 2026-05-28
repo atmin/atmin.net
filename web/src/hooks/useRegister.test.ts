@@ -2,9 +2,14 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/api', () => ({
-    register: vi.fn(),
-}));
+vi.mock('@/lib/api', async () => {
+    const actual =
+        await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
+    return {
+        ...actual,
+        register: vi.fn(),
+    };
+});
 
 vi.mock('@/lib/auth', () => ({
     saveSession: vi.fn().mockResolvedValue(undefined),

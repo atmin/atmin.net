@@ -1,5 +1,4 @@
 import { useEffect, useMemo } from 'react';
-import { useParams } from 'react-router-dom';
 import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
 import { useChatScroll } from '@/hooks/useChatScroll';
@@ -9,17 +8,18 @@ import type { MediaFile } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
 
 interface Props {
+    handle: string;
     session: Session;
     sessionManager: SessionManager | null;
     onSendingChange?: (sending: boolean) => void;
 }
 
 export default function ChatRoute({
+    handle,
     session,
     sessionManager,
     onSendingChange,
 }: Props) {
-    const { handle } = useParams<{ handle: string }>();
     const {
         messages,
         loading,
@@ -44,13 +44,13 @@ export default function ChatRoute({
         session.token,
     );
 
-    const scroll = useChatScroll(messages, handle ?? '');
+    const scroll = useChatScroll(messages, handle);
 
     return (
         <ChatView
             chatTitle={chatTitle}
             isSaved={handle === 'saved'}
-            handle={handle ?? ''}
+            handle={handle}
             messages={messages}
             loading={loading}
             sending={sending}

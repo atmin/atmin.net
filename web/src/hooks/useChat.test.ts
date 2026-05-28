@@ -5,6 +5,7 @@ import type { Session } from '@/lib/auth';
 
 vi.mock('@/lib/api', () => ({
     resolve: vi.fn().mockResolvedValue({
+        status: 'live',
         user_id: 'peer-user',
         sharing_public_key: 'peer-key',
     }),

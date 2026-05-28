@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 type Profile struct {
@@ -32,15 +33,32 @@ type KDFParams struct {
 // publicHandleData is the projection written to handles/{handle}.json.
 // salt/kdf/key_version are public per-user values (v2 accounts only);
 // senders ignore them, the login fork consumes them.
+//
+// A handle's lifecycle has two shapes:
+//   - Live projection: every field set (UserID, SharingPublicKey, ...).
+//   - Tombstone: only ReleasedAt set; all other fields empty. The handle
+//     is in 30-day cooldown after account deletion (ADR-0013).
+//
+// The two shapes coexist at the same S3 path; resolve/register branch on
+// the presence and timing of ReleasedAt.
 type publicHandleData struct {
-	UserID           string     `json:"user_id"`
-	SharingPublicKey string     `json:"sharing_public_key"`
+	UserID           string     `json:"user_id,omitempty"`
+	SharingPublicKey string     `json:"sharing_public_key,omitempty"`
 	Salt             string     `json:"salt,omitempty"`
 	KDF              *KDFParams `json:"kdf,omitempty"`
 	KeyVersion       int        `json:"key_version,omitempty"`
 	DisplayName      string     `json:"display_name,omitempty"`
 	AvatarURL        string     `json:"avatar_url,omitempty"`
+	// ReleasedAt is set only on tombstones — the original account was
+	// deleted at this RFC3339 timestamp. The handle becomes claimable
+	// at ReleasedAt + handleCooldown.
+	ReleasedAt string `json:"released_at,omitempty"`
 }
+
+// handleCooldown is the post-deletion reservation window (ADR-0013).
+// A tombstone with `released_at + handleCooldown` in the past is stale
+// and can be reclaimed by a new registration.
+const handleCooldown = 30 * 24 * time.Hour
 
 // getProfile reads users/{uid}/profile.json and unmarshals into Profile.
 // Returns ErrNotFound if the profile does not exist.
