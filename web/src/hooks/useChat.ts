@@ -133,6 +133,7 @@ export function useChat(
                     session.token,
                     session.userId,
                     session.backupKey,
+                    session.keyVersion,
                 ).catch((err) => console.error('Contact backup failed:', err));
                 setConvId(conversationId(session.userId, res.user_id));
             })

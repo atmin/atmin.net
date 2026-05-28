@@ -83,6 +83,7 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
                 sharingPrivateKey: keys.sharing.privateKey,
                 sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,
+                keyVersion: profileKeyVersion,
             };
 
             await saveSession(session);

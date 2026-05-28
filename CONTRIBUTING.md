@@ -176,8 +176,9 @@ Single-package Go binary. **Stateless by design**: all durable state lives in S3
 | `handles/{handle}.json` | server (projection of `profile.json` public fields) | Resolve cache |
 | `inbox/{uid}/live/{msg_id}` | server (`POST /v1/send`) | JSON envelope |
 | `inbox/{uid}/archive/{date}-{ULID}` | server (`POST /v1/store/compact`) | CBOR array |
-| `keys/{uid}/live/{session_id}` | client (presigned PUT) | Encrypted Megolm session key |
-| `keys/{uid}/archive/{date}-{ULID}` | server (compaction) | CBOR array |
+| `keys/{uid}/live/{session_id}` | client (presigned PUT) | Encrypted Megolm session key (envelope `{v, iv, ciphertext, session_id, msg_id}`) |
+| `keys/{uid}/archive/{date}-{ULID}` | server (compaction) | CBOR array (entries may mix `v`) |
+| `keys/{uid}/key_chain.json` | client (presigned PUT, rotation only) | Old backup keys wrapped by their successors; absent until first rotation |
 | `media/{uid}/{ulid}` | client (presigned PUT) | AES-256-GCM ciphertext |
 
 Full schema and lifecycle: `docs/specs/mvp-v0.1.md`.

@@ -156,6 +156,7 @@ async function processEnvelopes(
     seenMsgIds: Set<string>,
     token?: string,
     backupKey?: CryptoKey,
+    keyVersion?: number,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
     if (sessionManager) {
         for (const { key, envelope } of envelopes) {
@@ -186,6 +187,7 @@ async function processEnvelopes(
                         inbound.session_id,
                         sessionKeyB64,
                         backupKey,
+                        keyVersion ?? 1,
                     ).catch((err) => console.error('Key backup failed:', err));
                 }
             } catch (error) {
@@ -241,6 +243,7 @@ export async function syncLive(
     sharingPrivateKey: CryptoKey,
     sessionManager: SessionManager | undefined,
     backupKey?: CryptoKey,
+    keyVersion?: number,
 ): Promise<{
     messages: DecryptedMessage[];
     advancedInbounds: Set<string>;
@@ -278,6 +281,7 @@ export async function syncLive(
         new Set(),
         token,
         backupKey,
+        keyVersion,
     );
 
     const lastKey =
@@ -296,6 +300,7 @@ export async function syncArchive(
     sessionManager: SessionManager | undefined,
     seenMsgIds: Set<string>,
     backupKey?: CryptoKey,
+    keyVersion?: number,
 ): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
     const archivePrefix = path.inboxArchive(userId);
     const storedCursor = await loadSyncCursor(archivePrefix);
@@ -339,6 +344,7 @@ export async function syncArchive(
         seenMsgIds,
         token,
         backupKey,
+        keyVersion,
     );
 }
 
@@ -370,6 +376,7 @@ export function syncMessages(
     sharingPrivateKey: CryptoKey,
     sessionManager?: SessionManager,
     backupKey?: CryptoKey,
+    keyVersion?: number,
 ): Promise<DecryptedMessage[]> {
     if (syncInFlight) return syncInFlight;
     syncInFlight = fetchMessages(
@@ -378,6 +385,7 @@ export function syncMessages(
         sharingPrivateKey,
         sessionManager,
         backupKey,
+        keyVersion,
     ).finally(() => {
         syncInFlight = null;
     });
@@ -390,6 +398,7 @@ export async function fetchMessages(
     sharingPrivateKey: CryptoKey,
     sessionManager?: SessionManager,
     backupKey?: CryptoKey,
+    keyVersion?: number,
 ): Promise<DecryptedMessage[]> {
     const live = await syncLive(
         token,
@@ -397,6 +406,7 @@ export async function fetchMessages(
         sharingPrivateKey,
         sessionManager,
         backupKey,
+        keyVersion,
     );
 
     const seenMsgIds = new Set(live.messages.map((m) => m.id));
@@ -407,6 +417,7 @@ export async function fetchMessages(
         sessionManager,
         seenMsgIds,
         backupKey,
+        keyVersion,
     );
 
     const allAdvanced = new Set([

@@ -8,6 +8,13 @@ export interface Session {
     sharingPrivateKey: CryptoKey;
     sharingPublicKeyBytes: Uint8Array;
     backupKey: CryptoKey;
+    /**
+     * Current `profile.key_version` for this account (ADR-0012). Stamped
+     * onto new envelopes so the chain-aware reader can dispatch per-blob;
+     * also bumped in-place after a successful rotation (task 4). Defaults
+     * to 1 for sessions persisted before this field existed.
+     */
+    keyVersion: number;
 }
 
 const LS_PREFIX = 'atmin:';
@@ -21,6 +28,7 @@ export async function saveSession(session: Session): Promise<void> {
         `${LS_PREFIX}sharingPublicKeyBytes`,
         btoa(String.fromCharCode(...session.sharingPublicKeyBytes)),
     );
+    localStorage.setItem(`${LS_PREFIX}keyVersion`, String(session.keyVersion));
 
     await putKey('sharingPrivateKey', session.sharingPrivateKey);
     await putKey('backupKey', session.backupKey);
@@ -49,6 +57,13 @@ export async function loadSession(): Promise<Session | null> {
             .map((c) => c.charCodeAt(0)),
     );
 
+    // Sessions written before ADR-0012 lacked keyVersion — default to 1.
+    const kvRaw = localStorage.getItem(`${LS_PREFIX}keyVersion`);
+    const keyVersion =
+        kvRaw && Number.parseInt(kvRaw, 10) > 0
+            ? Number.parseInt(kvRaw, 10)
+            : 1;
+
     return {
         token,
         userId,
@@ -57,6 +72,7 @@ export async function loadSession(): Promise<Session | null> {
         sharingPrivateKey,
         sharingPublicKeyBytes,
         backupKey,
+        keyVersion,
     };
 }
 
@@ -66,6 +82,7 @@ export function clearToken(): void {
     localStorage.removeItem(`${LS_PREFIX}deviceId`);
     localStorage.removeItem(`${LS_PREFIX}handle`);
     localStorage.removeItem(`${LS_PREFIX}sharingPublicKeyBytes`);
+    localStorage.removeItem(`${LS_PREFIX}keyVersion`);
 }
 
 export async function clearSession(): Promise<void> {

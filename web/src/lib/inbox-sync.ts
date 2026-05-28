@@ -52,6 +52,7 @@ export async function syncAndPublish(
             session.sharingPrivateKey,
             sessionManager,
             session.backupKey,
+            session.keyVersion,
         );
     } catch (err) {
         console.error('Inbox sync failed:', err);

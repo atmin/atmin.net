@@ -40,6 +40,7 @@ export function useSession(): SessionState {
     const deviceId = session?.deviceId ?? null;
     const token = session?.token ?? null;
     const backupKey = session?.backupKey ?? null;
+    const keyVersion = session?.keyVersion ?? 1;
     useEffect(() => {
         if (!userId || !deviceId || !token || !backupKey) return;
 
@@ -67,13 +68,22 @@ export function useSession(): SessionState {
                         sessionId,
                         sessionKey,
                         backupKey,
+                        keyVersion,
                     ).catch((err) => console.error('Key backup failed:', err)),
             );
             if (cancelled) return;
 
-            // Restore inbound session keys before first sync (see docs/scenarios/account-recovery.md)
+            // Restore inbound session keys before first sync (see docs/scenarios/account-recovery.md).
+            // Pass currentVersion so blobs written under an older kv get
+            // decrypted via the chain walker (ADR-0012).
             try {
-                await restoreSessionKeys(token, userId, backupKey, mgr);
+                await restoreSessionKeys(
+                    token,
+                    userId,
+                    backupKey,
+                    keyVersion,
+                    mgr,
+                );
             } catch (err) {
                 console.error('Session key restore failed:', err);
             }
@@ -83,7 +93,7 @@ export function useSession(): SessionState {
 
             // Restore contacts from backup (new device restore)
             if (cancelled) return;
-            restoreContacts(token, userId, backupKey).catch((err) =>
+            restoreContacts(token, userId, backupKey, keyVersion).catch((err) =>
                 console.error('Contact restore failed:', err),
             );
         })();
@@ -95,7 +105,7 @@ export function useSession(): SessionState {
                 return null;
             });
         };
-    }, [userId, deviceId, token, backupKey]);
+    }, [userId, deviceId, token, backupKey, keyVersion]);
 
     const tokenRef = useRef(session?.token ?? null);
     tokenRef.current = session?.token ?? null;

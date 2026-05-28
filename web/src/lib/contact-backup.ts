@@ -1,14 +1,23 @@
 /**
  * Contact backup — encrypt/upload and download/decrypt the contacts list.
  *
- * Contacts are encrypted with the user's backup key (AES-256-GCM)
- * and stored at `users/{userId}/contacts.json`.
+ * Contacts are encrypted with the user's *current* backup key
+ * (AES-256-GCM) and stored at `users/{userId}/contacts.json` in the
+ * versioned envelope shared with key backup (ADR-0012). After a
+ * rotation, a stale read sees `v: oldKv` and recovers the old backup
+ * key via the chain walker; the next write re-wraps with the new key.
+ *
  * Last-write-wins. All devices read the same file.
  */
 
 import { putWithRetry, storeGet, storePresign } from './api';
 import { backupDecrypt, backupEncrypt } from './crypto';
 import { loadAllContacts, saveContact } from './db';
+import {
+    parseKeyBackupEnvelope,
+    wrapKeyBackupEnvelope,
+} from './key-backup-envelope';
+import { fetchChain, resolveBackupKey } from './key-chain';
 import { path } from './paths';
 
 interface ContactEntry {
@@ -25,6 +34,7 @@ export async function uploadContacts(
     token: string,
     userId: string,
     backupKey: CryptoKey,
+    keyVersion: number,
 ): Promise<void> {
     const contactMap = await loadAllContacts();
     const contacts: ContactEntry[] = [];
@@ -36,11 +46,12 @@ export async function uploadContacts(
     const plaintext = new TextEncoder().encode(JSON.stringify(blob));
 
     const encrypted = await backupEncrypt(backupKey, plaintext);
-    const encryptedBlob = JSON.stringify({
-        iv: btoa(String.fromCharCode(...encrypted.iv)),
-        ciphertext: btoa(String.fromCharCode(...encrypted.ciphertext)),
-    });
-    const blobBytes = new TextEncoder().encode(encryptedBlob);
+    const env = wrapKeyBackupEnvelope(
+        keyVersion,
+        encrypted.iv,
+        encrypted.ciphertext,
+    );
+    const blobBytes = new TextEncoder().encode(JSON.stringify(env));
 
     const key = path.contacts(userId);
     const { presigned_url } = await storePresign(token, key, blobBytes.length);
@@ -52,6 +63,7 @@ export async function restoreContacts(
     token: string,
     userId: string,
     backupKey: CryptoKey,
+    currentVersion: number,
 ): Promise<number> {
     let blob: ArrayBuffer;
     try {
@@ -61,13 +73,31 @@ export async function restoreContacts(
         return 0;
     }
 
-    const { iv, ciphertext } = JSON.parse(new TextDecoder().decode(blob));
-    const ivBytes = Uint8Array.from(atob(iv), (c) => c.charCodeAt(0));
-    const ctBytes = Uint8Array.from(atob(ciphertext), (c) => c.charCodeAt(0));
+    const parsed = parseKeyBackupEnvelope(
+        JSON.parse(new TextDecoder().decode(blob)),
+    );
 
-    const plainBytes = await backupDecrypt(backupKey, {
-        iv: ivBytes,
-        ciphertext: ctBytes,
+    let decryptor = backupKey;
+    if (parsed.v !== currentVersion) {
+        if (parsed.v > currentVersion) {
+            console.warn(
+                `contacts blob written under newer kv ${parsed.v} (current ${currentVersion}); skipping restore`,
+            );
+            return 0;
+        }
+        const chain = await fetchChain(token, userId);
+        decryptor = await resolveBackupKey(
+            userId,
+            backupKey,
+            currentVersion,
+            parsed.v,
+            chain,
+        );
+    }
+
+    const plainBytes = await backupDecrypt(decryptor, {
+        iv: parsed.iv,
+        ciphertext: parsed.ciphertext,
     });
 
     const data = JSON.parse(

@@ -13,5 +13,6 @@ export const path = {
     keysLive: (uid: string) => `keys/${uid}/live/`,
     keysArchive: (uid: string) => `keys/${uid}/archive/`,
     keyBackup: (uid: string, sid: string) => `keys/${uid}/live/${sid}`,
+    keyChain: (uid: string) => `keys/${uid}/key_chain.json`,
     media: (uid: string, ulid: string) => `media/${uid}/${ulid}`,
 };

@@ -27,6 +27,7 @@ const fakeSession = {
     sharingPrivateKey: 'pk' as unknown as CryptoKey,
     sharingPublicKeyBytes: new Uint8Array(),
     backupKey: 'bk' as unknown as CryptoKey,
+    keyVersion: 1,
 };
 const fakeSessionManager = {} as Parameters<typeof syncAndPublish>[1];
 
@@ -63,6 +64,7 @@ describe('syncAndPublish', () => {
             fakeSession.sharingPrivateKey,
             fakeSessionManager,
             fakeSession.backupKey,
+            fakeSession.keyVersion,
         );
         expect(saveMessagesMock).toHaveBeenCalledWith('u', [msg]);
         expect(listener).toHaveBeenCalledTimes(1);

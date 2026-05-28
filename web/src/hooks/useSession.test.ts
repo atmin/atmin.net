@@ -39,6 +39,7 @@ const fakeSession: Session = {
     sharingPrivateKey: {} as CryptoKey,
     sharingPublicKeyBytes: new Uint8Array([1, 2, 3]),
     backupKey: {} as CryptoKey,
+    keyVersion: 1,
 };
 
 describe('useSession', () => {

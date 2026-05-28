@@ -71,6 +71,7 @@ describe('backupSessionKey retry', () => {
             sender.session_id,
             sender.session_key(),
             backupKey,
+            1,
         );
         expect(putCalls).toBe(2);
 
@@ -93,6 +94,7 @@ describe('backupSessionKey retry', () => {
                 sender.session_id,
                 sender.session_key(),
                 backupKey,
+                1,
             ),
         ).rejects.toThrow();
 
@@ -108,7 +110,14 @@ describe('backupSessionKey', () => {
         const sessionKey = sender.session_key();
         const sessionId = sender.session_id;
 
-        await backupSessionKey(token, userId, sessionId, sessionKey, backupKey);
+        await backupSessionKey(
+            token,
+            userId,
+            sessionId,
+            sessionKey,
+            backupKey,
+            1,
+        );
 
         const expectedPath = `keys/${userId}/live/${sessionId}`;
         expect(stored.has(expectedPath)).toBe(true);
@@ -144,7 +153,14 @@ describe('restoreSessionKeys', () => {
         const sessionKey = sender.session_key();
         const sessionId = sender.session_id;
         const ciphertext = sender.encrypt('secret message');
-        await backupSessionKey(token, userId, sessionId, sessionKey, backupKey);
+        await backupSessionKey(
+            token,
+            userId,
+            sessionId,
+            sessionKey,
+            backupKey,
+            1,
+        );
 
         // Simulate Device B: fresh IDB, restore from backup
         globalThis.indexedDB = new IDBFactory();
@@ -153,6 +169,7 @@ describe('restoreSessionKeys', () => {
             token,
             userId,
             backupKey,
+            1,
             freshMgr,
         );
 
@@ -193,6 +210,7 @@ describe('restoreSessionKeys', () => {
             token,
             userId,
             backupKey,
+            1,
             freshMgr,
         );
 
@@ -218,11 +236,24 @@ describe('restoreSessionKeys', () => {
             sender.session_id,
             sender.session_key(),
             backupKey,
+            1,
         );
 
         const mgr = await createSessionManager(wasm);
-        const first = await restoreSessionKeys(token, userId, backupKey, mgr);
-        const second = await restoreSessionKeys(token, userId, backupKey, mgr);
+        const first = await restoreSessionKeys(
+            token,
+            userId,
+            backupKey,
+            1,
+            mgr,
+        );
+        const second = await restoreSessionKeys(
+            token,
+            userId,
+            backupKey,
+            1,
+            mgr,
+        );
 
         expect(first).toBe(1);
         expect(second).toBe(0);
@@ -245,6 +276,7 @@ describe('restoreSessionKeys', () => {
             senderA.session_id,
             senderA.session_key(),
             backupKey,
+            1,
         );
 
         // Archive: session B
@@ -273,6 +305,7 @@ describe('restoreSessionKeys', () => {
             token,
             userId,
             backupKey,
+            1,
             freshMgr,
         );
 
@@ -294,6 +327,7 @@ describe('restoreSessionKeys', () => {
             token,
             userId,
             backupKey,
+            1,
             mgr,
         );
         expect(restored).toBe(0);
@@ -315,6 +349,7 @@ describe('restoreSessionKeys', () => {
             senderA.session_id,
             senderA.session_key(),
             backupKey,
+            1,
         );
 
         // Session B: only in a same-day archive — exactly what compact deletes.
@@ -345,6 +380,7 @@ describe('restoreSessionKeys', () => {
             token,
             userId,
             backupKey,
+            1,
             freshMgr,
         );
 
@@ -370,11 +406,12 @@ describe('restoreSessionKeys', () => {
             sender.session_id,
             sender.session_key(),
             backupKey,
+            1,
         );
 
         const mgr = await createSessionManager(wasm);
         vi.mocked(storeCompact).mockClear();
-        await restoreSessionKeys(token, userId, backupKey, mgr);
+        await restoreSessionKeys(token, userId, backupKey, 1, mgr);
 
         expect(vi.mocked(storeCompact)).toHaveBeenCalledOnce();
         expect(vi.mocked(storeCompact)).toHaveBeenCalledWith(
@@ -397,7 +434,7 @@ describe('restoreSessionKeys', () => {
 
         const mgr = await createSessionManager(wasm);
         vi.mocked(storeCompact).mockClear();
-        await restoreSessionKeys(token, userId, backupKey, mgr);
+        await restoreSessionKeys(token, userId, backupKey, 1, mgr);
 
         expect(vi.mocked(storeCompact)).not.toHaveBeenCalled();
 
@@ -417,6 +454,7 @@ describe('restoreSessionKeys', () => {
             senderA.session_id,
             senderA.session_key(),
             backupKey,
+            1,
         );
 
         // Poison a second key: storeGet will throw for it
@@ -428,6 +466,7 @@ describe('restoreSessionKeys', () => {
             token,
             userId,
             backupKey,
+            1,
             mgr,
         );
 
@@ -435,6 +474,209 @@ describe('restoreSessionKeys', () => {
         expect(await mgr.getInbound(senderA.session_id)).not.toBeNull();
 
         senderA.free();
+        mgr.destroy();
+    });
+});
+
+describe('versioned envelopes + chain walking', () => {
+    it('writes a v2-shaped envelope when keyVersion = 2', async () => {
+        const { backupSessionKey } = await import('./key-backup');
+        const backupKey = await makeBackupKey();
+        const sender = new MegolmOutbound();
+
+        await backupSessionKey(
+            token,
+            userId,
+            sender.session_id,
+            sender.session_key(),
+            backupKey,
+            2,
+        );
+
+        const blob = stored.get(`keys/${userId}/live/${sender.session_id}`);
+        const raw = JSON.parse(new TextDecoder().decode(blob as Uint8Array));
+        expect(raw.v).toBe(2);
+        expect(raw.session_id).toBe(sender.session_id);
+        expect(raw.msg_id).toBe(sender.session_id);
+
+        sender.free();
+    });
+
+    it('restores a v1 legacy-shape live blob on a current=v1 account', async () => {
+        const { restoreSessionKeys } = await import('./key-backup');
+        const backupKey = await makeBackupKey();
+        const sender = new MegolmOutbound();
+        const sessionKey = sender.session_key();
+        const sessionId = sender.session_id;
+        const ciphertext = sender.encrypt('legacy live');
+
+        const { iv, ciphertext: ct } = await backupEncrypt(
+            backupKey,
+            new TextEncoder().encode(sessionKey),
+        );
+        const legacy = JSON.stringify({
+            msg_id: sessionId,
+            session_id: sessionId,
+            iv: btoa(String.fromCharCode(...iv)),
+            ciphertext: btoa(String.fromCharCode(...ct)),
+        });
+        stored.set(
+            `keys/${userId}/live/${sessionId}`,
+            new TextEncoder().encode(legacy),
+        );
+
+        const mgr = await createSessionManager(wasm);
+        const restored = await restoreSessionKeys(
+            token,
+            userId,
+            backupKey,
+            1,
+            mgr,
+        );
+        expect(restored).toBe(1);
+        const session = await mgr.getInbound(sessionId);
+        expect(session?.decrypt(ciphertext)).toBe('legacy live');
+
+        sender.free();
+        mgr.destroy();
+    });
+
+    it('walks the chain to restore a v1 blob on a current=v2 account', async () => {
+        const { backupSessionKey, restoreSessionKeys } = await import(
+            './key-backup'
+        );
+        const { buildChainLink, appendChainLink } = await import('./key-chain');
+
+        const v1Key = (
+            await deriveKeys(generateBackupSecret(), { extractable: true })
+        ).backupKey;
+        const v2Key = (
+            await deriveKeys(generateBackupSecret(), { extractable: true })
+        ).backupKey;
+
+        // Pre-existing v1 blob written under the old key. Snapshot
+        // session_key BEFORE the first encrypt — the Megolm ratchet
+        // advances on every encrypt and a later snapshot can't decrypt
+        // earlier messages.
+        const sender = new MegolmOutbound();
+        const v1SessionId = sender.session_id;
+        const v1SessionKey = sender.session_key();
+        const ciphertextV1 = sender.encrypt('encrypted under v1');
+        const v1Enc = await backupEncrypt(
+            v1Key,
+            new TextEncoder().encode(v1SessionKey),
+        );
+        stored.set(
+            `keys/${userId}/live/${v1SessionId}`,
+            new TextEncoder().encode(
+                JSON.stringify({
+                    v: 1,
+                    msg_id: v1SessionId,
+                    session_id: v1SessionId,
+                    iv: btoa(String.fromCharCode(...v1Enc.iv)),
+                    ciphertext: btoa(String.fromCharCode(...v1Enc.ciphertext)),
+                }),
+            ),
+        );
+
+        // Fresh v2 blob via the production write path.
+        const sender2 = new MegolmOutbound();
+        const v2SessionId = sender2.session_id;
+        const v2SessionKey = sender2.session_key();
+        const ciphertextV2 = sender2.encrypt('encrypted under v2');
+        await backupSessionKey(
+            token,
+            userId,
+            v2SessionId,
+            v2SessionKey,
+            v2Key,
+            2,
+        );
+
+        await appendChainLink(
+            token,
+            userId,
+            await buildChainLink(1, 2, v1Key, v2Key),
+        );
+
+        const mgr = await createSessionManager(wasm);
+        const restored = await restoreSessionKeys(token, userId, v2Key, 2, mgr);
+        expect(restored).toBe(2);
+
+        const s1 = await mgr.getInbound(v1SessionId);
+        expect(s1?.decrypt(ciphertextV1)).toBe('encrypted under v1');
+        const s2 = await mgr.getInbound(v2SessionId);
+        expect(s2?.decrypt(ciphertextV2)).toBe('encrypted under v2');
+
+        sender.free();
+        sender2.free();
+        mgr.destroy();
+    });
+
+    it('decrypts a mixed-version archive (v1 + v2 entries in one CBOR blob)', async () => {
+        const { restoreSessionKeys } = await import('./key-backup');
+        const { buildChainLink, appendChainLink } = await import('./key-chain');
+
+        const v1Key = (
+            await deriveKeys(generateBackupSecret(), { extractable: true })
+        ).backupKey;
+        const v2Key = (
+            await deriveKeys(generateBackupSecret(), { extractable: true })
+        ).backupKey;
+
+        const sA = new MegolmOutbound();
+        const sB = new MegolmOutbound();
+        const sAKey = sA.session_key();
+        const sBKey = sB.session_key();
+        const ctA = sA.encrypt('alpha');
+        const ctB = sB.encrypt('beta');
+
+        const encA = await backupEncrypt(
+            v1Key,
+            new TextEncoder().encode(sAKey),
+        );
+        const encB = await backupEncrypt(
+            v2Key,
+            new TextEncoder().encode(sBKey),
+        );
+        const archive = [
+            {
+                v: 1,
+                msg_id: sA.session_id,
+                session_id: sA.session_id,
+                iv: btoa(String.fromCharCode(...encA.iv)),
+                ciphertext: btoa(String.fromCharCode(...encA.ciphertext)),
+            },
+            {
+                v: 2,
+                msg_id: sB.session_id,
+                session_id: sB.session_id,
+                iv: btoa(String.fromCharCode(...encB.iv)),
+                ciphertext: btoa(String.fromCharCode(...encB.ciphertext)),
+            },
+        ];
+        stored.set(
+            `keys/${userId}/archive/2025-01-01-MIXEDARCHIVE`,
+            new Uint8Array(cborEncode(archive)),
+        );
+        await appendChainLink(
+            token,
+            userId,
+            await buildChainLink(1, 2, v1Key, v2Key),
+        );
+
+        const mgr = await createSessionManager(wasm);
+        const restored = await restoreSessionKeys(token, userId, v2Key, 2, mgr);
+        expect(restored).toBe(2);
+        expect((await mgr.getInbound(sA.session_id))?.decrypt(ctA)).toBe(
+            'alpha',
+        );
+        expect((await mgr.getInbound(sB.session_id))?.decrypt(ctB)).toBe(
+            'beta',
+        );
+
+        sA.free();
+        sB.free();
         mgr.destroy();
     });
 });

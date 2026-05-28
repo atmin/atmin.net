@@ -318,6 +318,54 @@ describe('Web Crypto', () => {
         });
     });
 
+    describe('deriveKeys extractable backup-key option', () => {
+        it('default backup key is non-extractable', async () => {
+            const keys = await deriveKeys(generateBackupSecret());
+            expect(keys.backupKey.extractable).toBe(false);
+            await expect(
+                crypto.subtle.exportKey('raw', keys.backupKey),
+            ).rejects.toThrow();
+        });
+
+        it('{extractable: true} produces an exportable 32-byte backup key', async () => {
+            const keys = await deriveKeys(generateBackupSecret(), {
+                extractable: true,
+            });
+            expect(keys.backupKey.extractable).toBe(true);
+            const raw = new Uint8Array(
+                await crypto.subtle.exportKey('raw', keys.backupKey),
+            );
+            expect(raw).toHaveLength(32);
+        });
+
+        it('the same secret with {extractable: true} yields the same key bytes as the default', async () => {
+            const secret = generateBackupSecret();
+            const exportable = (await deriveKeys(secret, { extractable: true }))
+                .backupKey;
+            const raw = new Uint8Array(
+                await crypto.subtle.exportKey('raw', exportable),
+            );
+            // The non-extractable variant can't be exported, but it must
+            // decrypt what the extractable one encrypts.
+            const std = (await deriveKeys(secret)).backupKey;
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const ct = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                exportable,
+                new TextEncoder().encode('roundtrip'),
+            );
+            const pt = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv },
+                std,
+                ct,
+            );
+            expect(new TextDecoder().decode(new Uint8Array(pt))).toBe(
+                'roundtrip',
+            );
+            expect(raw.byteLength).toBe(32);
+        });
+    });
+
     describe('AES-256-GCM key backup', () => {
         it('encrypts and decrypts', async () => {
             const keys = await deriveKeys(generateBackupSecret());

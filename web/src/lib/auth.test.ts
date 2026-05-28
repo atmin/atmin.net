@@ -60,6 +60,7 @@ describe('session - Session management', () => {
             sharingPrivateKey: keys.sharing.privateKey,
             sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
             backupKey: keys.backupKey,
+            keyVersion: 1,
         };
     });
 

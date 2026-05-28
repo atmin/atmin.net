@@ -519,3 +519,144 @@ describe('db - Sync cursors', () => {
         expect(await loadSyncCursor('inbox/user2/live/')).toBeUndefined();
     });
 });
+
+// ── v6 migration (backup_keys_by_version) ────────────────────────────
+
+describe('schema migration v5 → v6 (backup_keys_by_version)', () => {
+    function openAt(version: number): Promise<IDBDatabase> {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('atmin', version);
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => resolve(req.result);
+            req.onupgradeneeded = (event) => {
+                const db = (event.target as IDBOpenDBRequest).result;
+                if (!db.objectStoreNames.contains('keys')) {
+                    db.createObjectStore('keys');
+                }
+                if (!db.objectStoreNames.contains('messages')) {
+                    const s = db.createObjectStore('messages', {
+                        keyPath: 'id',
+                    });
+                    s.createIndex('userId', 'userId');
+                    s.createIndex('timestamp', 'timestamp');
+                    s.createIndex('userId_timestamp', ['userId', 'timestamp']);
+                    s.createIndex('fromUser', 'fromUser');
+                }
+                if (!db.objectStoreNames.contains('conversations')) {
+                    const s = db.createObjectStore('conversations', {
+                        keyPath: 'conversationId',
+                    });
+                    s.createIndex(
+                        'lastMessageTimestamp',
+                        'lastMessageTimestamp',
+                    );
+                }
+                if (!db.objectStoreNames.contains('contacts')) {
+                    db.createObjectStore('contacts', { keyPath: 'userId' });
+                }
+                if (!db.objectStoreNames.contains('megolm_outbound')) {
+                    db.createObjectStore('megolm_outbound', { keyPath: 'id' });
+                }
+                if (!db.objectStoreNames.contains('megolm_inbound')) {
+                    db.createObjectStore('megolm_inbound', {
+                        keyPath: 'sessionId',
+                    });
+                }
+                if (!db.objectStoreNames.contains('megolm_key_shares')) {
+                    db.createObjectStore('megolm_key_shares', {
+                        keyPath: ['sessionId', 'recipientUserId'],
+                    });
+                }
+                if (!db.objectStoreNames.contains('sync_cursors')) {
+                    db.createObjectStore('sync_cursors', { keyPath: 'prefix' });
+                }
+            };
+        });
+    }
+
+    it('opening at v6 on top of a populated v5 DB preserves rows and adds backup_keys_by_version', async () => {
+        const v5 = await openAt(5);
+        const tx = v5.transaction(
+            [
+                'contacts',
+                'megolm_outbound',
+                'sync_cursors',
+                'messages',
+                'conversations',
+                'megolm_inbound',
+                'megolm_key_shares',
+            ],
+            'readwrite',
+        );
+        tx.objectStore('contacts').put({
+            userId: 'U_BOB',
+            handle: 'cool-badger',
+        });
+        tx.objectStore('megolm_outbound').put({
+            id: 'current',
+            pickleJson: '{}',
+            sessionId: 'S1',
+            messageIndex: 7,
+        });
+        tx.objectStore('sync_cursors').put({
+            prefix: 'inbox/U/live/',
+            cursor: 'X',
+        });
+        tx.objectStore('messages').put({
+            id: 'M1',
+            userId: 'U',
+            conversationId: 'C',
+            fromUser: 'A',
+            fromDevice: 'D',
+            text: 'hi',
+            timestamp: 42,
+        });
+        tx.objectStore('conversations').put({
+            conversationId: 'C',
+            lastMessageText: 'hi',
+            lastMessageTimestamp: 42,
+            messageCount: 1,
+        });
+        tx.objectStore('megolm_inbound').put({
+            sessionId: 'S1',
+            fromUser: 'A',
+            fromDevice: 'D',
+            pickleJson: '{}',
+        });
+        tx.objectStore('megolm_key_shares').put({
+            sessionId: 'S1',
+            recipientUserId: 'B',
+            sharedAt: 1,
+        });
+        await new Promise<void>((res, rej) => {
+            tx.oncomplete = () => res();
+            tx.onerror = () => rej(tx.error);
+        });
+        v5.close();
+
+        // Trigger the v6 migration via the production open path.
+        expect((await loadAllContacts()).get('U_BOB')).toBe('cool-badger');
+        expect((await loadOutboundSession())?.sessionId).toBe('S1');
+        expect(await loadSyncCursor('inbox/U/live/')).toBe('X');
+        expect((await loadMessages('U'))[0]?.text).toBe('hi');
+        expect((await loadConversations())[0]?.conversationId).toBe('C');
+        expect((await loadInboundSession('S1'))?.pickleJson).toBe('{}');
+        expect(await hasKeyShare('S1', 'B')).toBe(true);
+
+        const { getBackupKey } = await import('./db');
+        expect(await getBackupKey('U_BOB', 1)).toBeUndefined();
+    });
+
+    it('fresh install creates backup_keys_by_version and round-trips a key', async () => {
+        await saveContact('U_X', 'h');
+        expect(await getContact('U_X')).toBe('h');
+
+        const { putBackupKey, getBackupKey } = await import('./db');
+        const { deriveKeys, generateBackupSecret } = await import('./crypto');
+        const key = (await deriveKeys(generateBackupSecret())).backupKey;
+        await putBackupKey('U_X', 1, key);
+        const got = await getBackupKey('U_X', 1);
+        expect(got).toBeDefined();
+        expect(got?.type).toBe('secret');
+    });
+});

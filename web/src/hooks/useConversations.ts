@@ -100,6 +100,7 @@ export function useConversations(
                         session.token,
                         session.userId,
                         session.backupKey,
+                        session.keyVersion,
                     ).catch((err) =>
                         console.error('Contact backup failed:', err),
                     );

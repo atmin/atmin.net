@@ -63,6 +63,9 @@ export function useRegister(
                 sharingPrivateKey: keys.sharing.privateKey,
                 sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
                 backupKey: keys.backupKey,
+                // Fresh v2 accounts start at key_version 1; v1 accounts also
+                // ride implicit kv=1 (their profile omits the field).
+                keyVersion: 1,
             };
 
             await saveSession(session);

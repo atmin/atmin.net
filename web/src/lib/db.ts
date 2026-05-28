@@ -11,7 +11,7 @@
  */
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
 const CONVERSATIONS_STORE = 'conversations';
@@ -20,6 +20,7 @@ const MEGOLM_OUTBOUND_STORE = 'megolm_outbound';
 const MEGOLM_INBOUND_STORE = 'megolm_inbound';
 const MEGOLM_KEY_SHARES_STORE = 'megolm_key_shares';
 const SYNC_CURSORS_STORE = 'sync_cursors';
+const BACKUP_KEYS_STORE = 'backup_keys_by_version';
 
 export interface StoredOutboundSession {
     id: 'current';
@@ -183,6 +184,13 @@ async function openDB(): Promise<IDBDatabase> {
                     keyPath: 'prefix',
                 });
             }
+
+            // v6: Per-(userId, key_version) memoized backup keys recovered
+            // by walking keys/{uid}/key_chain.json (ADR-0012). The chain
+            // walker populates this lazily; on a fresh install it's empty.
+            if (!database.objectStoreNames.contains(BACKUP_KEYS_STORE)) {
+                database.createObjectStore(BACKUP_KEYS_STORE);
+            }
         };
     });
 }
@@ -208,6 +216,37 @@ export async function clearKeys(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(KEYS_STORE, 'readwrite');
     tx.objectStore(KEYS_STORE).clear();
+    return awaitTx(tx);
+}
+
+// ── Backup keys by version (ADR-0012 chain memo) ───────────────────
+
+export async function putBackupKey(
+    userId: string,
+    version: number,
+    key: CryptoKey,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(BACKUP_KEYS_STORE, 'readwrite');
+    tx.objectStore(BACKUP_KEYS_STORE).put(key, [userId, version]);
+    return awaitTx(tx);
+}
+
+export async function getBackupKey(
+    userId: string,
+    version: number,
+): Promise<CryptoKey | undefined> {
+    const database = await openDB();
+    const tx = database.transaction(BACKUP_KEYS_STORE, 'readonly');
+    return awaitReq<CryptoKey | undefined>(
+        tx.objectStore(BACKUP_KEYS_STORE).get([userId, version]),
+    );
+}
+
+export async function clearBackupKeys(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(BACKUP_KEYS_STORE, 'readwrite');
+    tx.objectStore(BACKUP_KEYS_STORE).clear();
     return awaitTx(tx);
 }
 

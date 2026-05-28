@@ -126,7 +126,19 @@ export interface DerivedKeys {
     backupKey: CryptoKey;
 }
 
-export async function deriveKeys(secret: Uint8Array): Promise<DerivedKeys> {
+// Options for deriveKeys. `extractable` is the rotation-only escape hatch
+// described in ADR-0012 (Backup migration): at the moment of rotation the
+// caller re-derives the *old* backup key with extractable=true so it can
+// be `subtle.exportKey('raw')`-ed into the chain-link plaintext, then
+// dropped. The persisted at-rest backup key in IDB is always non-extractable.
+export interface DeriveKeysOptions {
+    extractable?: boolean;
+}
+
+export async function deriveKeys(
+    secret: Uint8Array,
+    opts: DeriveKeysOptions = {},
+): Promise<DerivedKeys> {
     const authSeed = new Uint8Array(await hkdfDerive(secret, 'auth-v1'));
     const sharingSeed = new Uint8Array(await hkdfDerive(secret, 'sharing-v1'));
     const backupKeyBytes = await hkdfDerive(secret, 'backup-v1');
@@ -180,12 +192,14 @@ export async function deriveKeys(secret: Uint8Array): Promise<DerivedKeys> {
         [],
     );
 
-    // AES-256-GCM backup key
+    // AES-256-GCM backup key. Default non-extractable; rotation re-derives
+    // the OLD key with extractable=true once, exports it into a chain link,
+    // and discards. See ADR-0012 — Backup migration.
     const backupKey = await crypto.subtle.importKey(
         'raw',
         backupKeyBytes,
         { name: 'AES-GCM' },
-        false,
+        opts.extractable ?? false,
         ['encrypt', 'decrypt'],
     );
 
