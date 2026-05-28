@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { describe, expect, it } from 'vitest';
@@ -12,8 +15,14 @@ import {
     importSharingPublicKey,
     signAuthProof,
     signAuthProofV2,
+    signContinuity,
     verifyAuthProof,
 } from './crypto.js';
+
+const fixtureDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../e2e/fixtures',
+);
 
 describe('Web Crypto', () => {
     describe('BIP39 mnemonic', () => {
@@ -152,6 +161,68 @@ describe('Web Crypto', () => {
             expect(new TextDecoder().decode(canonicalizeForSign(payload))).toBe(
                 '{"device_id":"d1","key_version":2,"timestamp":"2025-01-15T10:30:00Z","user_id":"u1"}',
             );
+        });
+    });
+
+    describe('JCS rotation interop fixture', () => {
+        it('canonicalizeForSign matches the bytes the Go server expects', () => {
+            const input = JSON.parse(
+                readFileSync(
+                    join(fixtureDir, 'jcs-rotation-vector.json'),
+                    'utf8',
+                ),
+            );
+            const want = new TextDecoder().decode(
+                readFileSync(
+                    join(fixtureDir, 'jcs-rotation-vector.canonical.txt'),
+                ),
+            );
+            const got = new TextDecoder().decode(canonicalizeForSign(input));
+            expect(got).toBe(want);
+        });
+    });
+
+    describe('signContinuity (rotate-keys)', () => {
+        it('round-trips against verify over the same canonical bytes', async () => {
+            const keys = await deriveKeys(generateBackupSecret());
+            const body = {
+                request_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+                key_version: 2,
+                auth_public_key: 'newAuthPub',
+                sharing_public_key: 'newSharePub',
+                salt: 'newSalt',
+                kdf: { type: 'argon2id', m: 65536, t: 3, p: 1 },
+            };
+            const sig = await signContinuity(keys.auth.privateKey, body);
+            const data = canonicalizeForSign(body);
+            const ok = await crypto.subtle.verify(
+                { name: 'Ed25519' },
+                keys.auth.publicKey,
+                sig as unknown as BufferSource,
+                data as unknown as BufferSource,
+            );
+            expect(ok).toBe(true);
+        });
+
+        it('a body with one different field does not verify', async () => {
+            const keys = await deriveKeys(generateBackupSecret());
+            const body = {
+                request_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+                key_version: 2,
+                auth_public_key: 'newAuthPub',
+                sharing_public_key: 'newSharePub',
+                salt: 'newSalt',
+                kdf: { type: 'argon2id', m: 65536, t: 3, p: 1 },
+            };
+            const sig = await signContinuity(keys.auth.privateKey, body);
+            const tampered = canonicalizeForSign({ ...body, key_version: 3 });
+            const ok = await crypto.subtle.verify(
+                { name: 'Ed25519' },
+                keys.auth.publicKey,
+                sig as unknown as BufferSource,
+                tampered as unknown as BufferSource,
+            );
+            expect(ok).toBe(false);
         });
     });
 

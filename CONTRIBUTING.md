@@ -171,6 +171,7 @@ Single-package Go binary. **Stateless by design**: all durable state lives in S3
 |---|---|---|
 | `users/{uid}/profile.json` | server (registration / `PUT /v1/profile`) | Source of truth for profile data |
 | `users/{uid}/devices/{did}.json` | server | Existence = device is valid; deletion = revoked |
+| `users/{uid}/rotation-records/{request_id}.json` | server (`POST /v1/rotate-keys`) | Idempotency record; 24h TTL |
 | `users/{uid}/contacts.json` | client (presigned PUT, AES-256-GCM with backup key) | E2E encrypted |
 | `handles/{handle}.json` | server (projection of `profile.json` public fields) | Resolve cache |
 | `inbox/{uid}/live/{msg_id}` | server (`POST /v1/send`) | JSON envelope |

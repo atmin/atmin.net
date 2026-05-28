@@ -19,5 +19,12 @@ func prefixKeys(uid string) string          { return "keys/" + uid + "/" }
 func prefixKeysLive(uid string) string      { return "keys/" + uid + "/live/" }
 func prefixMedia(uid string) string         { return "media/" + uid + "/" }
 
+// Rotation-records idempotency store: one tiny JSON blob per request_id,
+// swept by the cleanup routine after the 24h TTL (ADR-0012).
+func prefixRotationRecords(uid string) string { return "users/" + uid + "/rotation-records/" }
+func keyRotationRecord(uid, requestID string) string {
+	return prefixRotationRecords(uid) + requestID + ".json"
+}
+
 // Allow-list shared by authorizePrefix / authorizeKey / authorizeKeyWrite.
 var dataPrefixes = []string{"inbox/", "keys/", "media/"}

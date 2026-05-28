@@ -14,68 +14,87 @@ import (
 
 // helpers shared across middleware tests
 
-func setupAuth(t *testing.T) (*MemStore, Config, *deviceCache, string, string, string) {
+type authSetup struct {
+	store     *MemStore
+	cfg       Config
+	devCache  *deviceCache
+	profCache *profileCache
+	userID    string
+	deviceID  string
+	token     string
+}
+
+func setupAuth(t *testing.T) authSetup {
 	t.Helper()
 	store := NewMemStore()
 	cfg := Config{ServerSecret: []byte("test-secret")}
-	cache := newDeviceCache()
 	userID := "01USERAAAAAAAAAAAAAAA0"
 	deviceID := "01DEVICEAAAAAAAAAAAAA0"
-	token := generateToken(cfg.ServerSecret, userID, deviceID)
-	deviceKey := "users/" + userID + "/devices/" + deviceID + ".json"
-	store.PutObject(context.Background(), deviceKey, []byte("{}"), "application/json")
-	return store, cfg, cache, userID, deviceID, token
+	token := generateToken(cfg.ServerSecret, userID, deviceID, 1)
+	// Device + profile present; the middleware now reads both. KeyVersion=0
+	// rides implicit kv=1, which matches the token we just minted.
+	store.PutObject(context.Background(), keyDevice(userID, deviceID), []byte("{}"), "application/json")
+	putProfile(context.Background(), store, &Profile{UserID: userID})
+	return authSetup{
+		store:     store,
+		cfg:       cfg,
+		devCache:  newDeviceCache(),
+		profCache: newProfileCache(),
+		userID:    userID,
+		deviceID:  deviceID,
+		token:     token,
+	}
 }
 
 func TestRequireAuth_HeaderToken(t *testing.T) {
-	store, cfg, cache, userID, _, token := setupAuth(t)
+	s := setupAuth(t)
 
 	var gotUserID string
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = userIDFrom(r.Context())
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, s.store, s.cfg, s.devCache, s.profCache, true)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer "+s.token)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	if gotUserID != userID {
-		t.Fatalf("userID = %q, want %q", gotUserID, userID)
+	if gotUserID != s.userID {
+		t.Fatalf("userID = %q, want %q", gotUserID, s.userID)
 	}
 }
 
 func TestRequireAuth_QueryToken(t *testing.T) {
-	store, cfg, cache, userID, _, token := setupAuth(t)
+	s := setupAuth(t)
 
 	var gotUserID string
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		gotUserID = userIDFrom(r.Context())
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, s.store, s.cfg, s.devCache, s.profCache, true)
 
-	req := httptest.NewRequest("GET", "/test?token="+token, nil)
+	req := httptest.NewRequest("GET", "/test?token="+s.token, nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", w.Code)
 	}
-	if gotUserID != userID {
-		t.Fatalf("userID = %q, want %q", gotUserID, userID)
+	if gotUserID != s.userID {
+		t.Fatalf("userID = %q, want %q", gotUserID, s.userID)
 	}
 }
 
 func TestRequireAuth_NoToken(t *testing.T) {
-	store, cfg, cache, _, _, _ := setupAuth(t)
+	s := setupAuth(t)
 
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, s.store, s.cfg, s.devCache, s.profCache, true)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	w := httptest.NewRecorder()
@@ -94,11 +113,11 @@ func TestRequireAuth_NoToken(t *testing.T) {
 }
 
 func TestRequireAuth_MalformedToken(t *testing.T) {
-	store, cfg, cache, _, _, _ := setupAuth(t)
+	s := setupAuth(t)
 
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, s.store, s.cfg, s.devCache, s.profCache, true)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer not-a-valid-token")
@@ -120,13 +139,13 @@ func TestRequireAuth_MalformedToken(t *testing.T) {
 func TestRequireAuth_DeviceRevoked(t *testing.T) {
 	store := NewMemStore()
 	cfg := Config{ServerSecret: []byte("test-secret")}
-	cache := newDeviceCache()
-	// Token is valid but device file does not exist in store.
-	token := generateToken(cfg.ServerSecret, "01USER000", "01DEVICE000")
+	// Token is valid but device file does not exist in store. Device-existence
+	// is checked before the profile lookup, so this trips before the kv check.
+	token := generateToken(cfg.ServerSecret, "01USER000", "01DEVICE000", 1)
 
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, store, cfg, newDeviceCache(), newProfileCache(), true)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -146,16 +165,16 @@ func TestRequireAuth_DeviceRevoked(t *testing.T) {
 }
 
 func TestRequireAuth_RevocationInvalidatesCache(t *testing.T) {
-	store, cfg, cache, userID, deviceID, token := setupAuth(t)
-	deviceKey := "users/" + userID + "/devices/" + deviceID + ".json"
+	s := setupAuth(t)
+	deviceKey := keyDevice(s.userID, s.deviceID)
 
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, s.store, s.cfg, s.devCache, s.profCache, true)
 
 	authReq := func() *http.Request {
 		r := httptest.NewRequest("GET", "/test", nil)
-		r.Header.Set("Authorization", "Bearer "+token)
+		r.Header.Set("Authorization", "Bearer "+s.token)
 		return r
 	}
 
@@ -169,8 +188,8 @@ func TestRequireAuth_RevocationInvalidatesCache(t *testing.T) {
 	// Simulate revocation: delete device file and evict cache entry.
 	// Without the invalidate call the cached entry would allow the request
 	// through for up to the 30 s TTL — this confirms the contract.
-	store.DeleteObject(context.Background(), deviceKey)
-	cache.invalidate(deviceKey)
+	s.store.DeleteObject(context.Background(), deviceKey)
+	s.devCache.invalidate(deviceKey)
 
 	// Second request: cache miss → HeadObject → ErrNotFound → 403 immediately
 	w = httptest.NewRecorder()
@@ -191,12 +210,11 @@ func TestRequireAuth_HeadStoreError(t *testing.T) {
 	store := NewMemStore()
 	store.headErr = errors.New("connection refused")
 	cfg := Config{ServerSecret: []byte("test-secret")}
-	cache := newDeviceCache()
-	token := generateToken(cfg.ServerSecret, "01USER000", "01DEVICE000")
+	token := generateToken(cfg.ServerSecret, "01USER000", "01DEVICE000", 1)
 
 	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}, store, cfg, cache)
+	}, store, cfg, newDeviceCache(), newProfileCache(), true)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer "+token)

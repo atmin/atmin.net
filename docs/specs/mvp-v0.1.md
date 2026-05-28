@@ -66,6 +66,11 @@ Users and devices:
 
 - `users/{user_id}/profile.json` — includes public keys (derived from backup secret)
 - `users/{user_id}/devices/{device_id}.json`
+- `users/{user_id}/rotation-records/{request_id}.json` — idempotency record
+  for `POST /v1/rotate-keys`; recorded outcome (token + key_version on
+  success, error code + current kv on failure). 24h TTL; swept by the
+  cleanup routine. See [Rotate keys](#rotate-keys) and
+  [ADR-0012](../decisions/adr-0012-backup-secret-rotation.md).
 
 Inbox (per user, not per device):
 
@@ -858,10 +863,13 @@ This is the only unauthenticated endpoint (no existing token to present).
 
 ### Auth proof
 
-Add-device, revoke-device, and rotate-keys require an `auth_proof`:
-an Ed25519 signature over a JSON payload.
+Add-device and revoke-device require an `auth_proof`: an Ed25519
+signature over a JSON payload. Rotate-keys uses a related but distinct
+`continuity_signature` (over the whole request body sans the signature
+field) — see [Rotate keys](#rotate-keys). All three use the same
+JCS-canonicalization rules for v2 payloads.
 
-**v2 payload** (used for v2 accounts and all rotate-keys requests):
+**v2 payload** (used for v2 accounts):
 
 ```json
 {

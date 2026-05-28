@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    KeyVersionStaleError,
     onAuthEvent,
     type RegisterRequest,
+    type RotateKeysRequest,
     register,
     resolve,
+    rotateKeys,
     storeGet,
     updateProfile,
 } from './api';
@@ -573,5 +576,132 @@ describe('api - unauthorized (401)', () => {
         });
 
         expect(onUnauth).toHaveBeenCalledOnce();
+    });
+});
+
+describe('api - rotateKeys()', () => {
+    const baseReq: RotateKeysRequest = {
+        request_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        key_version: 2,
+        auth_public_key: 'newAuthPub',
+        sharing_public_key: 'newSharePub',
+        salt: 'newSalt',
+        kdf: { type: 'argon2id', m: 65536, t: 3, p: 1 },
+        continuity_signature: 'sigSigSig',
+    };
+
+    beforeEach(() => {
+        fetchMock.mockReset();
+    });
+
+    it('POSTs the body with bearer token and returns the new token + kv', async () => {
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({
+                token: 'NEW_TOKEN',
+                key_version: 2,
+            }) as Response,
+        );
+        const res = await rotateKeys('OLD_TOKEN', baseReq);
+
+        expect(res).toEqual({ token: 'NEW_TOKEN', key_version: 2 });
+        expect(fetchMock).toHaveBeenCalledWith(
+            '/v1/rotate-keys',
+            expect.objectContaining({
+                method: 'POST',
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer OLD_TOKEN',
+                    'Content-Type': 'application/json',
+                }),
+                body: JSON.stringify(baseReq),
+            }),
+        );
+    });
+
+    it('throws KeyVersionStaleError on 401 key_version_stale with current', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            statusText: 'Unauthorized',
+            json: async () => ({
+                error: 'key_version_stale',
+                message: 'stale',
+                current: 3,
+            }),
+        } as Response);
+
+        let caught: unknown;
+        try {
+            await rotateKeys('OLD', baseReq);
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(KeyVersionStaleError);
+        expect((caught as KeyVersionStaleError).current).toBe(3);
+    });
+
+    it('throws KeyVersionStaleError on 409 key_version_stale (race lost)', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 409,
+            statusText: 'Conflict',
+            json: async () => ({
+                error: 'key_version_stale',
+                message: 'race',
+                current: 2,
+            }),
+        } as Response);
+
+        let caught: unknown;
+        try {
+            await rotateKeys('OLD', baseReq);
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(KeyVersionStaleError);
+        expect((caught as KeyVersionStaleError).current).toBe(2);
+    });
+
+    it('throws APIError on 403 bad_continuity', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({
+                error: 'bad_continuity',
+                message: 'sig fail',
+            }),
+        } as Response);
+
+        await expect(rotateKeys('OLD', baseReq)).rejects.toMatchObject({
+            status: 403,
+            code: 'bad_continuity',
+        });
+    });
+
+    it('a retry with the same request_id passes the same id on the wire', async () => {
+        // First attempt: network failure. Second attempt: success.
+        // The caller is responsible for retry; the wrapper just forwards
+        // the body unchanged, so both calls must carry the same request_id.
+        fetchMock
+            .mockRejectedValueOnce(new Error('network'))
+            .mockResolvedValueOnce(
+                mockJsonResponse({ token: 'T', key_version: 2 }) as Response,
+            );
+
+        try {
+            await rotateKeys('OLD', baseReq);
+        } catch {
+            // expected
+        }
+        const res = await rotateKeys('OLD', baseReq);
+        expect(res.key_version).toBe(2);
+
+        const body1 = JSON.parse(
+            String((fetchMock.mock.calls[0][1] as RequestInit).body),
+        );
+        const body2 = JSON.parse(
+            String((fetchMock.mock.calls[1][1] as RequestInit).body),
+        );
+        expect(body1.request_id).toBe(body2.request_id);
     });
 });

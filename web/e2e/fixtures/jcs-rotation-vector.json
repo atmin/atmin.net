@@ -1,0 +1,8 @@
+{
+  "salt": "c2FsdC1mb3ItcHJpbnRpbmc",
+  "request_id": "01234567-89ab-cdef-0123-456789abcdef",
+  "kdf": { "type": "argon2id", "m": 65536, "t": 3, "p": 1 },
+  "sharing_public_key": "BHFhpY",
+  "auth_public_key": "QXV0aFB1Yg",
+  "key_version": 2
+}

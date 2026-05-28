@@ -232,6 +232,24 @@ export function canonicalizeForSign(obj: Record<string, unknown>): Uint8Array {
     return enc.encode(canonical);
 }
 
+/**
+ * Sign the JCS-canonicalized form of a request body with the user's auth
+ * private key. Used by the rotate-keys flow (continuity signature, signed
+ * by the *old* auth key over the new-credential request body excluding
+ * the continuity_signature field itself). Both halves of the rotation
+ * agree byte-for-byte on the signed input via JCS — the interop fixture
+ * in web/e2e/fixtures/jcs-rotation-vector.* is the regression guard.
+ */
+export async function signContinuity(
+    privateKey: CryptoKey,
+    bodyWithoutSig: Record<string, unknown>,
+): Promise<Uint8Array> {
+    const data = canonicalizeForSign(bodyWithoutSig);
+    return new Uint8Array(
+        await crypto.subtle.sign({ name: 'Ed25519' }, privateKey, buf(data)),
+    );
+}
+
 export async function signAuthProofV2(
     privateKey: CryptoKey,
     payload: {

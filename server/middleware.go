@@ -14,8 +14,9 @@ import (
 type contextKey string
 
 const (
-	ctxUserID   contextKey = "user_id"
-	ctxDeviceID contextKey = "device_id"
+	ctxUserID     contextKey = "user_id"
+	ctxDeviceID   contextKey = "device_id"
+	ctxKeyVersion contextKey = "key_version"
 )
 
 func userIDFrom(ctx context.Context) string {
@@ -26,14 +27,33 @@ func deviceIDFrom(ctx context.Context) string {
 	return ctx.Value(ctxDeviceID).(string)
 }
 
+func keyVersionFrom(ctx context.Context) int {
+	v, _ := ctx.Value(ctxKeyVersion).(int)
+	return v
+}
+
 // newDeviceCache creates a shared device cache for use across all auth handlers.
 func newDeviceCache() *deviceCache {
 	return &deviceCache{entries: make(map[string]time.Time)}
 }
 
-// requireAuth wraps a handler with token verification and device revocation check.
-// Supports token from Authorization header (Bearer token) or query parameter (for SSE).
-func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCache) http.HandlerFunc {
+// newProfileCache caches the current profile.key_version per uid so the
+// requireAuth middleware doesn't issue an S3 GET on every authenticated
+// request. The rotation handler invalidates the entry locally on every
+// successful rotation; the TTL is the safety net for the multi-instance
+// case where another server rotated.
+func newProfileCache() *profileCache {
+	return &profileCache{entries: make(map[string]profileCacheEntry)}
+}
+
+// requireAuth wraps a handler with token verification, device revocation check,
+// and (when enforceKeyVersion is true) key_version check against the current
+// profile (ADR-0012). The kv check is the multi-device cutoff that makes
+// stale tokens 401 on any normal endpoint; the rotate-keys endpoint
+// intentionally opts out because its handler runs its own precondition on
+// `req.key_version` and must remain reachable with the just-superseded
+// token so an idempotent retry can replay the recorded outcome.
+func requireAuth(next http.HandlerFunc, store Store, cfg Config, devCache *deviceCache, profCache *profileCache, enforceKeyVersion bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := remoteIP(r)
 		var token string
@@ -53,7 +73,7 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCa
 			return
 		}
 
-		userID, deviceID, err := parseToken(cfg.ServerSecret, token)
+		userID, deviceID, tokenKV, err := parseToken(cfg.ServerSecret, token)
 		if err != nil {
 			slog.Warn("auth: invalid token", "ip", ip, "path", r.URL.Path)
 			writeError(w, errUnauthorized)
@@ -62,7 +82,7 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCa
 
 		// Revocation check: device file must exist
 		deviceKey := keyDevice(userID, deviceID)
-		if !cache.valid(deviceKey) {
+		if !devCache.valid(deviceKey) {
 			if err := store.HeadObject(r.Context(), deviceKey); err != nil {
 				if errors.Is(err, ErrNotFound) {
 					slog.Warn("auth: device revoked", "ip", ip, "user_id", userID, "device_id", deviceID)
@@ -73,11 +93,44 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, cache *deviceCa
 				writeError(w, APIError{http.StatusInternalServerError, "internal", "Device check failed"})
 				return
 			}
-			cache.set(deviceKey)
+			devCache.set(deviceKey)
+		}
+
+		// key_version check (ADR-0012). A token bound to a superseded
+		// key_version means another device rotated; tell the client to
+		// re-login at the current version.
+		var currentKV int
+		if enforceKeyVersion {
+			c, ok := profCache.get(userID)
+			if !ok {
+				p, err := getProfile(r.Context(), store, userID)
+				if err != nil {
+					if errors.Is(err, ErrNotFound) {
+						slog.Warn("auth: profile gone", "ip", ip, "user_id", userID)
+						writeError(w, errUnauthorized)
+						return
+					}
+					slog.Error("profile load failed", "user_id", userID, "err", err)
+					writeError(w, APIError{http.StatusInternalServerError, "internal", "Profile load failed"})
+					return
+				}
+				c = p.KeyVersion
+				if c == 0 {
+					c = 1 // v1 / unrotated v2 — both ride kv = 1
+				}
+				profCache.set(userID, c)
+			}
+			currentKV = c
+			if tokenKV != currentKV {
+				slog.Warn("auth: key_version stale", "ip", ip, "user_id", userID, "token_kv", tokenKV, "current_kv", currentKV)
+				writeErrorStatus(w, errKeyVersionStale, http.StatusUnauthorized, map[string]any{"current": currentKV})
+				return
+			}
 		}
 
 		ctx := context.WithValue(r.Context(), ctxUserID, userID)
 		ctx = context.WithValue(ctx, ctxDeviceID, deviceID)
+		ctx = context.WithValue(ctx, ctxKeyVersion, currentKV)
 		next(w, r.WithContext(ctx))
 	}
 }
@@ -107,6 +160,43 @@ func (c *deviceCache) invalidate(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
+}
+
+// profileCache caches the current key_version per uid. A small TTL plus an
+// explicit invalidate on rotation keeps the requireAuth fast path free of
+// S3 GETs without letting a rotated kv linger.
+type profileCache struct {
+	mu      sync.RWMutex
+	entries map[string]profileCacheEntry
+}
+
+type profileCacheEntry struct {
+	keyVersion int
+	at         time.Time
+}
+
+const profileCacheTTL = 5 * time.Second
+
+func (c *profileCache) get(uid string) (int, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e, ok := c.entries[uid]
+	if !ok || time.Since(e.at) >= profileCacheTTL {
+		return 0, false
+	}
+	return e.keyVersion, true
+}
+
+func (c *profileCache) set(uid string, kv int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[uid] = profileCacheEntry{keyVersion: kv, at: time.Now()}
+}
+
+func (c *profileCache) invalidate(uid string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, uid)
 }
 
 // remoteIP extracts the client IP from X-Forwarded-For (set by Scaleway's proxy) or RemoteAddr.

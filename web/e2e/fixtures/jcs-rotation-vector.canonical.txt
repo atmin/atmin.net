@@ -1,0 +1,1 @@
+{"auth_public_key":"QXV0aFB1Yg","kdf":{"m":65536,"p":1,"t":3,"type":"argon2id"},"key_version":2,"request_id":"01234567-89ab-cdef-0123-456789abcdef","salt":"c2FsdC1mb3ItcHJpbnRpbmc","sharing_public_key":"BHFhpY"}

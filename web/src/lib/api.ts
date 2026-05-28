@@ -13,6 +13,20 @@ export class APIError extends Error {
     }
 }
 
+// KeyVersionStaleError is the typed reaction to `key_version_stale` from
+// either the middleware (401: this device's token was superseded by a
+// rotation on another device — task 5 wires the forced re-login) or the
+// rotate-keys handler (409: the request's key_version didn't advance from
+// the current one — another rotation already happened). The `.current`
+// field tells the client what to do: re-login at `current`, or re-derive
+// at `current+1` and retry the rotation.
+export class KeyVersionStaleError extends Error {
+    constructor(public current: number) {
+        super('key_version_stale');
+        this.name = 'KeyVersionStaleError';
+    }
+}
+
 type AuthEvent = 'device_revoked' | 'unauthorized';
 const authEvents = new EventTarget();
 
@@ -46,6 +60,13 @@ async function request<T>(
             error: 'unknown',
             message: res.statusText,
         }));
+        if (err.error === 'key_version_stale') {
+            // Typed throw so the caller can branch on staleness (forced
+            // re-login on most endpoints; race-lost retry on rotate-keys).
+            throw new KeyVersionStaleError(
+                typeof err.current === 'number' ? err.current : -1,
+            );
+        }
         if (res.status === 403 && err.error === 'device_revoked')
             emitAuth('device_revoked');
         if (res.status === 401) emitAuth('unauthorized');
@@ -105,6 +126,21 @@ export interface CompactResponse {
     archive_key: string;
 }
 
+export interface RotateKeysRequest {
+    request_id: string; // UUID v4 — idempotency key; reuse for retries.
+    key_version: number;
+    auth_public_key: string;
+    sharing_public_key: string;
+    salt: string;
+    kdf: KdfParams;
+    continuity_signature: string;
+}
+
+export interface RotateKeysResponse {
+    token: string;
+    key_version: number;
+}
+
 export interface AddDeviceRequest {
     user_id: string;
     device_label: string;
@@ -149,6 +185,21 @@ export function register(req: RegisterRequest): Promise<RegisterResponse> {
 
 export function addDevice(req: AddDeviceRequest): Promise<AddDeviceResponse> {
     return request('POST', '/v1/devices', { body: req });
+}
+
+/**
+ * Rotate the account's credential-derived keys. Throws
+ * `KeyVersionStaleError` on a 401 (token bound to old kv) or 409
+ * (race-lost: another rotation already happened); a fresh derivation at
+ * `error.current + 1` is required before the next attempt. Other errors
+ * surface as `APIError`. Caller is responsible for keeping `request_id`
+ * stable across retries so the server can deduplicate.
+ */
+export function rotateKeys(
+    token: string,
+    req: RotateKeysRequest,
+): Promise<RotateKeysResponse> {
+    return request('POST', '/v1/rotate-keys', { token, body: req });
 }
 
 export async function listDevices(

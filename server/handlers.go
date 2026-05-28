@@ -5,11 +5,14 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/gowebpki/jcs"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -52,7 +55,10 @@ func handleRegister(store Store, cfg Config) http.HandlerFunc {
 
 		userID := ulid.Make().String()
 		deviceID := ulid.Make().String()
-		token := generateToken(cfg.ServerSecret, userID, deviceID)
+		// New accounts always start at key_version 1; the token is v2-format
+		// even for v1 (no-salt/kdf) registrations — only the profile shape
+		// differs between v1 and v2 there.
+		token := generateToken(cfg.ServerSecret, userID, deviceID, 1)
 
 		// Generate handle, retry on collision
 		var handle string
@@ -137,25 +143,43 @@ func validKDFParams(salt string, kdf *KDFParams) bool {
 	return true
 }
 
-// errAuthProofInvalid is returned by fetchAndVerifyAuthProof when the key is
-// malformed or the proof signature/timestamp is invalid.
-var errAuthProofInvalid = errors.New("auth proof invalid")
+// Sentinel errors for fetchAndVerifyAuthProof. The profile is also returned
+// on stale-version failures so the caller can render the current kv to the
+// client without a second S3 read.
+var (
+	errAuthProofInvalid = errors.New("auth proof invalid")
+	errAuthProofStale   = errors.New("auth proof key_version stale")
+)
 
-// fetchAndVerifyAuthProof fetches the user's profile to get their auth public key,
-// then verifies the auth proof. Returns ErrNotFound if the profile does not exist.
-func fetchAndVerifyAuthProof(ctx context.Context, store Store, userID string, proof AuthProof) error {
+// fetchAndVerifyAuthProof fetches the user's profile to get their auth public
+// key, verifies the auth-proof signature, and (for v2 payloads) confirms the
+// proof's key_version matches the current profile.key_version. Returns the
+// profile on success and on staleness; returns nil on ErrNotFound / invalid.
+func fetchAndVerifyAuthProof(ctx context.Context, store Store, userID string, proof AuthProof) (*Profile, error) {
 	p, err := getProfile(ctx, store, userID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	pubKeyBytes, err := b64url.DecodeString(p.AuthPublicKey)
 	if err != nil || len(pubKeyBytes) != ed25519.PublicKeySize {
-		return errAuthProofInvalid
+		return nil, errAuthProofInvalid
 	}
 	if err := verifyAuthProof(ed25519.PublicKey(pubKeyBytes), proof); err != nil {
-		return errAuthProofInvalid
+		return nil, errAuthProofInvalid
 	}
-	return nil
+	// v2 proofs are only valid against the current key_version. v1 proofs
+	// (no key_version field) ride implicit kv=1, which is correct for any
+	// account that hasn't rotated.
+	if proof.Payload.KeyVersion > 0 {
+		currentKV := p.KeyVersion
+		if currentKV == 0 {
+			currentKV = 1
+		}
+		if proof.Payload.KeyVersion != currentKV {
+			return p, errAuthProofStale
+		}
+	}
+	return p, nil
 }
 
 // POST /v1/devices
@@ -171,10 +195,17 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 			return
 		}
 
-		if err := fetchAndVerifyAuthProof(r.Context(), store, req.UserID, req.AuthProof); err != nil {
+		p, err := fetchAndVerifyAuthProof(r.Context(), store, req.UserID, req.AuthProof)
+		if err != nil {
 			switch {
 			case errors.Is(err, ErrNotFound):
 				writeError(w, errNotFound)
+			case errors.Is(err, errAuthProofStale):
+				currentKV := p.KeyVersion
+				if currentKV == 0 {
+					currentKV = 1
+				}
+				writeErrorStatus(w, errKeyVersionStale, http.StatusUnauthorized, map[string]any{"current": currentKV})
 			case errors.Is(err, errAuthProofInvalid):
 				writeError(w, errForbidden)
 			default:
@@ -184,7 +215,13 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 		}
 
 		deviceID := req.AuthProof.Payload.DeviceID
-		token := generateToken(cfg.ServerSecret, req.UserID, deviceID)
+		// New token is bound to the account's current key_version (v1 accounts
+		// ride implicit kv=1; rotated v2 accounts mint at their current kv).
+		kv := p.KeyVersion
+		if kv == 0 {
+			kv = 1
+		}
+		token := generateToken(cfg.ServerSecret, req.UserID, deviceID, kv)
 
 		device, _ := json.Marshal(map[string]string{
 			"device_id":    deviceID,
@@ -233,14 +270,23 @@ func handleRevokeDevice(store Store, cfg Config, cache *deviceCache) http.Handle
 
 		userID := userIDFrom(r.Context())
 
-		if err := fetchAndVerifyAuthProof(r.Context(), store, userID, req.AuthProof); err != nil {
-			if errors.Is(err, errAuthProofInvalid) {
+		p, err := fetchAndVerifyAuthProof(r.Context(), store, userID, req.AuthProof)
+		if err != nil {
+			switch {
+			case errors.Is(err, errAuthProofStale):
+				currentKV := p.KeyVersion
+				if currentKV == 0 {
+					currentKV = 1
+				}
+				writeErrorStatus(w, errKeyVersionStale, http.StatusUnauthorized, map[string]any{"current": currentKV})
+			case errors.Is(err, errAuthProofInvalid):
 				writeError(w, errForbidden)
-			} else {
+			default:
 				internalError(w, "Failed to verify auth proof")
 			}
 			return
 		}
+		_ = p // profile fetch is reused to short-circuit; no further use here
 
 		deviceKey := keyDevice(userID, req.DeviceID)
 		if err := store.DeleteObject(r.Context(), deviceKey); err != nil {
@@ -772,4 +818,198 @@ func extractMsgID(obj any) (string, bool) {
 		return id, ok
 	}
 	return "", false
+}
+
+// ── POST /v1/rotate-keys ─────────────────────────────────────────────
+//
+// See ADR-0012 + docs/specs/mvp-v0.1.md#rotate-keys. The bearer token's
+// key_version match is already enforced by requireAuth — only a device
+// holding a current-kv token reaches this handler. Per-user_id mutex
+// serializes the GET-VERIFY-WRITE on profile.json against a concurrent
+// rotation; request_id deduplicates network retries.
+
+var requestIDRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+type rotateKeysRequest struct {
+	RequestID           string     `json:"request_id"`
+	KeyVersion          int        `json:"key_version"`
+	AuthPublicKey       string     `json:"auth_public_key"`
+	SharingPublicKey    string     `json:"sharing_public_key"`
+	Salt                string     `json:"salt"`
+	KDF                 *KDFParams `json:"kdf"`
+	ContinuitySignature string     `json:"continuity_signature"`
+}
+
+// rotationMutexTimeout caps how long a rotation handler waits for the
+// per-uid lock before returning 409. Two genuinely-concurrent rotations
+// from the same user are degenerate; 500 ms is plenty of headroom for
+// the in-flight one to complete an S3 write and release.
+const rotationMutexTimeout = 500 * time.Millisecond
+
+func handleRotateKeys(store Store, cfg Config, profCache *profileCache, mu *rotationMutexMap) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFrom(r.Context())
+		deviceID := deviceIDFrom(r.Context())
+
+		var req rotateKeysRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, errBadRequest)
+			return
+		}
+		if !requestIDRegex.MatchString(req.RequestID) {
+			writeError(w, errBadRequest)
+			return
+		}
+		// Validate the new credential params up front so a malformed
+		// rotation never reaches the mutex/profile write.
+		if req.Salt == "" || req.KDF == nil || !validKDFParams(req.Salt, req.KDF) {
+			writeError(w, errBadRequest)
+			return
+		}
+		if !validPublicKey(req.AuthPublicKey, ed25519.PublicKeySize) ||
+			!validPublicKey(req.SharingPublicKey, 65) {
+			writeError(w, errBadRequest)
+			return
+		}
+		if req.ContinuitySignature == "" {
+			writeError(w, errBadRequest)
+			return
+		}
+
+		// 1. Serialize per user_id. Concurrent rotations from the same
+		// user fall through to the idempotency check or the kv
+		// precondition; this just prevents the GET-VERIFY-WRITE race.
+		release, err := mu.acquire(userID, rotationMutexTimeout)
+		if err != nil {
+			// Genuine concurrent rotation against ourselves. Single-instance:
+			// 409 with current=-1 (the other writer hasn't finished, so we
+			// can't yet quote a current kv). Multi-instance future: 503.
+			writeErrorStatus(w, errKeyVersionStale, http.StatusConflict, map[string]any{"current": -1})
+			return
+		}
+		defer release()
+
+		// 2. Idempotency: replay if seen.
+		if rec, ok, _ := loadRotationRecord(r.Context(), store, userID, req.RequestID); ok {
+			writeJSON(w, rec.Status, rec.Body())
+			return
+		}
+
+		// 3. Read current profile.
+		current, err := getProfile(r.Context(), store, userID)
+		if err != nil {
+			internalError(w, "Failed to read profile")
+			return
+		}
+		currentKV := current.KeyVersion
+		if currentKV == 0 {
+			currentKV = 1
+		}
+
+		// 4. key_version precondition: request must advance by exactly one.
+		if req.KeyVersion != currentKV+1 {
+			rec := RotationRecord{
+				Status:  http.StatusConflict,
+				Error:   errKeyVersionStale.Code,
+				Current: currentKV,
+			}
+			_ = saveRotationRecord(r.Context(), store, userID, req.RequestID, rec)
+			writeErrorStatus(w, errKeyVersionStale, http.StatusConflict, map[string]any{"current": currentKV})
+			return
+		}
+
+		// 5. Continuity signature over JCS-canonicalized body sans sig.
+		canonical, err := canonicalRotationBody(&req)
+		if err != nil {
+			internalError(w, "Failed to canonicalize rotation body")
+			return
+		}
+		oldPub, err := b64url.DecodeString(current.AuthPublicKey)
+		if err != nil || len(oldPub) != ed25519.PublicKeySize {
+			internalError(w, "Stored auth_public_key is malformed")
+			return
+		}
+		sigBytes, err := b64url.DecodeString(req.ContinuitySignature)
+		if err != nil || !ed25519.Verify(ed25519.PublicKey(oldPub), canonical, sigBytes) {
+			rec := RotationRecord{Status: http.StatusForbidden, Error: errBadContinuity.Code}
+			_ = saveRotationRecord(r.Context(), store, userID, req.RequestID, rec)
+			writeError(w, errBadContinuity)
+			return
+		}
+
+		// 6. Build & write new profile (unconditional; mutex makes the
+		// GET-VERIFY-WRITE effectively atomic for this uid).
+		next := *current
+		next.AuthPublicKey = req.AuthPublicKey
+		next.SharingPublicKey = req.SharingPublicKey
+		next.Salt = req.Salt
+		next.KDF = req.KDF
+		next.KeyVersion = req.KeyVersion
+		if err := putProfile(r.Context(), store, &next); err != nil {
+			internalError(w, "Failed to write profile")
+			return
+		}
+
+		// 7. Refresh the resolve projection so other users see the new
+		// sharing_public_key + salt/kdf on their next resolve.
+		if err := putHandleProjection(r.Context(), store, &next); err != nil {
+			slog.Error("rotate: handle projection write failed", "user_id", userID, "err", err)
+			// Profile is already authoritative; resolve will fall back to it.
+		}
+
+		// 8. Mint a new v2 token bound to the new key_version.
+		token := generateToken(cfg.ServerSecret, userID, deviceID, req.KeyVersion)
+
+		// 9. Record the outcome under the request_id for idempotent replay.
+		rec := RotationRecord{
+			Status:     http.StatusOK,
+			Token:      token,
+			KeyVersion: req.KeyVersion,
+		}
+		if err := saveRotationRecord(r.Context(), store, userID, req.RequestID, rec); err != nil {
+			// Best-effort: the rotation already succeeded. A retry would
+			// hit the kv precondition and 409, which is acceptable.
+			slog.Error("rotate: save idempotency record failed", "user_id", userID, "err", err)
+		}
+
+		// 10. Invalidate the local profile cache so the next requireAuth
+		// fetch reflects the new kv without waiting for TTL expiry.
+		profCache.invalidate(userID)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":       token,
+			"key_version": req.KeyVersion,
+		})
+	}
+}
+
+// canonicalRotationBody marshals the rotation request's signed fields
+// (everything except continuity_signature) and runs them through JCS so
+// the bytes match what the client signed. Both sides depend on this
+// agreement — the JCS interop fixture is the regression guard.
+func canonicalRotationBody(req *rotateKeysRequest) ([]byte, error) {
+	toSign := map[string]any{
+		"request_id":         req.RequestID,
+		"key_version":        req.KeyVersion,
+		"auth_public_key":    req.AuthPublicKey,
+		"sharing_public_key": req.SharingPublicKey,
+		"salt":               req.Salt,
+		"kdf":                req.KDF,
+	}
+	raw, err := json.Marshal(toSign)
+	if err != nil {
+		return nil, err
+	}
+	return jcs.Transform(raw)
+}
+
+func validPublicKey(b64 string, wantLen int) bool {
+	if b64 == "" {
+		return false
+	}
+	b, err := b64url.DecodeString(b64)
+	if err != nil || len(b) != wantLen {
+		return false
+	}
+	return true
 }
