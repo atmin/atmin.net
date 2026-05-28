@@ -29,9 +29,13 @@ export async function registerUserWithPassword(
     await page.fill('#password', password);
     await page.fill('#confirm', password);
 
-    // Acknowledge the no-reset warning, then submit.
-    await page.locator('label', { hasText: 'I understand' }).click();
-    await page.getByRole('button', { name: 'Register' }).click();
+    // setChecked, not click: Radix Checkbox is a <button role="checkbox">.
+    const ack = page.getByRole('checkbox', { name: /I understand/i });
+    await ack.setChecked(true);
+    await expect(ack).toBeChecked({ timeout: 5_000 });
+    const register = page.getByRole('button', { name: 'Register' });
+    await expect(register).toBeEnabled({ timeout: 5_000 });
+    await register.click();
 
     // Wait for redirect to home page (Argon2id + registration).
     await page.waitForSelector('text=Your handle', {

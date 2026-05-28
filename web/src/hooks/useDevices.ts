@@ -77,8 +77,9 @@ export function useDevices(token: string, userId: string): DevicesState {
             );
             const keys = await deriveKeys(secret);
 
-            // key_version is 1 for every account until rotation ships
-            // (ADR-0012, task 2), so the v1 auth proof is correct here.
+            // v1 auth proof (no `key_version` field) — the server accepts
+            // it for any account because v1 proofs skip the key_version
+            // check and verify on signature + timestamp alone.
             const payload = {
                 user_id: userId,
                 device_id: deviceId,

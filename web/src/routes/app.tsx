@@ -53,7 +53,10 @@ export default function App() {
                     path="/settings"
                     element={
                         session ? (
-                            <Settings session={session} />
+                            <Settings
+                                session={session}
+                                onSessionChange={handleLogin}
+                            />
                         ) : (
                             <Navigate to="/login" replace />
                         )

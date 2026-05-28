@@ -15,8 +15,8 @@ import (
 // Success: status=200 with Token + KeyVersion.
 // Failure: status=409/403 with Error + (for kv mismatches) Current.
 //
-// Records are swept by the cleanup routine after the 24 h TTL — see
-// tasks/server-cleanup-routine.md for the sweep target.
+// Records are swept by the periodic S3 cleanup routine after the 24 h
+// TTL (ADR-0012 — Idempotency).
 type RotationRecord struct {
 	Status     int    `json:"status"`
 	Token      string `json:"token,omitempty"`

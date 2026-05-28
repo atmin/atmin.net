@@ -15,11 +15,11 @@ export class APIError extends Error {
 
 // KeyVersionStaleError is the typed reaction to `key_version_stale` from
 // either the middleware (401: this device's token was superseded by a
-// rotation on another device — task 5 wires the forced re-login) or the
-// rotate-keys handler (409: the request's key_version didn't advance from
-// the current one — another rotation already happened). The `.current`
-// field tells the client what to do: re-login at `current`, or re-derive
-// at `current+1` and retry the rotation.
+// rotation on another device — the caller's expected reaction is a forced
+// re-login) or the rotate-keys handler (409: the request's key_version
+// didn't advance from the current one — another rotation already
+// happened). The `.current` field tells the client what to do: re-login
+// at `current`, or re-derive at `current+1` and retry the rotation.
 export class KeyVersionStaleError extends Error {
     constructor(public current: number) {
         super('key_version_stale');

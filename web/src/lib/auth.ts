@@ -11,7 +11,7 @@ export interface Session {
     /**
      * Current `profile.key_version` for this account (ADR-0012). Stamped
      * onto new envelopes so the chain-aware reader can dispatch per-blob;
-     * also bumped in-place after a successful rotation (task 4). Defaults
+     * the change-password flow updates this in-place on success. Defaults
      * to 1 for sessions persisted before this field existed.
      */
     keyVersion: number;

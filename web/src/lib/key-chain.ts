@@ -14,7 +14,8 @@
  * O(rotations) walk is paid once per device per version.
  *
  * Forward writes — `buildChainLink` + `appendChainLink` — are invoked
- * from the rotation flow (task 4), not from this module's read path.
+ * from the change-password flow (see `useRotateKeys`), not from this
+ * module's read path.
  */
 
 import { putWithRetry, storeGet, storePresign } from './api';
@@ -96,8 +97,8 @@ export async function buildChainLink(
  * Read the current chain, append the new link, and write it back.
  * Not atomic: a concurrent rotation racing this caller would clobber
  * one of the appends. That race is closed at the rotation flow level
- * — the server's per-uid mutex (task 2) ensures only one rotation is
- * in flight per account.
+ * — the server's per-uid rotation mutex ensures only one rotation is
+ * in flight per account (see ADR-0012 — Concurrency control).
  */
 export async function appendChainLink(
     token: string,

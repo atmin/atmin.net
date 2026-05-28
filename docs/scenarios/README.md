@@ -6,6 +6,7 @@ the resulting S3 state, and is used to generate end-to-end tests.
 
 - [First conversation](./first-conversation.md) — registration, key exchange, first message
 - [Credential registration](./credential-registration.md) — password + Argon2id registration and login autodetect
+- [Credential rotation](./credential-rotation.md) — change-password flow with continuity signature + lazy chain
 - [Multi-device](./multi-device.md) — adding a second device, syncing history
 - [Profile and contacts](./profile-and-contacts.md) — profile updates, contact management
 - [Session rotation](./session-rotation.md) — Megolm session lifecycle

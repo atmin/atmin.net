@@ -318,10 +318,44 @@ slow but does not break anything.
 
 The rotating device throws away its current outbound Megolm session
 and starts a fresh one on next send. Per [adr-0002] this happens
-every 100 messages anyway; rotation just forces it sooner. Contacts
-fetch the new `sharing_public_key` next time they refresh the
-rotating user's profile, and the new key share is encrypted to that
-fresh sharing key. No explicit signal needed.
+every 100 messages anyway; rotation just forces it sooner.
+
+### Contact sharing-key refresh
+
+A contact (Bob) who has a chat with the rotating user (Alice) needs
+Alice's *current* `sharing_public_key` whenever he encrypts a new
+Megolm session key for her via ECIES. After Alice rotates, any key
+share Bob builds against a stale snapshot of her sharing key would
+be ECIES-decryptable only with Alice's old sharing private key —
+which her rotated device has discarded.
+
+**Policy: clients re-resolve the recipient's profile on every send,
+not just on chat-open.** The `sharing_public_key` returned by
+`GET /v1/resolve/{handle}` is used directly to build the ECIES
+ciphertext, with no client-side caching of that field. One additional
+GET per outgoing message is a tolerable cost given the simplicity
+guarantee it buys (no stale-key window after rotation, no
+sender-receiver re-handshake protocol).
+
+Bob's *existing* outbound session for Alice is unaffected by her
+rotation — its key share was already delivered, and Alice cached the
+decrypted session key in her IDB pre-rotation. New messages in that
+session continue to decrypt with that cached entry. Only the *next*
+Megolm session Bob creates (after his own session restarts every 100
+messages or on app boot) needs to encrypt a fresh key share, and the
+per-send resolve guarantees it picks up Alice's new sharing key.
+
+On resolve failure (network unreachable), the client surfaces the
+send error and lets the user retry; no fallback to a cached sharing
+key — silently encrypting to a possibly-stale key would produce
+undecryptable messages with no diagnostic.
+
+Receiver-side back-signaling — "I couldn't ECIES-decrypt your key
+share, here's my current sharing key" — was considered as an
+alternative. Rejected: it doubles the wire-format surface (new
+envelope type, sender-side retry logic) to optimise away a single
+GET on a path that is already an HTTPS round trip. Reconsider if
+profile-resolve latency becomes a measured problem.
 
 ### Error model
 

@@ -174,6 +174,18 @@ The store endpoints (`store/list`, `store/object`, `store/presign`)
 share the same `request` helper, so they inherit the new behaviour
 automatically. Confirm no separate fetch sites bypass `request`.
 
+### 7. Scenario doc + cross-references
+
+Add `docs/scenarios/credential-multi-device-cutoff.md` describing the
+end-to-end flow (rotation on device A → device B's next request →
+forced sign-out → re-login on B). The credential-rotation scenario
+already forward-references "the dedicated multi-device-cutoff
+scenario" in its *Other devices* section — once this scenario doc
+exists, update that back-reference in
+[`docs/scenarios/credential-rotation.md`](../docs/scenarios/credential-rotation.md)
+to a concrete markdown link, and add the new scenario to
+[`docs/scenarios/README.md`](../docs/scenarios/README.md).
+
 ## Out of scope
 
 - Detecting that the *server* doesn't know about the user (full
