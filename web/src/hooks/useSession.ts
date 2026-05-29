@@ -17,15 +17,23 @@ export interface SessionState {
     sessionManager: SessionManager | null;
     loading: boolean;
     notice: LoginNotice;
+    /**
+     * Count of session keys that couldn't be restored on this device
+     * (corrupt/undecryptable backup blobs), or null when none. Surfaced
+     * so partial history loss isn't silent (I6).
+     */
+    restoreWarning: number | null;
     handleLogin: (session: Session) => void;
     handleLogout: () => Promise<void>;
     clearNotice: () => void;
+    clearRestoreWarning: () => void;
 }
 
 export function useSession(): SessionState {
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
     const [notice, setNotice] = useState<LoginNotice>(null);
+    const [restoreWarning, setRestoreWarning] = useState<number | null>(null);
     const [sessionManager, setSessionManager] = useState<SessionManager | null>(
         null,
     );
@@ -50,6 +58,9 @@ export function useSession(): SessionState {
         if (!userId || !deviceId || !token || !backupKey) return;
 
         let cancelled = false;
+        // Each (re)login starts with a clean slate so a prior session's
+        // restore warning can't linger across accounts.
+        setRestoreWarning(null);
 
         (async () => {
             const { loadWasm } = await import('@/lib/wasm');
@@ -82,13 +93,16 @@ export function useSession(): SessionState {
             // Pass currentVersion so blobs written under an older kv get
             // decrypted via the chain walker (ADR-0012).
             try {
-                await restoreSessionKeys(
+                const result = await restoreSessionKeys(
                     token,
                     userId,
                     backupKey,
                     keyVersion,
                     mgr,
                 );
+                if (!cancelled && result.failed > 0) {
+                    setRestoreWarning(result.failed);
+                }
             } catch (err) {
                 console.error('Session key restore failed:', err);
             }
@@ -177,14 +191,17 @@ export function useSession(): SessionState {
         setNotice(null);
     };
     const clearNotice = () => setNotice(null);
+    const clearRestoreWarning = () => setRestoreWarning(null);
 
     return {
         session,
         sessionManager,
         loading,
         notice,
+        restoreWarning,
         handleLogin,
         handleLogout,
         clearNotice,
+        clearRestoreWarning,
     };
 }

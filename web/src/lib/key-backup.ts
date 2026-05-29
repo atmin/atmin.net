@@ -58,14 +58,30 @@ export async function backupSessionKey(
     await putWithRetry(presigned_url, blobBytes);
 }
 
+/**
+ * Outcome of a restore pass.
+ * - `restored`: session keys successfully recovered into the manager.
+ * - `failed`: key-backup blobs we found but could not recover (corrupt
+ *   ciphertext, undecryptable, unparseable, or an unresolvable key
+ *   version). Each is a session whose history won't surface on this
+ *   device — surfaced to the user rather than silently dropped (I6).
+ *   List/transport failures are NOT counted here (they're transient and
+ *   retried on the next sync); only per-blob failures are.
+ */
+export interface RestoreResult {
+    restored: number;
+    failed: number;
+}
+
 export async function restoreSessionKeys(
     token: string,
     userId: string,
     backupKey: CryptoKey,
     currentVersion: number,
     sessionManager: SessionManager,
-): Promise<number> {
+): Promise<RestoreResult> {
     let restored = 0;
+    let failed = 0;
 
     // Chain is only needed when we see a blob with `v < currentVersion`.
     // Fetch eagerly once; absence is cheap (one storeGet → 404 → empty).
@@ -114,6 +130,7 @@ export async function restoreSessionKeys(
                     sessionManager,
                 );
             } catch (error) {
+                failed += 1;
                 console.error(`Failed to restore key ${key}:`, error);
             }
         }
@@ -146,6 +163,7 @@ export async function restoreSessionKeys(
                             sessionManager,
                         );
                     } catch (entryErr) {
+                        failed += 1;
                         console.error('Failed archive entry:', entryErr);
                     }
                 }
@@ -164,7 +182,7 @@ export async function restoreSessionKeys(
         storeCompact(token, livePrefix, '~').catch(console.error);
     }
 
-    return restored;
+    return { restored, failed };
 }
 
 async function restoreEntry(

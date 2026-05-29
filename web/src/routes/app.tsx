@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom';
 import NotFound from '@/components/NotFound';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
+import { RestoreWarningToast } from '@/components/RestoreWarningToast';
 import { SWUpdateToast } from '@/components/SWUpdateToast';
 import { useInboxSync } from '@/hooks/useInboxSync';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -72,9 +73,11 @@ export default function App() {
         sessionManager,
         loading,
         notice,
+        restoreWarning,
         handleLogin,
         handleLogout,
         clearNotice,
+        clearRestoreWarning,
     } = useSession();
     useInboxSync(session, sessionManager);
     const online = useOnlineStatus();
@@ -165,6 +168,12 @@ export default function App() {
                     sending={chatSending}
                     onUpdate={swUpdate.onUpdate}
                     onDismiss={swUpdate.onDismiss}
+                />
+            )}
+            {session && restoreWarning !== null && (
+                <RestoreWarningToast
+                    count={restoreWarning}
+                    onDismiss={clearRestoreWarning}
                 />
             )}
             {!online && <OfflineIndicator />}

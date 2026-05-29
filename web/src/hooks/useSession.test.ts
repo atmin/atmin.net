@@ -19,7 +19,7 @@ vi.mock('@/lib/contact-backup', () => ({
 }));
 
 vi.mock('@/lib/key-backup', () => ({
-    restoreSessionKeys: vi.fn().mockResolvedValue(undefined),
+    restoreSessionKeys: vi.fn().mockResolvedValue({ restored: 0, failed: 0 }),
     backupSessionKey: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -282,5 +282,48 @@ describe('useSession', () => {
         // result reaches state. sessionManager should not be null.
         expect(createSessionManager).toHaveBeenCalled();
         expect(result.current.sessionManager).not.toBeNull();
+    });
+
+    it('surfaces restoreWarning when restore reports failures, clearable', async () => {
+        const { loadSession } = await import('@/lib/auth');
+        const { restoreSessionKeys } = await import('@/lib/key-backup');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+        vi.mocked(restoreSessionKeys).mockResolvedValue({
+            restored: 2,
+            failed: 3,
+        });
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 10));
+        });
+
+        expect(result.current.restoreWarning).toBe(3);
+
+        act(() => {
+            result.current.clearRestoreWarning();
+        });
+        expect(result.current.restoreWarning).toBeNull();
+    });
+
+    it('no restoreWarning when restore reports zero failures', async () => {
+        const { loadSession } = await import('@/lib/auth');
+        const { restoreSessionKeys } = await import('@/lib/key-backup');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+        vi.mocked(restoreSessionKeys).mockResolvedValue({
+            restored: 5,
+            failed: 0,
+        });
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 10));
+        });
+
+        expect(result.current.restoreWarning).toBeNull();
     });
 });

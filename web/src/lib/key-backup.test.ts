@@ -165,7 +165,7 @@ describe('restoreSessionKeys', () => {
         // Simulate Device B: fresh IDB, restore from backup
         globalThis.indexedDB = new IDBFactory();
         const freshMgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(
+        const { restored } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -207,7 +207,7 @@ describe('restoreSessionKeys', () => {
         stored.set(archiveKey, new Uint8Array(cborEncode([entry])));
 
         const freshMgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(
+        const { restored } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -241,14 +241,14 @@ describe('restoreSessionKeys', () => {
         );
 
         const mgr = await createSessionManager(wasm);
-        const first = await restoreSessionKeys(
+        const { restored: first } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
             1,
             mgr,
         );
-        const second = await restoreSessionKeys(
+        const { restored: second } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -303,7 +303,7 @@ describe('restoreSessionKeys', () => {
 
         globalThis.indexedDB = new IDBFactory();
         const freshMgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(
+        const { restored } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -325,7 +325,7 @@ describe('restoreSessionKeys', () => {
         const backupKey = await makeBackupKey();
 
         const mgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(
+        const { restored } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -379,7 +379,7 @@ describe('restoreSessionKeys', () => {
 
         globalThis.indexedDB = new IDBFactory();
         const freshMgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(
+        const { restored } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -464,8 +464,10 @@ describe('restoreSessionKeys', () => {
         stored.set(`keys/${userId}/live/ghost-session`, new Uint8Array(0));
 
         const mgr = await createSessionManager(wasm);
-        // Should restore senderA and skip the corrupt entry, not throw
-        const restored = await restoreSessionKeys(
+        // Should restore senderA and skip the corrupt entry, not throw —
+        // and the skipped entry is *counted* (failed), not silently dropped,
+        // so the caller can surface partial history loss (I6).
+        const result = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -473,7 +475,8 @@ describe('restoreSessionKeys', () => {
             mgr,
         );
 
-        expect(restored).toBe(1);
+        expect(result.restored).toBe(1);
+        expect(result.failed).toBe(1);
         expect(await mgr.getInbound(senderA.session_id)).not.toBeNull();
 
         senderA.free();
@@ -531,7 +534,7 @@ describe('versioned envelopes + chain walking', () => {
         );
 
         const mgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(
+        const { restored } = await restoreSessionKeys(
             token,
             userId,
             backupKey,
@@ -605,7 +608,13 @@ describe('versioned envelopes + chain walking', () => {
         );
 
         const mgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(token, userId, v2Key, 2, mgr);
+        const { restored } = await restoreSessionKeys(
+            token,
+            userId,
+            v2Key,
+            2,
+            mgr,
+        );
         expect(restored).toBe(2);
 
         const s1 = await mgr.getInbound(v1SessionId);
@@ -671,7 +680,13 @@ describe('versioned envelopes + chain walking', () => {
         );
 
         const mgr = await createSessionManager(wasm);
-        const restored = await restoreSessionKeys(token, userId, v2Key, 2, mgr);
+        const { restored } = await restoreSessionKeys(
+            token,
+            userId,
+            v2Key,
+            2,
+            mgr,
+        );
         expect(restored).toBe(2);
         expect((await mgr.getInbound(sA.session_id))?.decrypt(ctA)).toBe(
             'alpha',

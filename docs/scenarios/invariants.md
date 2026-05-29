@@ -84,7 +84,7 @@ Ordered by blast radius if the invariant breaks in production.
 | I3 | Archive/live boundary is consistent | **P0** | Boundary correctness we cross every compaction |
 | I4 | Restore-equivalence across devices | **P1** | Rarely exercised path, high stakes |
 | I5 | Send outcomes are unambiguous | **P1** | No "ghost sent" states |
-| I6 | Bad backup secret fails cleanly | **P1** | Distinguish from corrupted ciphertext |
+| I6 | Bad credential / corrupt backup fails legibly | **P1** | Wrong password rejected; corrupt blob → resilient restore + visible count |
 | I7 | Account deletion races terminate cleanly | **P2** | Low probability, contained blast radius |
 | I8 | Sync is idempotent | **P2** | Guard against accumulating side-effects on re-sync |
 | I9 | Chain walker recovers history across N rotations | **P1** | Silent failure of multi-hop walk would surface only after real rotations |
@@ -259,30 +259,41 @@ and ADR-0002 for the Megolm ratchet rationale.)
 
 ---
 
-## I6 — Bad backup secret fails cleanly
+## I6 — Bad credential / corrupt backup fails legibly
 
-**Statement.** Attempting to log in with an incorrect password fails
-explicitly. No IDB writes, no partial state, no silent fall-through.
-Separately, a correct password against corrupted ciphertext (e.g., a
-truncated key backup object) fails with a different, distinguishable
-error.
+**Statement.** The two failure modes are distinct, and neither is silent:
+
+- A **wrong password** is rejected at login — no session is established,
+  no local session state is written.
+- A **correct password against a corrupt/undecryptable key-backup blob**
+  does *not* block login. Restore is resilient: it recovers every blob it
+  can, counts the ones it cannot, and surfaces that count to the user
+  ("N conversations' history couldn't be restored"). One bad blob must
+  not cost the user every *other* conversation — but the loss is shown,
+  not swallowed.
 
 **Fault construction.**
 
 - *Wrong secret*: register Alice, then attempt second-device login with
   a different password.
-- *Corrupt ciphertext*: register Alice, mutate a key-backup S3 object
-  to truncate the GCM tag, then attempt restore with the correct
-  password.
+- *Corrupt ciphertext*: register Alice and receive ≥1 message (so a
+  key-backup blob exists), then on a fresh device corrupt that
+  `keys/{uid}/live/{session_id}` blob's ciphertext before logging in with
+  the *correct* password.
 
 **Assertions.**
 
-- Both cases: no IDB writes during the failed attempt.
-- Two distinct user-visible error messages (or error codes) — wrong
-  secret vs. corrupted object.
-- Remote state unchanged in both cases.
+- *Wrong secret*: login does not succeed (stays on `/login` with an
+  error); no session token is persisted; IDB holds no restored session.
+- *Corrupt blob*: login succeeds; the restore-warning signal
+  (`[data-testid="restore-warning"]`) appears with the failed count; the
+  client does not crash; conversations whose blobs were intact still
+  restore.
+- Remote state is unchanged in both cases (the fault is read-side).
 
-**Permitted divergence.** None.
+**Permitted divergence.** A corrupt blob is skipped, not repaired — that
+conversation's history stays absent on this device until a good copy is
+restored. The user is told; it is not silent.
 
 ---
 
@@ -295,7 +306,7 @@ crashing the client.
 
 **Fault construction.**
 
-1. Alice on device 1 starts `DELETE /v1/account`.
+1. Alice on device 1 starts `DELETE /v1/profile`.
 2. Alice on device 2, online concurrently, is mid-sync.
 3. Bob sends a message during the window.
 
