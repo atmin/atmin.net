@@ -3,17 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { ulid } from 'ulid';
 import { addDevice, resolve } from '@/lib/api';
 import { type Session, saveSession } from '@/lib/auth';
-import { deriveSecretFromCredential } from '@/lib/credential';
-import {
-    base64UrlEncode,
-    deriveKeys,
-    signAuthProof,
-    signAuthProofV2,
-} from '@/lib/crypto';
+import { deriveSecretFromPassword } from '@/lib/credential';
+import { base64UrlEncode, deriveKeys, signAuthProofV2 } from '@/lib/crypto';
 import { detectDeviceLabel } from '@/lib/utils';
-
-// Re-exported for tests; the canonical definition lives in lib/credential.
-export { isLegacyMnemonic } from '@/lib/credential';
 
 export interface LoginState {
     loading: boolean;
@@ -52,37 +44,28 @@ export function useLogin(onSuccess: (session: Session) => void): LoginState {
             }
             const userId = resolveRes.user_id;
 
-            const derivedSecret = await deriveSecretFromCredential(
-                secretInput,
-                {
-                    salt: resolveRes.salt,
-                    kdf: resolveRes.kdf,
-                },
-            );
+            const derivedSecret = await deriveSecretFromPassword(secretInput, {
+                salt: resolveRes.salt,
+                kdf: resolveRes.kdf,
+            });
             const profileKeyVersion = resolveRes.key_version ?? 1;
 
             const keys = await deriveKeys(derivedSecret);
 
             const deviceId = ulid();
 
-            // v2 auth proof (JCS-canonicalized, carries key_version) only
-            // once an account has rotated; v2 accounts still at key_version 1
-            // match v1's implicit kv=1, so v1 is correct there too.
+            // Single auth-proof shape: JCS-canonicalized, carrying the
+            // account's current key_version (1 for a never-rotated account).
             const payload = {
                 user_id: userId,
                 device_id: deviceId,
                 timestamp: new Date().toISOString(),
-                ...(profileKeyVersion > 1
-                    ? { key_version: profileKeyVersion }
-                    : {}),
+                key_version: profileKeyVersion,
             };
-            const signature =
-                profileKeyVersion > 1
-                    ? await signAuthProofV2(keys.auth.privateKey, {
-                          ...payload,
-                          key_version: profileKeyVersion,
-                      })
-                    : await signAuthProof(keys.auth.privateKey, payload);
+            const signature = await signAuthProofV2(
+                keys.auth.privateKey,
+                payload,
+            );
 
             const deviceRes = await addDevice({
                 user_id: userId,

@@ -81,7 +81,7 @@ vi.mock('@/lib/key-chain', () => ({
 }));
 
 vi.mock('@/lib/credential', () => ({
-    deriveSecretFromCredential: vi.fn(async () => new Uint8Array(16).fill(5)),
+    deriveSecretFromPassword: vi.fn(async () => new Uint8Array(16).fill(5)),
 }));
 
 vi.mock('react-router-dom', () => ({
@@ -274,45 +274,5 @@ describe('useRotateKeys', () => {
         expect(result.current.error).toContain('chain write timeout');
         expect(rotateKeys).not.toHaveBeenCalled();
         expect(onSuccess).not.toHaveBeenCalled();
-    });
-
-    it('v1 → v2 migration: legacy (no salt/kdf) account rotates by passing empty params to the credential helper', async () => {
-        const { useRotateKeys } = await loadHook();
-        const { storeGet, rotateKeys } = await import('@/lib/api');
-        const { deriveSecretFromCredential } = await import('@/lib/credential');
-
-        // Profile lacks salt/kdf — the v1 case the autodetect helper handles
-        // by taking the mnemonic decode path.
-        vi.mocked(storeGet).mockResolvedValueOnce(
-            new TextEncoder().encode(
-                JSON.stringify({
-                    auth_public_key: 'OLD_AUTH_PUB',
-                }),
-            ).buffer,
-        );
-
-        const onSuccess = vi.fn();
-        const { result } = renderHook(() =>
-            useRotateKeys(baseSession, onSuccess),
-        );
-        act(() => {
-            result.current.setCurrent('twelve word mnemonic here');
-            result.current.setNew('new-pw');
-            result.current.setConfirm('new-pw');
-            result.current.setAcknowledged(true);
-        });
-        await act(async () => {
-            await result.current.submit();
-        });
-
-        // No legacy-account error; rotation proceeds via the autodetect helper.
-        expect(result.current.error).toBeNull();
-        // The helper was called with empty params (no salt/kdf to apply).
-        expect(deriveSecretFromCredential).toHaveBeenCalledWith(
-            'twelve word mnemonic here',
-            { salt: undefined, kdf: undefined },
-        );
-        expect(rotateKeys).toHaveBeenCalledOnce();
-        expect(onSuccess).toHaveBeenCalled();
     });
 });

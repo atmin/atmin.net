@@ -60,8 +60,7 @@ export default function LoginForm({
                     <CardHeader>
                         <CardTitle>Sign In</CardTitle>
                         <CardDescription>
-                            Restore your account with your password or recovery
-                            phrase
+                            Restore your account with your password
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -107,7 +106,7 @@ export default function LoginForm({
                                     htmlFor="secret"
                                     className="mb-1 block text-sm font-medium"
                                 >
-                                    Password or recovery phrase
+                                    Password
                                 </label>
                                 <PasswordInput
                                     id="secret"
@@ -116,13 +115,9 @@ export default function LoginForm({
                                         setSecret(v);
                                         dismissNoticeOnInput();
                                     }}
-                                    placeholder="Password or recovery phrase"
+                                    placeholder="Password"
                                     autoComplete="current-password"
                                 />
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                    Enter your password, or your legacy 12-word
-                                    recovery phrase.
-                                </p>
                             </div>
 
                             {error && (

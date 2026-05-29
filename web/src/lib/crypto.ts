@@ -218,26 +218,13 @@ export async function deriveKeys(
     };
 }
 
-// ── Ed25519 auth proof ──────────────────────────────────────────────
-
-export async function signAuthProof(
-    privateKey: CryptoKey,
-    payload: { user_id: string; device_id: string; timestamp: string },
-): Promise<Uint8Array> {
-    const data = enc.encode(JSON.stringify(payload));
-    return new Uint8Array(
-        await crypto.subtle.sign({ name: 'Ed25519' }, privateKey, data),
-    );
-}
-
-// ── JCS canonicalization + v2 auth proof ────────────────────────────
+// ── JCS canonicalization + auth proof ───────────────────────────────
 //
-// v2 auth proofs (rotated accounts, key_version > 1) and the rotation
-// continuity signature are signed over their RFC 8785 (JCS) canonical
-// bytes rather than JSON.stringify's insertion-order output, so the
-// client and the Go server agree on the exact byte sequence regardless
-// of key ordering. The v1 signAuthProof above is frozen on the wire and
-// kept only for legacy-mnemonic logins.
+// Auth proofs and the rotation continuity signature are signed over their
+// RFC 8785 (JCS) canonical bytes rather than JSON.stringify's
+// insertion-order output, so the client and the Go server agree on the
+// exact byte sequence regardless of key ordering. This is the single
+// auth-proof shape — the legacy non-canonical form has been removed.
 
 export function canonicalizeForSign(obj: Record<string, unknown>): Uint8Array {
     const canonical = canonicalize(obj);
@@ -276,20 +263,6 @@ export async function signAuthProofV2(
     const data = canonicalizeForSign(payload);
     return new Uint8Array(
         await crypto.subtle.sign({ name: 'Ed25519' }, privateKey, buf(data)),
-    );
-}
-
-export async function verifyAuthProof(
-    publicKey: CryptoKey,
-    payload: { user_id: string; device_id: string; timestamp: string },
-    signature: Uint8Array,
-): Promise<boolean> {
-    const data = enc.encode(JSON.stringify(payload));
-    return crypto.subtle.verify(
-        { name: 'Ed25519' },
-        publicKey,
-        buf(signature),
-        data,
     );
 }
 

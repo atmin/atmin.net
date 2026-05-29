@@ -6,7 +6,7 @@ the resulting S3 state, and is used to generate end-to-end tests.
 
 - [First conversation](./first-conversation.md) — registration, key exchange, first message
 - [Custom handles](./custom-handles.md) — user-chosen handle at registration, 30-day cooldown on deletion, /@-prefixed URLs
-- [Credential registration](./credential-registration.md) — password + Argon2id registration and login autodetect
+- [Credential registration](./credential-registration.md) — password + Argon2id registration and login
 - [Credential rotation](./credential-rotation.md) — change-password flow with continuity signature + lazy chain
 - [Credential multi-device cutoff](./credential-multi-device-cutoff.md) — stale device's reaction to rotation on another device
 - [Multi-device](./multi-device.md) — adding a second device, syncing history

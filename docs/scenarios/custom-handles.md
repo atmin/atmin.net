@@ -40,9 +40,9 @@ sequenceDiagram
 The registration form opens with the handle field above the password
 fields. A leading `@` is rendered as a CSS affordance; the input value
 itself is the bare handle. A **Surprise me** button generates a
-random `word1-word2` pair from the client-side BIP39 wordlist (the
-same wordlist bundled for the legacy mnemonic autodetect path — no
-new dependency weight).
+random `word1-word2` pair from the client-side BIP39 wordlist
+(`@scure/bip39`, bundled for this suggester — no new dependency
+weight).
 
 As the user types, the form runs two checks in parallel:
 

@@ -1,7 +1,7 @@
 # Scenario: Account recovery
 
 Alice loses all her devices. She recovers her account on a new phone
-using only her 12-word mnemonic.
+using only her password.
 
 **Prerequisite**: [Multi-device](./multi-device.md) completed, then both
 of Alice's devices are lost (laptop broken, phone stolen and revoked).
@@ -16,7 +16,7 @@ sequenceDiagram
     participant B as Bob
 
     note over N,B: Add new device + revoke lost ones
-    N->>S: POST /v1/devices (auth proof from mnemonic)
+    N->>S: POST /v1/devices (auth proof from password)
     S-->>N: device_id adev03, token
     N->>S: POST /v1/devices/revoke adev01
 
@@ -83,9 +83,10 @@ keys/bob01/live/S3
 ## 1. Alice adds a new device
 
 Alice gets a new phone, opens the app, chooses "Recover account",
-and enters her 12-word mnemonic.
+and enters her password.
 
-The phone derives the same three keys (auth, sharing, backup) from the backup secret.
+The phone resolves her `salt`/`kdf`, runs Argon2id then HKDF, and derives the
+same three keys (auth, sharing, backup) from the backup secret.
 Generates a new device ID and signs an auth proof:
 
 ```
@@ -301,7 +302,7 @@ keys/bob01/live/S4                 ← new
 
 ## What to test
 
-- Account recovery works with only the 12-word mnemonic (no other device needed).
+- Account recovery works with only the password (no other device needed).
 - Key backups are restored before inbox sync (keys needed to decrypt messages).
 - Archived key backups (CBOR) are decoded and decrypted correctly.
 - Archived inbox messages (CBOR) are decoded and decrypted correctly.

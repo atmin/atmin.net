@@ -197,6 +197,7 @@ describe('restoreSessionKeys', () => {
             new TextEncoder().encode(sessionKey),
         );
         const entry = {
+            v: 1,
             msg_id: sessionId,
             session_id: sessionId,
             iv: btoa(String.fromCharCode(...iv)),
@@ -290,6 +291,7 @@ describe('restoreSessionKeys', () => {
             new Uint8Array(
                 cborEncode([
                     {
+                        v: 1,
                         msg_id: senderB.session_id,
                         session_id: senderB.session_id,
                         iv: btoa(String.fromCharCode(...iv)),
@@ -365,6 +367,7 @@ describe('restoreSessionKeys', () => {
             new Uint8Array(
                 cborEncode([
                     {
+                        v: 1,
                         msg_id: senderB.session_id,
                         session_id: senderB.session_id,
                         iv: btoa(String.fromCharCode(...iv)),
@@ -502,7 +505,7 @@ describe('versioned envelopes + chain walking', () => {
         sender.free();
     });
 
-    it('restores a v1 legacy-shape live blob on a current=v1 account', async () => {
+    it('defensively restores a no-v live blob as v: 1 (stray pre-versioning blob)', async () => {
         const { restoreSessionKeys } = await import('./key-backup');
         const backupKey = await makeBackupKey();
         const sender = new MegolmOutbound();
@@ -510,6 +513,8 @@ describe('versioned envelopes + chain walking', () => {
         const sessionId = sender.session_id;
         const ciphertext = sender.encrypt('legacy live');
 
+        // A blob written before envelope versioning: no `v` field. Nothing
+        // rewrites write-once key blobs, so the reader must still handle it.
         const { iv, ciphertext: ct } = await backupEncrypt(
             backupKey,
             new TextEncoder().encode(sessionKey),

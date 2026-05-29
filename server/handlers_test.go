@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	"github.com/gowebpki/jcs"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -58,11 +59,14 @@ func registerTestUserWithHandle(t *testing.T, mux http.Handler, label, handle st
 	pub, priv, _ := ed25519.GenerateKey(nil)
 	pubB64 := b64url.EncodeToString(pub)
 
-	body, _ := json.Marshal(map[string]string{
+	// Every account is password-derived: registration always carries salt + kdf.
+	body, _ := json.Marshal(map[string]any{
 		"handle":             handle,
 		"device_label":       label,
 		"auth_public_key":    pubB64,
 		"sharing_public_key": b64url.EncodeToString([]byte("sharing-key-placeholder-32bytes!")),
+		"salt":               b64url.EncodeToString(make([]byte, 16)),
+		"kdf":                map[string]any{"type": "argon2id", "m": 65536, "t": 3, "p": 1},
 	})
 	req := httptest.NewRequest("POST", "/v1/register", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
@@ -91,20 +95,30 @@ func registerTestUserWithHandle(t *testing.T, mux http.Handler, label, handle st
 	}
 }
 
+// signAuthProof builds an auth proof for an account at key_version 1 — the
+// shape registerTestUser accounts use until they rotate. For a rotated
+// account, use signAuthProofKV with the current key_version.
 func signAuthProof(priv ed25519.PrivateKey, userID, deviceID string) string {
-	payload := AuthProofPayload{
-		UserID:    userID,
-		DeviceID:  deviceID,
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-	payloadBytes, _ := json.Marshal(payload)
-	sig := ed25519.Sign(priv, payloadBytes)
+	return signAuthProofKV(priv, userID, deviceID, 1)
+}
 
-	proof := AuthProof{
-		Payload:   payload,
-		Signature: b64url.EncodeToString(sig),
+// signAuthProofKV builds the single canonical auth-proof shape: a payload
+// carrying key_version, signed over its JCS-canonicalized bytes.
+func signAuthProofKV(priv ed25519.PrivateKey, userID, deviceID string, kv int) string {
+	payload := map[string]any{
+		"user_id":     userID,
+		"device_id":   deviceID,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+		"key_version": kv,
 	}
-	proofBytes, _ := json.Marshal(proof)
+	raw, _ := json.Marshal(payload)
+	canonical, _ := jcs.Transform(raw)
+	sig := ed25519.Sign(priv, canonical)
+
+	proofBytes, _ := json.Marshal(map[string]any{
+		"payload":   payload,
+		"signature": b64url.EncodeToString(sig),
+	})
 	return string(proofBytes)
 }
 

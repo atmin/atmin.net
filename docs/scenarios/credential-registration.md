@@ -1,8 +1,8 @@
 # Scenario: Credential registration (password)
 
-A new user registers with a password instead of a BIP39 mnemonic. The
-password is stretched through Argon2id into the 16-byte backup secret that
-feeds the existing HKDF chain. Matches `web/e2e/credential-registration.spec.ts`.
+A new user registers with a password. The password is stretched through
+Argon2id into the 16-byte backup secret that feeds the existing HKDF chain.
+Matches `web/e2e/credential-registration.spec.ts`.
 See [ADR-0011](../decisions/adr-0011-credential-derivation.md).
 
 ## Overview
@@ -56,26 +56,22 @@ POST /v1/register
 ```
 
 The server validates the KDF shape (`type == "argon2id"`, `m ∈ [8, 1048576]`
-KiB, `t ∈ [1, 16]`, `p ∈ [1, 8]`, salt decodes to exactly 16 bytes). It rejects
-a partial set (salt without kdf or vice versa) or malformed params with
-`400 bad_request`. On success it persists `salt`, `kdf`, and `key_version: 1`
-onto `profile.json` and the `handles/{handle}.json` projection.
+KiB, `t ∈ [1, 16]`, `p ∈ [1, 8]`, salt decodes to exactly 16 bytes). `salt`
+and `kdf` are mandatory: a request missing either, carrying only one of the
+pair, or with malformed params is rejected `400 bad_request`. On success it
+persists `salt`, `kdf`, and `key_version: 1` onto `profile.json` and the
+`handles/{handle}.json` projection.
 
-A v1 (legacy mnemonic) registration omits `salt`/`kdf`; the server stores a
-clean v1 profile with none of the three fields. That path is retained for the
-migration-mechanism rehearsal but is no longer exposed in the production UI.
+## 4. Login
 
-## 4. Login (autodetect)
-
-A returning device enters its handle and credential into a single field. The
-client autodetects: 12 valid wordlist tokens with a good checksum → legacy
-direct-HKDF path; otherwise → fetch `salt` + `kdf` from
-`GET /v1/resolve/{handle}`, run Argon2id, then HKDF. Both converge on the same
-16-byte secret. See [multi-device](./multi-device.md) for the add-device flow.
+A returning device enters its handle and password into a single password
+field. The client fetches `salt` + `kdf` from `GET /v1/resolve/{handle}`,
+runs Argon2id, then HKDF to recover the same 16-byte secret. See
+[multi-device](./multi-device.md) for the add-device flow.
 
 ## S3 state
 
-- `users/{uid}/profile.json` — gains `salt`, `kdf`, `key_version: 1` (v2 only).
+- `users/{uid}/profile.json` — gains `salt`, `kdf`, `key_version: 1`.
 - `handles/{handle}.json` — projection gains the same three fields.
 - Everything else (devices, inbox, keys) is unchanged from
   [first-conversation](./first-conversation.md).

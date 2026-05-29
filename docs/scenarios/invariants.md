@@ -196,7 +196,7 @@ duplicate.
 
 ## I4 — Restore-equivalence across devices
 
-**Statement.** Given the same handle and backup mnemonic, a second device
+**Statement.** Given the same handle and password, a second device
 that comes online later converges to the same ordered message set and the
 same decryptability status per `msg_id` as the first device. Convergence
 is reached without manual intervention.
@@ -261,19 +261,19 @@ and ADR-0002 for the Megolm ratchet rationale.)
 
 ## I6 — Bad backup secret fails cleanly
 
-**Statement.** Attempting to log in with an incorrect mnemonic fails
+**Statement.** Attempting to log in with an incorrect password fails
 explicitly. No IDB writes, no partial state, no silent fall-through.
-Separately, a correct mnemonic against corrupted ciphertext (e.g., a
+Separately, a correct password against corrupted ciphertext (e.g., a
 truncated key backup object) fails with a different, distinguishable
 error.
 
 **Fault construction.**
 
 - *Wrong secret*: register Alice, then attempt second-device login with
-  a different mnemonic.
+  a different password.
 - *Corrupt ciphertext*: register Alice, mutate a key-backup S3 object
   to truncate the GCM tag, then attempt restore with the correct
-  mnemonic.
+  password.
 
 **Assertions.**
 

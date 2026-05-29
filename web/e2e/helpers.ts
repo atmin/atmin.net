@@ -66,8 +66,7 @@ export async function registerUserWithPassword(
 
 /**
  * Log in on a second device using an existing user's handle and
- * credential (password for v2 accounts, or a legacy recovery phrase).
- * Assumes the page is not logged in.
+ * password. Assumes the page is not logged in.
  */
 export async function loginUser(
     page: Page,

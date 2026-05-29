@@ -11,9 +11,9 @@ type Profile struct {
 	Handle           string     `json:"handle"`
 	AuthPublicKey    string     `json:"auth_public_key"`
 	SharingPublicKey string     `json:"sharing_public_key"`
-	Salt             string     `json:"salt,omitempty"`
-	KDF              *KDFParams `json:"kdf,omitempty"`
-	KeyVersion       int        `json:"key_version,omitempty"`
+	Salt             string     `json:"salt"`
+	KDF              *KDFParams `json:"kdf"`
+	KeyVersion       int        `json:"key_version"`
 	DisplayName      string     `json:"display_name,omitempty"`
 	AvatarURL        string     `json:"avatar_url,omitempty"`
 	LastActive       string     `json:"last_active,omitempty"`
@@ -31,8 +31,8 @@ type KDFParams struct {
 }
 
 // publicHandleData is the projection written to handles/{handle}.json.
-// salt/kdf/key_version are public per-user values (v2 accounts only);
-// senders ignore them, the login fork consumes them.
+// salt/kdf/key_version are public per-user values; senders ignore them,
+// the login fork consumes them to re-derive keys from the password.
 //
 // A handle's lifecycle has two shapes:
 //   - Live projection: every field set (UserID, SharingPublicKey, ...).
@@ -44,9 +44,9 @@ type KDFParams struct {
 type publicHandleData struct {
 	UserID           string     `json:"user_id,omitempty"`
 	SharingPublicKey string     `json:"sharing_public_key,omitempty"`
-	Salt             string     `json:"salt,omitempty"`
-	KDF              *KDFParams `json:"kdf,omitempty"`
-	KeyVersion       int        `json:"key_version,omitempty"`
+	Salt             string     `json:"salt"`
+	KDF              *KDFParams `json:"kdf"`
+	KeyVersion       int        `json:"key_version"`
 	DisplayName      string     `json:"display_name,omitempty"`
 	AvatarURL        string     `json:"avatar_url,omitempty"`
 	// ReleasedAt is set only on tombstones — the original account was

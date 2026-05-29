@@ -79,7 +79,7 @@ keys/bob01/live/S1
 
 ## 1. Alice adds her phone
 
-Alice opens the app on her phone, chooses "Add device", and enters her 12-word mnemonic.
+Alice opens the app on her phone, chooses "Add device", and enters her password.
 The phone derives the same three keys (auth, sharing, backup) from the backup secret.
 
 The phone generates a new device ID and signs an auth proof:
@@ -312,7 +312,7 @@ keys/bob01/live/S3              ← new (received from phone)
 
 ## What to test
 
-- Phone derives identical keys from mnemonic (auth proof verifies).
+- Phone derives identical keys from the password (auth proof verifies).
 - Phone decrypts full history after key backup + inbox sync.
 - Bob receives and decrypts messages from Alice's phone (different session, different `from_device`).
 - Laptop discovers phone's session key via key backup when it encounters an unknown session.

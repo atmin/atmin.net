@@ -9,7 +9,7 @@ import {
 } from '@/lib/api';
 import { argonStretch } from '@/lib/argon2-worker.client';
 import { clearSession, type Session, saveSession } from '@/lib/auth';
-import { deriveSecretFromCredential } from '@/lib/credential';
+import { deriveSecretFromPassword } from '@/lib/credential';
 import {
     base64UrlEncode,
     DEFAULT_KDF,
@@ -80,25 +80,20 @@ export function useRotateKeys(
         setError(null);
         try {
             // One read of the user's own profile.json gives us everything we
-            // need: salt + kdf to derive the old key (absent for v1 → mnemonic
-            // path), auth_public_key to verify the current credential before
-            // any new-key work, and key_version to compute the next.
+            // need: salt + kdf to derive the old key, auth_public_key to
+            // verify the current credential before any new-key work, and
+            // key_version to compute the next.
             const profile = await readOwnProfile(session.token, session.userId);
             const currentKV = profile.keyVersion;
 
-            // 1. Derive the OLD keys. Autodetect handles both v2 (password →
-            //    Argon2id with profile.salt/kdf) and v1 (mnemonic → direct
-            //    HKDF) — same flow recovers either credential. Extractable
-            //    on the backup key so it can be wrapped into the chain link
-            //    in step 3, then dropped.
+            // 1. Derive the OLD keys from the current password and the stored
+            //    Argon2id params. Extractable on the backup key so it can be
+            //    wrapped into the chain link in step 3, then dropped.
             setStep('deriving-old');
-            const oldSecret = await deriveSecretFromCredential(
-                currentPassword,
-                {
-                    salt: profile.salt,
-                    kdf: profile.kdf,
-                },
-            );
+            const oldSecret = await deriveSecretFromPassword(currentPassword, {
+                salt: profile.salt,
+                kdf: profile.kdf,
+            });
             const oldKeys = await deriveKeys(oldSecret, { extractable: true });
 
             // Sanity check: derived pubkey must match what's published.
@@ -108,7 +103,7 @@ export function useRotateKeys(
                 base64UrlEncode(oldKeys.auth.publicKeyBytes) !==
                 profile.authPublicKey
             ) {
-                setError('Current password or recovery phrase is incorrect.');
+                setError('Current password is incorrect.');
                 setStep('enter');
                 return;
             }

@@ -30,7 +30,7 @@ export const Loading: Story = {
 export const WithError: Story = {
     args: {
         loading: false,
-        error: 'Invalid recovery phrase. Please check your words and try again.',
+        error: 'Incorrect password. Please try again.',
     },
 };
 

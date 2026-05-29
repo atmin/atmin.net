@@ -42,20 +42,17 @@ func TestTokenRoundTripV2KeyVersion(t *testing.T) {
 	}
 }
 
-func TestTokenAcceptsLegacyV1(t *testing.T) {
-	// Construct a 3-segment v1 token manually — it must parse as kv=1.
+func TestTokenRejectsLegacyV1(t *testing.T) {
+	// A synthetic 3-segment (no-kv) token — the legacy v1 shape — must no
+	// longer parse. Pins the removal so a refactor can't reintroduce it.
 	secret := []byte("test-secret")
 	payload := "user1.dev1"
 	mac := computeHMAC(secret, payload)
 	raw := payload + "." + b64url.EncodeToString(mac)
 	legacy := b64url.EncodeToString([]byte(raw))
 
-	uid, did, kv, err := parseToken(secret, legacy)
-	if err != nil {
-		t.Fatalf("parseToken legacy: %v", err)
-	}
-	if uid != "user1" || did != "dev1" || kv != 1 {
-		t.Fatalf("got %q/%q/%d, want user1/dev1/1", uid, did, kv)
+	if _, _, _, err := parseToken(secret, legacy); err == nil {
+		t.Fatal("expected legacy 3-segment token to be rejected")
 	}
 }
 
@@ -101,23 +98,37 @@ func TestTokenEmptyInput(t *testing.T) {
 	}
 }
 
+// buildAuthProof builds a canonical (JCS + key_version) auth proof and
+// unmarshals it back into the AuthProof type, capturing payloadRaw the way
+// the real request path does.
+func buildAuthProof(t *testing.T, priv ed25519.PrivateKey, userID, deviceID string, kv int, ts string) AuthProof {
+	t.Helper()
+	payload := map[string]any{
+		"user_id":     userID,
+		"device_id":   deviceID,
+		"timestamp":   ts,
+		"key_version": kv,
+	}
+	raw, _ := json.Marshal(payload)
+	canonical, err := jcs.Transform(raw)
+	if err != nil {
+		t.Fatalf("canonicalize: %v", err)
+	}
+	sig := ed25519.Sign(priv, canonical)
+	wire, _ := json.Marshal(map[string]any{
+		"payload":   payload,
+		"signature": b64url.EncodeToString(sig),
+	})
+	var proof AuthProof
+	if err := json.Unmarshal(wire, &proof); err != nil {
+		t.Fatalf("unmarshal proof: %v", err)
+	}
+	return proof
+}
+
 func TestAuthProofValid(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-
-	payload := AuthProofPayload{
-		UserID:    "user1",
-		DeviceID:  "dev1",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
-	sig := ed25519.Sign(priv, payloadBytes)
-
-	proof := AuthProof{
-		Payload:   payload,
-		Signature: b64url.EncodeToString(sig),
-	}
-
+	proof := buildAuthProof(t, priv, "user1", "dev1", 1, time.Now().UTC().Format(time.RFC3339))
 	if err := verifyAuthProof(pub, proof); err != nil {
 		t.Fatalf("verifyAuthProof: %v", err)
 	}
@@ -125,21 +136,8 @@ func TestAuthProofValid(t *testing.T) {
 
 func TestAuthProofExpired(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(nil)
-
-	payload := AuthProofPayload{
-		UserID:    "user1",
-		DeviceID:  "dev1",
-		Timestamp: time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339),
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
-	sig := ed25519.Sign(priv, payloadBytes)
-
-	proof := AuthProof{
-		Payload:   payload,
-		Signature: b64url.EncodeToString(sig),
-	}
-
+	old := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+	proof := buildAuthProof(t, priv, "user1", "dev1", 1, old)
 	if err := verifyAuthProof(pub, proof); err == nil {
 		t.Fatal("expected error for expired proof")
 	}
@@ -221,21 +219,7 @@ func TestAuthProofV2_WrongCanonicalRejected(t *testing.T) {
 func TestAuthProofWrongKey(t *testing.T) {
 	_, priv, _ := ed25519.GenerateKey(nil)
 	otherPub, _, _ := ed25519.GenerateKey(nil)
-
-	payload := AuthProofPayload{
-		UserID:    "user1",
-		DeviceID:  "dev1",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-
-	payloadBytes, _ := json.Marshal(payload)
-	sig := ed25519.Sign(priv, payloadBytes)
-
-	proof := AuthProof{
-		Payload:   payload,
-		Signature: b64url.EncodeToString(sig),
-	}
-
+	proof := buildAuthProof(t, priv, "user1", "dev1", 1, time.Now().UTC().Format(time.RFC3339))
 	if err := verifyAuthProof(otherPub, proof); err == nil {
 		t.Fatal("expected error for wrong public key")
 	}

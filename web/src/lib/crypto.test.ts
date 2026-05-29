@@ -13,10 +13,8 @@ import {
     eciesEncrypt,
     generateBackupSecret,
     importSharingPublicKey,
-    signAuthProof,
     signAuthProofV2,
     signContinuity,
-    verifyAuthProof,
 } from './crypto.js';
 
 const fixtureDir = join(
@@ -75,63 +73,6 @@ describe('Web Crypto', () => {
             await expect(
                 crypto.subtle.exportKey('jwk', keys.sharing.privateKey),
             ).rejects.toThrow();
-        });
-    });
-
-    describe('Ed25519 auth proof', () => {
-        it('signs and verifies', async () => {
-            const keys = await deriveKeys(generateBackupSecret());
-            const payload = {
-                user_id: 'user01',
-                device_id: 'dev01',
-                timestamp: '2025-01-15T10:30:00Z',
-            };
-
-            const sig = await signAuthProof(keys.auth.privateKey, payload);
-            expect(sig).toHaveLength(64);
-
-            const valid = await verifyAuthProof(
-                keys.auth.publicKey,
-                payload,
-                sig,
-            );
-            expect(valid).toBe(true);
-        });
-
-        it('rejects tampered payload', async () => {
-            const keys = await deriveKeys(generateBackupSecret());
-            const payload = {
-                user_id: 'user01',
-                device_id: 'dev01',
-                timestamp: '2025-01-15T10:30:00Z',
-            };
-
-            const sig = await signAuthProof(keys.auth.privateKey, payload);
-            const tampered = { ...payload, user_id: 'user02' };
-            const valid = await verifyAuthProof(
-                keys.auth.publicKey,
-                tampered,
-                sig,
-            );
-            expect(valid).toBe(false);
-        });
-
-        it('rejects wrong key', async () => {
-            const keys1 = await deriveKeys(generateBackupSecret());
-            const keys2 = await deriveKeys(generateBackupSecret());
-            const payload = {
-                user_id: 'user01',
-                device_id: 'dev01',
-                timestamp: '2025-01-15T10:30:00Z',
-            };
-
-            const sig = await signAuthProof(keys1.auth.privateKey, payload);
-            const valid = await verifyAuthProof(
-                keys2.auth.publicKey,
-                payload,
-                sig,
-            );
-            expect(valid).toBe(false);
         });
     });
 

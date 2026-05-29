@@ -19,14 +19,13 @@ import (
 // b64url is unpadded base64url encoding (RFC 4648 section 5).
 var b64url = base64.RawURLEncoding
 
-// Token wire format (v2, per ADR-0012):
+// Token wire format (per ADR-0012):
 //
 //	base64url(uid || "." || did || "." || kv || "." || HMAC-SHA256(secret, uid || "." || did || "." || kv))
 //
-// kv (key_version) is covered by the HMAC, so a stolen v1 token cannot be
-// upgraded to v2 by an attacker. v1 tokens (3 segments, no kv) are still
-// accepted at parse time as kv = 1 — that's the rehearsal-of-protocol-upgrade
-// behaviour ADR-0011/0012 calls for. New tokens are always minted v2.
+// kv (key_version) is covered by the HMAC, so a stolen token cannot have its
+// key_version rewritten by an attacker. Tokens are always 4 segments; the
+// legacy 3-segment (no-kv) shape is no longer accepted.
 
 func generateToken(secret []byte, userID, deviceID string, keyVersion int) string {
 	if keyVersion < 1 {
@@ -38,7 +37,8 @@ func generateToken(secret []byte, userID, deviceID string, keyVersion int) strin
 	return b64url.EncodeToString([]byte(raw))
 }
 
-// parseToken accepts both v1 (3 segments → kv = 1) and v2 (4 segments → embedded kv).
+// parseToken decodes a 4-segment token (uid.did.kv.sig) and verifies its HMAC.
+// Any other shape — including the legacy 3-segment (no-kv) form — is rejected.
 func parseToken(secret []byte, token string) (userID, deviceID string, keyVersion int, err error) {
 	raw, decodeErr := b64url.DecodeString(token)
 	if decodeErr != nil {
@@ -46,36 +46,23 @@ func parseToken(secret []byte, token string) (userID, deviceID string, keyVersio
 	}
 
 	parts := strings.Split(string(raw), ".")
-	switch len(parts) {
-	case 3:
-		userID, deviceID = parts[0], parts[1]
-		sig, sErr := b64url.DecodeString(parts[2])
-		if sErr != nil {
-			return "", "", 0, errors.New("invalid token signature encoding")
-		}
-		expected := computeHMAC(secret, userID+"."+deviceID)
-		if !hmac.Equal(sig, expected) {
-			return "", "", 0, errors.New("invalid token signature")
-		}
-		return userID, deviceID, 1, nil
-	case 4:
-		userID, deviceID = parts[0], parts[1]
-		kv, kvErr := strconv.Atoi(parts[2])
-		if kvErr != nil || kv < 1 {
-			return "", "", 0, errors.New("invalid token key_version")
-		}
-		sig, sErr := b64url.DecodeString(parts[3])
-		if sErr != nil {
-			return "", "", 0, errors.New("invalid token signature encoding")
-		}
-		expected := computeHMAC(secret, userID+"."+deviceID+"."+parts[2])
-		if !hmac.Equal(sig, expected) {
-			return "", "", 0, errors.New("invalid token signature")
-		}
-		return userID, deviceID, kv, nil
-	default:
+	if len(parts) != 4 {
 		return "", "", 0, errors.New("invalid token format")
 	}
+	userID, deviceID = parts[0], parts[1]
+	kv, kvErr := strconv.Atoi(parts[2])
+	if kvErr != nil || kv < 1 {
+		return "", "", 0, errors.New("invalid token key_version")
+	}
+	sig, sErr := b64url.DecodeString(parts[3])
+	if sErr != nil {
+		return "", "", 0, errors.New("invalid token signature encoding")
+	}
+	expected := computeHMAC(secret, userID+"."+deviceID+"."+parts[2])
+	if !hmac.Equal(sig, expected) {
+		return "", "", 0, errors.New("invalid token signature")
+	}
+	return userID, deviceID, kv, nil
 }
 
 func computeHMAC(secret []byte, message string) []byte {
@@ -86,13 +73,10 @@ func computeHMAC(secret []byte, message string) []byte {
 
 // Auth proof: Ed25519 signature over a JSON payload with timestamp.
 //
-// v2 payloads carry a `key_version` field and are signed over their
-// JCS-canonicalized (RFC 8785) byte sequence — used by rotate-keys, and by
-// add-device/revoke-device once an account's key_version exceeds 1.
-// v1 payloads omit `key_version` and are verified against the legacy
-// `json.Marshal` byte sequence of the typed AuthProofPayload struct
-// (which happens to match `JSON.stringify` of `{user_id, device_id, timestamp}`).
-// v1 proofs are never regenerated on the server.
+// Every payload carries a `key_version` field and is signed over its
+// JCS-canonicalized (RFC 8785) byte sequence. The legacy shape (no
+// `key_version`, verified against a plain `json.Marshal` of the typed
+// struct) is no longer accepted — there is a single auth-proof shape.
 
 type AuthProof struct {
 	Payload   AuthProofPayload `json:"payload"`
@@ -139,34 +123,21 @@ func verifyAuthProof(authPublicKey ed25519.PublicKey, proof AuthProof) error {
 	if math.Abs(time.Since(ts).Seconds()) > authProofMaxAge.Seconds() {
 		return errors.New("auth proof expired")
 	}
+	if proof.Payload.KeyVersion < 1 {
+		return errors.New("auth proof missing key_version")
+	}
 
 	sig, err := b64url.DecodeString(proof.Signature)
 	if err != nil {
 		return errors.New("invalid signature encoding")
 	}
 
-	// v2 path: the payload carries `key_version`, signed over JCS bytes.
-	if proof.Payload.KeyVersion > 0 {
-		canonical, err := jcs.Transform(proof.payloadRaw)
-		if err != nil {
-			return fmt.Errorf("canonicalize payload: %w", err)
-		}
-		if !ed25519.Verify(authPublicKey, canonical, sig) {
-			return errors.New("invalid signature")
-		}
-		return nil
-	}
-
-	// v1 path: legacy JSON.marshal of the typed payload.
-	payloadBytes, err := json.Marshal(AuthProofPayload{
-		UserID:    proof.Payload.UserID,
-		DeviceID:  proof.Payload.DeviceID,
-		Timestamp: proof.Payload.Timestamp,
-	})
+	// The payload carries `key_version` and is signed over its JCS bytes.
+	canonical, err := jcs.Transform(proof.payloadRaw)
 	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
+		return fmt.Errorf("canonicalize payload: %w", err)
 	}
-	if !ed25519.Verify(authPublicKey, payloadBytes, sig) {
+	if !ed25519.Verify(authPublicKey, canonical, sig) {
 		return errors.New("invalid signature")
 	}
 	return nil

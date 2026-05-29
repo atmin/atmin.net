@@ -54,15 +54,9 @@ func handleRegister(store Store, cfg Config, handleMu *handleMutexMap) http.Hand
 			return
 		}
 
-		// Credential params: both present (v2) or both absent (v1).
-		// A partial set, or malformed v2 params, is a bad request.
-		hasSalt := req.Salt != ""
-		hasKDF := req.KDF != nil
-		if hasSalt != hasKDF {
-			writeError(w, errBadRequest)
-			return
-		}
-		if hasKDF && !validKDFParams(req.Salt, req.KDF) {
+		// Credential params are mandatory: every account is password-derived
+		// (salt + Argon2id kdf). A missing or malformed pair is a bad request.
+		if req.Salt == "" || req.KDF == nil || !validKDFParams(req.Salt, req.KDF) {
 			writeError(w, errBadRequest)
 			return
 		}
@@ -124,9 +118,7 @@ func handleRegister(store Store, cfg Config, handleMu *handleMutexMap) http.Hand
 
 		userID := ulid.Make().String()
 		deviceID := ulid.Make().String()
-		// New accounts always start at key_version 1; the token is v2-format
-		// even for v1 (no-salt/kdf) registrations — only the profile shape
-		// differs between v1 and v2 there.
+		// New accounts always start at key_version 1.
 		token := generateToken(cfg.ServerSecret, userID, deviceID, 1)
 
 		p := &Profile{
@@ -134,13 +126,10 @@ func handleRegister(store Store, cfg Config, handleMu *handleMutexMap) http.Hand
 			Handle:           req.Handle,
 			AuthPublicKey:    req.AuthPublicKey,
 			SharingPublicKey: req.SharingPublicKey,
+			Salt:             req.Salt,
+			KDF:              req.KDF,
+			KeyVersion:       1,
 			CreatedAt:        time.Now().UTC().Format(time.RFC3339),
-		}
-		if hasKDF {
-			// v2 account: rotation counter starts at 1.
-			p.Salt = req.Salt
-			p.KDF = req.KDF
-			p.KeyVersion = 1
 		}
 
 		// Order: handle projection FIRST (claims the name under the mutex),
@@ -229,17 +218,13 @@ func fetchAndVerifyAuthProof(ctx context.Context, store Store, userID string, pr
 	if err := verifyAuthProof(ed25519.PublicKey(pubKeyBytes), proof); err != nil {
 		return nil, errAuthProofInvalid
 	}
-	// v2 proofs are only valid against the current key_version. v1 proofs
-	// (no key_version field) ride implicit kv=1, which is correct for any
-	// account that hasn't rotated.
-	if proof.Payload.KeyVersion > 0 {
-		currentKV := p.KeyVersion
-		if currentKV == 0 {
-			currentKV = 1
-		}
-		if proof.Payload.KeyVersion != currentKV {
-			return p, errAuthProofStale
-		}
+	// A proof is only valid against the account's current key_version.
+	currentKV := p.KeyVersion
+	if currentKV == 0 {
+		currentKV = 1
+	}
+	if proof.Payload.KeyVersion != currentKV {
+		return p, errAuthProofStale
 	}
 	return p, nil
 }
@@ -277,8 +262,8 @@ func handleAddDevice(store Store, cfg Config) http.HandlerFunc {
 		}
 
 		deviceID := req.AuthProof.Payload.DeviceID
-		// New token is bound to the account's current key_version (v1 accounts
-		// ride implicit kv=1; rotated v2 accounts mint at their current kv).
+		// New token is bound to the account's current key_version. The
+		// kv==0 guard is defensive; every profile now carries key_version >= 1.
 		kv := p.KeyVersion
 		if kv == 0 {
 			kv = 1

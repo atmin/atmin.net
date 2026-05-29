@@ -98,45 +98,18 @@ func TestRegisterV2StoresCredentialParams(t *testing.T) {
 	}
 }
 
-func TestRegisterV1OmitsCredentialParams(t *testing.T) {
-	store, mux, _ := testServer(t)
-
-	// A v1 registration sends neither salt nor kdf.
-	w := registerV2(t, mux, "", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("register status = %d; body = %s", w.Code, w.Body.String())
-	}
-	var reg struct {
-		UserID string `json:"user_id"`
-		Handle string `json:"handle"`
-	}
-	json.NewDecoder(w.Body).Decode(&reg)
-
-	// The three v2 keys must be absent on the wire (omitempty), not zero values.
-	profileData, _ := store.GetObject(context.Background(), "users/"+reg.UserID+"/profile.json")
-	var raw map[string]any
-	json.Unmarshal(profileData, &raw)
-	for _, k := range []string{"salt", "kdf", "key_version"} {
-		if _, ok := raw[k]; ok {
-			t.Fatalf("v1 profile.json should omit %q, got %v", k, raw[k])
-		}
-	}
-
-	// resolve must also omit them.
-	rw := httptest.NewRecorder()
-	mux.ServeHTTP(rw, httptest.NewRequest("GET", "/v1/resolve/"+reg.Handle, nil))
-	var resolvedRaw map[string]any
-	json.Unmarshal(rw.Body.Bytes(), &resolvedRaw)
-	for _, k := range []string{"salt", "kdf", "key_version"} {
-		if _, ok := resolvedRaw[k]; ok {
-			t.Fatalf("v1 resolve should omit %q, got %v", k, resolvedRaw[k])
-		}
-	}
-}
-
-func TestRegisterPartialCredentialParams(t *testing.T) {
+// TestRegisterRequiresCredentialParams pins that salt + kdf are mandatory:
+// every account is password-derived. A missing pair (formerly a valid v1
+// registration) and a partial pair both return 400 bad_request.
+func TestRegisterRequiresCredentialParams(t *testing.T) {
 	_, mux, _ := testServer(t)
 
+	t.Run("both absent", func(t *testing.T) {
+		w := registerV2(t, mux, "", nil)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body = %s", w.Code, w.Body.String())
+		}
+	})
 	t.Run("salt without kdf", func(t *testing.T) {
 		w := registerV2(t, mux, validSalt, nil)
 		if w.Code != http.StatusBadRequest {

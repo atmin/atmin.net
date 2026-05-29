@@ -21,7 +21,7 @@ sequenceDiagram
     note over A: Navigate to welcome screen
 
     note over A,S: Alice re-authenticates
-    note over A: Prompt for 12-word mnemonic
+    note over A: Prompt for password
     note over A: Derive auth key → sign auth proof
     A->>S: POST /v1/devices (auth proof)
     S-->>A: tok_a2, new device_id
@@ -123,18 +123,18 @@ When `onerror` fires:
 
 ## After re-authenticating
 
-Alice enters her 12-word mnemonic. The client derives the auth key, signs an
-auth proof, and calls `POST /v1/devices` — the same flow used to add a second
-device or recover an account. The server issues a fresh token for the same
-user ID.
+Alice enters her password. The client re-derives the auth key (Argon2id over
+the resolved `salt`/`kdf`, then HKDF), signs an auth proof, and calls
+`POST /v1/devices` — the same flow used to add a second device or recover an
+account. The server issues a fresh token for the same user ID.
 
-**Why the mnemonic is required**: the auth private key (Ed25519) is derived
-from the mnemonic at registration and then discarded — it is never written to
+**Why the password is required**: the auth private key (Ed25519) is derived
+from the password at login and then discarded — it is never written to
 IndexedDB. The keys that do survive (`sharingPrivateKey`, `backupKey`) are the
 wrong type to sign an auth proof. This is intentional: a compromised device
-cannot register new devices without the mnemonic. The consequence is that a
-server-side secret rotation — however rare — forces the user to produce their
-12 words to regain access.
+cannot register new devices without the password. The consequence is that a
+server-side secret rotation — however rare — forces the user to re-enter their
+password to regain access.
 
 On next load:
 
@@ -166,7 +166,7 @@ entry via `POST /v1/devices/revoke`.
 - `onUnauthorized` does not call `deleteDevice` (no outgoing request).
 - localStorage keys are removed; IndexedDB is not cleared.
 - UI navigates to the welcome screen, not the offline indicator.
-- After re-authenticating with the mnemonic, the chat view shows messages
+- After re-authenticating with the password, the chat view shows messages
   from before the 401 immediately (IndexedDB load, before server sync).
 - Megolm inbound and outbound sessions are intact after re-authenticating.
 - `403 device_revoked` still triggers a full wipe (existing behaviour

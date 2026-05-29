@@ -249,10 +249,10 @@ without a URL change.
 ### "Surprise me"
 
 The registration form offers a "Surprise me" button next to the
-handle input. The button runs a client-side BIP39 random
-generator (the wordlist is already bundled for the legacy login
-autodetect path). No server endpoint, so the generator cannot be
-abused to fish for free random handles at scale.
+handle input. The button runs a client-side BIP39 random generator;
+the `@scure/bip39` wordlist is bundled for this purpose. No server
+endpoint, so the generator cannot be abused to fish for free random
+handles at scale.
 
 ### Availability check at registration
 

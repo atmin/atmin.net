@@ -173,6 +173,7 @@ export interface AddDeviceRequest {
             user_id: string;
             device_id: string;
             timestamp: string;
+            key_version: number;
         };
         signature: string;
     };
@@ -190,6 +191,7 @@ export interface RevokeDeviceRequest {
             user_id: string;
             device_id: string;
             timestamp: string;
+            key_version: number;
         };
         signature: string;
     };

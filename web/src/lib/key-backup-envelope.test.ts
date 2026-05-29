@@ -30,7 +30,7 @@ describe('key-backup envelope', () => {
         expect(env.v).toBe(3);
     });
 
-    it('parse accepts legacy {iv, ciphertext} (no v) as v: 1', () => {
+    it('parse defensively reads a {iv, ciphertext} shape with no v as v: 1', () => {
         const legacy = {
             iv: btoa(String.fromCharCode(...iv)),
             ciphertext: btoa(String.fromCharCode(...ct)),

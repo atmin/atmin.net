@@ -19,11 +19,13 @@ import (
 func postRegister(t *testing.T, mux http.Handler, handle string) *httptest.ResponseRecorder {
 	t.Helper()
 	pub, _, _ := ed25519.GenerateKey(nil)
-	body, _ := json.Marshal(map[string]string{
+	body, _ := json.Marshal(map[string]any{
 		"handle":             handle,
 		"device_label":       "test device",
 		"auth_public_key":    b64url.EncodeToString(pub),
 		"sharing_public_key": b64url.EncodeToString(make([]byte, 65)),
+		"salt":               b64url.EncodeToString(make([]byte, 16)),
+		"kdf":                map[string]any{"type": "argon2id", "m": 65536, "t": 3, "p": 1},
 	})
 	req := httptest.NewRequest("POST", "/v1/register", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")

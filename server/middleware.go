@@ -116,7 +116,7 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, devCache *devic
 				}
 				c = p.KeyVersion
 				if c == 0 {
-					c = 1 // v1 / unrotated v2 — both ride kv = 1
+					c = 1 // defensive; every profile now carries key_version >= 1
 				}
 				profCache.set(userID, c)
 			}

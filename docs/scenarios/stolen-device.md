@@ -117,8 +117,7 @@ GET /v1/store/list?prefix=users/alice01/devices/
 → ["users/alice01/devices/adev01.json", "users/alice01/devices/adev02.json"]
 ```
 
-Alice revokes the phone. She enters her credential — her password (v2) or, for
-a legacy account, her 12-word mnemonic — which is autodetected and re-derives
+Alice revokes the phone. She enters her password, which re-derives
 the auth key to sign the revocation proof (see
 [ADR-0011](../decisions/adr-0011-credential-derivation.md)):
 
@@ -225,7 +224,7 @@ keys/alice01/live/S3
 - **Post-revocation access is zero**: no API call succeeds without a valid device file.
 - **Self-wipe is defense-in-depth**: clears local data on next network contact. Not a guarantee (airplane mode), but a useful mitigation.
 - **No impersonation**: Eve cannot send messages as Alice — `POST /v1/send` requires a valid token.
-- **No new devices**: adding a device requires the backup secret (12-word mnemonic), which is not stored on-device.
+- **No new devices**: adding a device requires the backup secret (derived from the password), which is not stored on-device.
 - **Existing session keys are safe to reuse**: Eve has S2 but cannot obtain ciphertexts encrypted with it. Alice does not need to rotate sessions (but may choose to for defense-in-depth).
 
 ## What to test

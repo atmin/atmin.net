@@ -9,8 +9,12 @@
  *   per-archive dedup.
  * - `contacts.json` reuses the same envelope sans `session_id`.
  *
- * The pre-ADR-0012 wire shape was `{iv, ciphertext}` (no `v`). Readers
- * treat the missing field as `v: 1` and dispatch through the chain.
+ * Every envelope written now carries `v`. The pre-ADR-0012 shape
+ * (`{iv, ciphertext}` with no `v`) has no current producer, but the
+ * reader still defensively treats a missing `v` as `v: 1`: backup blobs
+ * are durable and write-once (rotation/compaction never rewrite them),
+ * so a stray pre-versioning blob must stay readable rather than be
+ * silently dropped on restore and lose that session's history.
  */
 export interface KeyBackupEnvelopeV2 {
     v: number;
@@ -59,8 +63,10 @@ export function wrapKeyBackupEnvelope(
 }
 
 /**
- * Accept v2 (`{v, iv, ciphertext, ...}`) or legacy v1 (`{iv, ciphertext}`).
- * Throws on a shape that's neither — e.g. missing iv/ciphertext.
+ * Parse the `{v, iv, ciphertext, ...}` wire shape. Throws on missing
+ * iv/ciphertext. A missing or non-positive `v` is defensively coerced to
+ * `v: 1` (see the type doc above) so a stray pre-versioning blob stays
+ * readable.
  */
 export function parseKeyBackupEnvelope(raw: unknown): ParsedEnvelope {
     if (!raw || typeof raw !== 'object') {

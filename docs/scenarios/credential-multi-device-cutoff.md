@@ -128,7 +128,7 @@ doesn't see it again if they ever sign out and come back later.
 
 Signing in with the new password follows the standard
 [credential-registration](./credential-registration.md) login path
-(autodetect → Argon2id → add-device → token at kv+1). The clean IDB
+(resolve → Argon2id → add-device → token at kv+1). The clean IDB
 means the first restore of session keys triggers a full chain walk
 from
 [`web/src/lib/key-chain.ts`](../../web/src/lib/key-chain.ts) — kv-era

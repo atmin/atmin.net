@@ -6,12 +6,13 @@ import {
     revokeDevice,
     storeGet,
 } from '@/lib/api';
+import { deriveSecretFromPassword } from '@/lib/credential';
 import {
-    type CredentialParams,
-    deriveSecretFromCredential,
-    isLegacyMnemonic,
-} from '@/lib/credential';
-import { base64UrlEncode, deriveKeys, signAuthProof } from '@/lib/crypto';
+    base64UrlEncode,
+    deriveKeys,
+    type KdfParams,
+    signAuthProofV2,
+} from '@/lib/crypto';
 import { path } from '@/lib/paths';
 
 export interface DevicesState {
@@ -60,32 +61,32 @@ export function useDevices(token: string, userId: string): DevicesState {
     const handleRevoke = async (deviceId: string) => {
         setRevokeError(null);
         try {
-            // v2 accounts need their stored Argon2id params; read them from
-            // the caller's own profile.json. Legacy mnemonics skip this.
-            let params: CredentialParams = {};
-            if (!isLegacyMnemonic(secretInput)) {
-                const blob = await storeGet(token, path.profile(userId));
-                const profile = JSON.parse(
-                    new TextDecoder().decode(blob),
-                ) as CredentialParams;
-                params = { salt: profile.salt, kdf: profile.kdf };
-            }
+            // Re-derive the caller's keys from their password. Read the stored
+            // Argon2id params + current key_version from the caller's own
+            // profile.json; the auth proof must carry that key_version.
+            const blob = await storeGet(token, path.profile(userId));
+            const profile = JSON.parse(new TextDecoder().decode(blob)) as {
+                salt?: string;
+                kdf?: KdfParams;
+                key_version?: number;
+            };
+            const keyVersion = profile.key_version ?? 1;
 
-            const secret = await deriveSecretFromCredential(
-                secretInput,
-                params,
-            );
+            const secret = await deriveSecretFromPassword(secretInput, {
+                salt: profile.salt,
+                kdf: profile.kdf,
+            });
             const keys = await deriveKeys(secret);
 
-            // v1 auth proof (no `key_version` field) — the server accepts
-            // it for any account because v1 proofs skip the key_version
-            // check and verify on signature + timestamp alone.
+            // Single auth-proof shape: JCS-canonicalized, carrying the
+            // account's current key_version.
             const payload = {
                 user_id: userId,
                 device_id: deviceId,
                 timestamp: new Date().toISOString(),
+                key_version: keyVersion,
             };
-            const signature = await signAuthProof(
+            const signature = await signAuthProofV2(
                 keys.auth.privateKey,
                 payload,
             );

@@ -66,13 +66,12 @@ before writing.
 
 JCS pins a deterministic byte sequence for any JSON value
 (recursive lexicographic key ordering, no whitespace, RFC 8259
-string escapes, numbers in shortest round-tripping form). This
-matters more here than it did for the v1 auth proof — the v1
-payload is a flat three-string object where `JSON.stringify` happens
-to be deterministic in practice, but the rotation request embeds a
-nested `kdf` object and would be a footgun without a pinned
-canonicalization. We use `canonicalize` (npm) on the client and
-`github.com/gowebpki/jcs` on the server.
+string escapes, numbers in shortest round-tripping form). It is
+essential here because the rotation request embeds a nested `kdf`
+object and would be a footgun without a pinned canonicalization. The
+auth proof now uses the same canonicalization, so there is a single
+signing rule across both. We use `canonicalize` (npm) on the client
+and `github.com/gowebpki/jcs` on the server.
 
 The server flow:
 
@@ -180,8 +179,7 @@ help an attacker on a different device.
 
 ### `profile.json` schema
 
-ADR-0011 added `salt` and `kdf` (absent for v1 accounts). This ADR
-adds a third additive field:
+ADR-0011 added `salt` and `kdf`. This ADR adds a third field:
 
 ```jsonc
 {
@@ -191,11 +189,11 @@ adds a third additive field:
   "sharing_public_key": "...",
   "created_at": "...",
 
-  // Added by ADR-0011 — absent for legacy accounts
+  // Added by ADR-0011 — always present
   "salt": "...",
   "kdf":  { "type": "argon2id", "m": 65536, "t": 3, "p": 1 },
 
-  // Added by ADR-0012 — absent = 1
+  // Added by ADR-0012 — always present, starts at 1
   "key_version": 2
 }
 ```
@@ -209,7 +207,7 @@ in one round trip.
 Token format gains a `key_version` segment, and the HMAC covers it:
 
 ```
-v2 token = base64url(
+token = base64url(
     user_id || "." ||
     device_id || "." ||
     key_version || "." ||
@@ -217,7 +215,7 @@ v2 token = base64url(
 )
 ```
 
-v1 tokens (no version segment) are treated as `key_version = 1`. The
+The legacy three-segment token (no version segment) is rejected. The
 auth middleware compares the token's `key_version` to the current
 `profile.key_version`. Mismatch → `401 key_version_stale`, with the
 current version in the response body so the client can show the
@@ -232,26 +230,25 @@ The auth-proof payload signed for add-device and revoke-device gains
 { "user_id": "...", "device_id": "...", "timestamp": "...", "key_version": 2 }
 ```
 
-v2 auth-proof payloads are signed over their JCS-canonicalized form,
-matching the rotation request. v1 payloads (no `key_version` field)
-continue to use the existing `JSON.stringify` path for verification
-compatibility, since v1 is frozen and not regenerated. Missing
-`key_version` is treated as `1`. Server rejects a proof whose
-`key_version` does not match the current `profile.key_version`.
+Auth-proof payloads are signed over their JCS-canonicalized form,
+matching the rotation request — a single signing rule. A payload
+without `key_version` (the legacy non-canonical shape) is rejected.
+Server rejects a proof whose `key_version` does not match the current
+`profile.key_version`.
 
 ### Multi-device propagation: immediate cutoff
 
 The combination of token binding and auth-proof binding produces a
 hard cutoff at the moment the new `profile.json` is written:
 
-- Every other device holds a v1-or-older token. Its next request
-  returns `401 key_version_stale`.
+- Every other device holds a token bound to the old `key_version`.
+  Its next request returns `401 key_version_stale`.
 - The client treats this as a forced sign-out: clear IndexedDB,
   clear `localStorage`, navigate to the login screen with a one-line
   notice ("This account was rotated on another device — please sign
   in again"). User re-types the new credential, the login flow runs
   Argon2id with the new `salt`/`kdf`, the device re-adds itself via
-  `POST /v1/devices` with a v2 auth proof.
+  `POST /v1/devices` with an auth proof at the new `key_version`.
 - The rotating device receives its new token in the rotation
   response and keeps operating.
 
@@ -286,8 +283,11 @@ under `keys/{uid}/live/...` and `keys/{uid}/archive/...`, and
 { "v": 2, "iv": "...", "ciphertext": "..." }
 ```
 
-A blob without `v` is treated as `v: 1` (legacy). The server is
-content-agnostic so no server change; only the client schema moves.
+Every blob written carries `v`; on read, a missing `v` is defensively
+coerced to `v: 1` so a stray pre-versioning blob stays readable (key
+blobs are write-once — neither rotation nor compaction rewrites them).
+The server is content-agnostic so no server change; only the client
+schema moves.
 Compaction must produce homogeneous archives — never mix versions in
 the same archive blob.
 
@@ -400,8 +400,6 @@ on the rotation request itself.
   surprised. ("You will need to sign in again on your other devices.")
 - Backup-blob reads after N rotations cost N key-chain decryptions.
   Memoize the resolved backup keys in IDB to amortize.
-- Token and auth-proof formats now have two wire versions in
-  circulation. Code paths must handle both until legacy sunset.
 - Archive CBOR arrays may now contain mixed-version entries when a
   rotation lands between compactions. The compaction server flow is
   unchanged — entries remain opaque to the server — but the client
@@ -427,10 +425,10 @@ on the rotation request itself.
   preparing the new key material. Reusing the old salt would be
   cryptographically fine, but rotating it is simpler to reason
   about and costs nothing.
-- The dual-path code (v1 and v2 tokens / auth proofs / blob
-  envelopes) is retained deliberately as a rehearsal of how future
-  protocol upgrades will roll out. Sunset is expected within weeks
-  of launch but is not pinned here.
+- The dual-path code (legacy and current tokens / auth proofs / blob
+  envelopes) was retained for a time as a rehearsal of how future
+  protocol upgrades roll out, then removed once every account had
+  migrated — leaving a single wire shape for each.
 - `key_chain.json` is itself encrypted only by the current backup
   key; the file's existence reveals that a rotation occurred, but
   not how many times, what the previous parameters were, or

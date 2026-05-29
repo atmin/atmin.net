@@ -172,7 +172,7 @@ GET /v1/store/object?key=users/alice01/contacts.json
 → { "iv": "...", "ciphertext": "..." }
 ```
 
-The device decrypts with Alice's backup key (derived from her 12-word mnemonic)
+The device decrypts with Alice's backup key (derived from her password)
 and displays Bob in the contact list.
 
 Last-write-wins: if both devices edit contacts simultaneously, the last upload

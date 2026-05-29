@@ -445,37 +445,6 @@ func TestRotateKeys_ConcurrentSameRequestID(t *testing.T) {
 	}
 }
 
-func TestRotateKeys_V1ToV2Migration(t *testing.T) {
-	_, mux, _ := testServer(t)
-	alice := registerTestUser(t, mux, "Alice (v1)") // no salt/kdf
-	newPub, _, _ := ed25519.GenerateKey(nil)
-
-	body := buildRotateKeys(t, alice.AuthPriv, rotationParams{
-		requestID: freshUUID(t), newKV: 2, newAuthPub: newPub,
-	})
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, rotateRequest(t, alice.Token, body))
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
-	}
-
-	// The profile must now carry salt/kdf/key_version even though it
-	// started life as a v1 account.
-	store, _, _ := testServer(t)
-	_ = store // unused; using mux's store below
-	rw := httptest.NewRecorder()
-	mux.ServeHTTP(rw, httptest.NewRequest("GET", "/v1/resolve/"+alice.Handle, nil))
-	var resolved struct {
-		Salt       string     `json:"salt"`
-		KDF        *KDFParams `json:"kdf"`
-		KeyVersion int        `json:"key_version"`
-	}
-	json.NewDecoder(rw.Body).Decode(&resolved)
-	if resolved.Salt == "" || resolved.KDF == nil || resolved.KeyVersion != 2 {
-		t.Fatalf("v1→v2 migration didn't populate v2 fields: %+v", resolved)
-	}
-}
-
 func TestRotateKeys_RejectsMalformedRequestID(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUserV2(t, mux, "Alice")

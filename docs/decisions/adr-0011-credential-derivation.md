@@ -86,22 +86,19 @@ your account and history are gone."
 No "generate a phrase for me" UI in v2. BIP39 mnemonic generation is
 gone from the registration path.
 
-### Legacy login UX
+### Login UX
 
-A single text field. Client-side autodetection:
+A single password field. The client fetches `salt` + `kdf` from
+`resolve`, runs Argon2id (in a worker), then HKDF. There is no fork.
 
-- input is 12 whitespace-separated tokens, all valid in the BIP39
-  English wordlist → legacy direct-HKDF path,
-- otherwise → fetch `salt` + `kdf` params from `resolve`, run
-  Argon2id (in worker), then HKDF.
-
-The autodetect path and `@scure/bip39` dependency are retained
-deliberately, not for compatibility's sake — see *Migration* below.
+A 12-word BIP39 mnemonic was the original credential and was supported
+at login via client-side autodetection for migration-rehearsal
+purposes; that path was removed once every account had migrated (see
+*Migration* below).
 
 ### Wire format
 
-`profile.json` gains two fields (both optional; absence = legacy v1
-account):
+`profile.json` carries two credential fields (always present):
 
 ```jsonc
 {
@@ -111,9 +108,9 @@ account):
 }
 ```
 
-`GET /v1/resolve/{handle}` adds `salt` and `kdf` to its response,
-unset for v1 accounts. Senders ignore both; only the account holder's
-login flow consumes them.
+`GET /v1/resolve/{handle}` adds `salt` and `kdf` to its response.
+Senders ignore both; only the account holder's login flow consumes
+them.
 
 The `secret` input to HKDF is `Argon2id(password_utf8, salt, m, t, p,
 hash_len=16)`. HKDF parameters are unchanged from ADR-0002.
@@ -153,21 +150,20 @@ hash_len=16)`. HKDF parameters are unchanged from ADR-0002.
   worker-mediated. Slightly more complex than the current
   synchronous derivation, and tests need to either spawn a real
   worker or mock the message channel.
-- **Two derivation paths in the codebase** until legacy sunset. The
-  client has to dispatch on autodetect; the server has to validate
-  auth proofs from both wire versions ([adr-0012] covers the auth
-  proof side).
+- **Single derivation path.** Password → Argon2id → HKDF is the only
+  flow; the legacy mnemonic direct-HKDF path and the dual auth-proof
+  wire shapes ([adr-0012]) were removed after migration completed.
 
 ### Neutral
 
 - The salt is public, on purpose. Argon2id was designed with public
   per-input salts as the standard mode.
-- `@scure/bip39` is retained as a runtime dependency for the legacy
-  login decode path. It is unused in new account flows. Bundle
-  impact is unchanged from today.
+- `@scure/bip39` is retained as a runtime dependency for the
+  "Surprise me" handle suggester (ADR-0013), not for credentials —
+  the legacy mnemonic login decode path that originally needed it is
+  gone. Bundle impact is unchanged.
 - Strength-meter score is shown but ignored by submit logic. UX
-  decision (warn, don't block) deliberately mirrors how the existing
-  mnemonic flow handles "are you sure?" — informational, not gated.
+  decision (warn, don't block) — informational, not gated.
 - HIBP queries are best-effort. Network failure, ad-blocker
   interference, or an offline registration just means the meter shows
   the local score without the HIBP-match flag. No retry storms, no
@@ -175,22 +171,15 @@ hash_len=16)`. HKDF parameters are unchanged from ADR-0002.
 
 ## Migration
 
-New accounts use v2 derivation from registration onward.
-
-Existing v1 accounts (BIP39 mnemonic, no salt on `profile.json`)
-continue to work unchanged. They migrate to v2 only when the user
-triggers a rotation; rotation is specified in ADR-0012 and adds the
-`salt` and `kdf` fields to that account's `profile.json` as part of
-the same atomic write that publishes the new public keys.
-
-The dual-path design (autodetect login, v1-and-v2 `profile.json`
-shapes) is retained even though there are no real v1 users to
-protect. This is a deliberate rehearsal of the protocol-upgrade
-mechanism: the next protocol upgrade after this one will use the
-same dual-path pattern, and shipping it now with a known-empty
-legacy population is the cheapest possible test of that mechanism.
-Sunset on the legacy code path is expected but no calendar date is
-pinned here.
+The original credential was a 12-word BIP39 mnemonic (no `salt`/`kdf`
+on `profile.json`). The password flow shipped with a dual-path design
+— autodetect login plus v1-and-v2 `profile.json` shapes — kept
+deliberately as a rehearsal of the protocol-upgrade mechanism rather
+than for any real legacy population. Once every account had migrated
+to v2 (rotation, per ADR-0012, populates `salt`/`kdf`/`key_version`),
+the legacy paths were removed, leaving a single derivation path. The
+rehearsal value of the dual-path pattern is captured; the next
+protocol upgrade can follow the same shape.
 
 ## Alternatives considered
 

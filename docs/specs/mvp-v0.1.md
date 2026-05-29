@@ -142,14 +142,14 @@ are `m=65536 KiB, t=3, p=1`. The chosen `(salt, m, t, p)` are stored on
 `profile.json` and surfaced via `GET /v1/resolve/{handle}` so any device
 can re-derive the same keys from the password.
 
-Legacy accounts (v1, BIP39 mnemonic) skip the Argon2id stage: the
-mnemonic decodes directly to 16 bytes and feeds HKDF. A v1 `profile.json`
-has no `salt` / `kdf` / `key_version` fields — that absence *is* the v1
-signal. v1 accounts migrate to v2 by going through the rotation flow
-(see [Rotate keys](#rotate-keys)); there is no in-place upgrade.
+The credential field used to be a 12-word BIP39 mnemonic; that path was
+removed once every account had migrated to the password flow. Every
+`profile.json` now carries `salt`, `kdf`, and `key_version`.
 
 Version suffixes (`-v1`) on the HKDF `info` strings allow future
-derivation path changes without changing the backup secret itself.
+derivation path changes without changing the backup secret itself. Their
+`-v1` is the HKDF info version and is unrelated to the (now-removed)
+credential v1/v2 split.
 
 #### Key roles
 
@@ -166,8 +166,8 @@ derivation path changes without changing the backup secret itself.
   transmitted.
 
 The backup secret itself is never persisted in the browser. The
-password (for v2) is entered once per device, stretched, and the
-derived secret is discarded as soon as the three keys are derived.
+password is entered once per device, stretched, and the derived
+secret is discarded as soon as the three keys are derived.
 Only the sharing private key and current backup encryption key remain
 on the device — the minimum needed for ongoing operation.
 
@@ -175,17 +175,15 @@ A compromised browser cannot add rogue devices (requires the auth
 key, which requires the secret, which requires the password the user
 keeps in their password manager).
 
-Losing the password (v2) or the mnemonic (v1) and all devices means
-unrecoverable loss of account and history. There is no recovery
-mechanism.
+Losing the password and all devices means unrecoverable loss of
+account and history. There is no recovery mechanism.
 
 #### Key rotation
 
 The credential and all derived keys can be rotated atomically via
 `POST /v1/rotate-keys`. Rotation:
 
-1. Derives new keys from a new password (or new BIP39 mnemonic for
-   v1→v2 migration) and a freshly generated salt.
+1. Derives new keys from a new password and a freshly generated salt.
 2. Atomically replaces the public keys in `profile.json`, with a
    continuity signature proving possession of the old auth private
    key. Concurrency is enforced by an in-server per-`user_id` mutex
@@ -204,20 +202,12 @@ on next request. The user must re-enter the new password on each
 other device. See [Rotate keys](#rotate-keys) and
 [ADR-0012](../decisions/adr-0012-backup-secret-rotation.md).
 
-#### Login fork (autodetect)
+#### Login
 
-The login screen has a single text field. The client autodetects the
-credential format:
-
-- If the input is 12 whitespace-separated tokens, all present in the
-  BIP39 English wordlist → treat as a legacy mnemonic, decode to 16
-  bytes, run HKDF directly.
-- Otherwise → fetch `salt` and `kdf` from `GET /v1/resolve/{handle}`,
-  run Argon2id with those parameters in a Web Worker, then HKDF.
-
-The legacy code path is retained deliberately as a rehearsal of the
-protocol-upgrade migration mechanism, not for any specific
-population of v1 users. Sunset is expected but not pinned.
+The login screen has a single password field. The client fetches
+`salt` and `kdf` from `GET /v1/resolve/{handle}`, runs Argon2id with
+those parameters in a Web Worker, then HKDF. There is no fork — the
+credential is always a password.
 
 ### Adding a device
 
@@ -420,8 +410,11 @@ The plaintext is the Megolm session key (base64, as returned by
 `session_key()`).
 
 The outer `v` field identifies which `key_version`'s backup key
-encrypted this blob. A blob without `v` is treated as `v: 1` (legacy
-envelope; predates ADR-0012). When reading a blob with `v: N` while
+encrypted this blob. Every blob written carries `v`; on read, a
+missing `v` is defensively treated as `v: 1` (write-once key blobs are
+never rewritten by rotation or compaction, so a stray pre-versioning
+blob stays readable rather than dropping that session's history).
+When reading a blob with `v: N` while
 the account is at `key_version: M` and `N < M`, the client walks
 [`keys/{uid}/key_chain.json`](#key-chain) backwards from `M` to `N`
 to recover the right backup key.
@@ -694,7 +687,7 @@ Source of truth for all profile data (see [ADR-0005](../decisions/adr-0005-profi
   "auth_public_key": "<base64url Ed25519, 32 bytes>",
   "sharing_public_key": "<base64url P-256 uncompressed SEC1, 65 bytes>",
 
-  // v2 fields (ADR-0011 + ADR-0012). Absent on v1 accounts.
+  // Credential params (ADR-0011 + ADR-0012). Always present.
   "salt":        "<base64url, 16 bytes>",
   "kdf":         { "type": "argon2id", "m": 65536, "t": 3, "p": 1 },
   "key_version": 1,
@@ -709,11 +702,9 @@ Source of truth for all profile data (see [ADR-0005](../decisions/adr-0005-profi
 ```
 
 `display_name`, `avatar_url`, and `last_active` are absent until set.
-`salt`, `kdf`, and `key_version` are absent on v1 accounts (their
-absence is the v1 signal); on v2 accounts they are always present
-together. `key_version` is initialised to `1` at v2 registration and
-bumps by one on each rotation. `kdf.m` is in KiB per the Argon2 spec
-convention.
+`salt`, `kdf`, and `key_version` are always present together.
+`key_version` is initialised to `1` at registration and bumps by one
+on each rotation. `kdf.m` is in KiB per the Argon2 spec convention.
 
 ### `users/{user_id}/devices/{device_id}.json`
 
@@ -780,7 +771,7 @@ Error codes used by the server:
 - Bearer token per device: `Authorization: Bearer <token>`.
 - Token issued at device registration or rotation; long-lived, no expiry,
   but bound to the `key_version` in force when it was issued.
-- **Token format (v2)**:
+- **Token format**:
   ```
   base64url(
       user_id || "." ||
@@ -790,9 +781,9 @@ Error codes used by the server:
   )
   ```
   Opaque to the client. The HMAC covers `key_version` so the client cannot
-  forge a token for a different version.
-- **Token format (v1, legacy)**: same shape without the `key_version`
-  segment. Accepted indefinitely; treated as `key_version = 1`.
+  forge a token for a different version. This four-segment shape is the
+  only accepted form; the legacy three-segment (no-`key_version`) token is
+  rejected.
 - **Auth middleware**:
   1. Parse the token; verify HMAC.
   2. Read current `profile.key_version` (cached). Treat absence as `1`.
@@ -815,20 +806,17 @@ Input:
 - `device_label`
 - `auth_public_key` (base64url Ed25519)
 - `sharing_public_key` (base64url P-256 uncompressed SEC1)
-- `salt` (base64url, 16 bytes — v2 accounts; omit for v1)
-- `kdf` (object `{ type, m, t, p }` — v2 accounts; omit for v1)
+- `salt` (base64url, 16 bytes — required)
+- `kdf` (object `{ type, m, t, p }` — required)
 
-For v2 registrations the client generates a random `salt`, runs
-Argon2id over the user's password, and derives the auth and sharing
-keypairs from the resulting 16-byte secret. The salt and KDF
-parameters are sent alongside the public keys. The server stores all
-of `auth_public_key`, `sharing_public_key`, `salt`, `kdf`, and
-`key_version: 1` (the rotation counter starts at 1 for v2 accounts;
-it is bumped on each rotation) into `profile.json`.
-
-v1 registration paths (no `salt`/`kdf` in the request) are retained
-for the migration-mechanism rehearsal but are no longer exposed in
-the production UI.
+The client generates a random `salt`, runs Argon2id over the user's
+password, and derives the auth and sharing keypairs from the resulting
+16-byte secret. The salt and KDF parameters are sent alongside the
+public keys. The server stores all of `auth_public_key`,
+`sharing_public_key`, `salt`, `kdf`, and `key_version: 1` (the rotation
+counter starts at 1; it is bumped on each rotation) into `profile.json`.
+A request missing either `salt` or `kdf`, or carrying only one of the
+pair, is rejected `400 bad_request`.
 
 Handle claim flow (see
 [ADR-0013](../decisions/adr-0013-user-chosen-handles.md) for the
@@ -866,10 +854,10 @@ This is the only unauthenticated endpoint (no existing token to present).
 Add-device and revoke-device require an `auth_proof`: an Ed25519
 signature over a JSON payload. Rotate-keys uses a related but distinct
 `continuity_signature` (over the whole request body sans the signature
-field) — see [Rotate keys](#rotate-keys). All three use the same
-JCS-canonicalization rules for v2 payloads.
+field) — see [Rotate keys](#rotate-keys). All use the same
+JCS-canonicalization rules.
 
-**v2 payload** (used for v2 accounts):
+**Payload** — a single shape, always carrying `key_version`:
 
 ```json
 {
@@ -883,31 +871,20 @@ JCS-canonicalization rules for v2 payloads.
 }
 ```
 
-v2 payloads are signed over their **JCS-canonicalized**
+The payload is signed over its **JCS-canonicalized**
 ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785)) bytes — recursive
 lexicographic key ordering, no whitespace, RFC 8259 string escapes,
 numbers in shortest round-tripping form. The client uses
 [`canonicalize`](https://www.npmjs.com/package/canonicalize); the
 server uses [`github.com/gowebpki/jcs`](https://github.com/gowebpki/jcs).
-
-**v1 payload** (legacy, no `key_version` field):
-
-```json
-{
-  "payload": { "user_id": "...", "device_id": "...", "timestamp": "..." },
-  "signature": "<base64url Ed25519 signature>"
-}
-```
-
-v1 payloads are verified against the existing `JSON.stringify` byte
-sequence (insertion-order keys, no whitespace). They are not
-regenerated — the path exists only to verify legacy mnemonic logins.
+A payload with no `key_version` (the legacy, non-canonical shape) is
+rejected.
 
 Server verifies the signature against `auth_public_key` from
 `profile.json`. Server rejects with `401 key_version_stale` if the
-payload's `key_version` (treated as `1` if absent) does not match
-the current `profile.key_version`. **Replay protection**: reject if
-`timestamp` is more than 5 minutes from server time.
+payload's `key_version` does not match the current
+`profile.key_version`. **Replay protection**: reject if `timestamp`
+is more than 5 minutes from server time.
 
 ### Add device
 
@@ -982,7 +959,7 @@ Server flow:
    the recorded error) without re-running the rotation.
 4. Read current `profile.json`.
 5. Reject `409 key_version_stale` if `request.key_version !=
-   profile.key_version + 1` (or, for a v1 account, `!= 2`).
+   profile.key_version + 1`.
 6. Verify `continuity_signature` against the current
    `profile.auth_public_key`. On failure, return `403 bad_continuity`.
 7. Build the new `profile.json` from the request fields plus the
@@ -1040,9 +1017,9 @@ distinguish "this handle is unavailable but coming back" from
 
 - `user_id`
 - `sharing_public_key`
-- `salt` (v2 accounts only — needed for the login fork)
-- `kdf` (v2 accounts only — `{ type, m, t, p }`)
-- `key_version` (v2 accounts only)
+- `salt` (needed for the login key derivation)
+- `kdf` (`{ type, m, t, p }`)
+- `key_version`
 - `display_name` (if set)
 - `avatar_url` (if set)
 
@@ -1283,10 +1260,8 @@ Realtime hint:
 
 ### New device sync
 
-1. Resolve the user's salt + `kdf` + `key_version` via `GET /v1/resolve/{handle}`
-   (or skip for v1 accounts — fields absent).
-2. Derive keys from the entered credential (Argon2id in a Web Worker
-   for v2; direct HKDF for v1).
+1. Resolve the user's salt + `kdf` + `key_version` via `GET /v1/resolve/{handle}`.
+2. Derive keys from the entered password (Argon2id in a Web Worker, then HKDF).
 3. If the account has rotated (i.e. `keys/{user_id}/key_chain.json`
    exists), fetch it and memoize the resolved older backup keys in
    IndexedDB.
