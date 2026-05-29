@@ -79,7 +79,7 @@ links the implementing Playwright file, or marks it as not-yet-written.
 | # | Invariant | Priority | Spec |
 |---|---|---|---|
 | [I1](./i1-message-identity.md) | Message identity is unique across layers | **P0** | `no-duplicate-messages.spec.ts` |
-| [I2](./i2-no-lost-messages.md) | No lost messages under fault | **P0** | _todo_ |
+| [I2](./i2-no-lost-messages.md) | No lost messages under fault | **P0** | `no-lost-messages.spec.ts` |
 | [I3](./i3-archive-live-boundary.md) | Archive/live boundary is consistent | **P0** | _todo_ |
 | [I4](./i4-restore-equivalence.md) | Restore-equivalence across devices | **P1** | _todo_ |
 | [I5](./i5-send-outcomes.md) | Send outcomes are unambiguous | **P1** | _todo_ |

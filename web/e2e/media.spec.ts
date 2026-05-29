@@ -277,17 +277,11 @@ test.describe('Media', () => {
 
         await openChat(alice, bobHandle);
 
-        let presignHits = 0;
-        alice.on('request', (req) => {
-            if (
-                req.method() === 'POST' &&
-                req.url().includes('/v1/store/presign') &&
-                (req.postData() ?? '').includes('"key":"media/')
-            ) {
-                presignHits++;
-            }
-        });
-
+        // A transient 503 on the first /v1/send is now retried idempotently
+        // inside send() (same msg_id), so the attach succeeds with no
+        // user-visible error and no manual retry. The envelope POST is
+        // retried; the media blob is uploaded only once (the retry doesn't
+        // re-run presign/PUT).
         let sendCalls = 0;
         await alice.route('**/v1/send', async (route) => {
             sendCalls++;
@@ -295,27 +289,31 @@ test.describe('Media', () => {
                 await route.fulfill({
                     status: 503,
                     contentType: 'application/json',
-                    body: JSON.stringify({ code: 'unavailable' }),
+                    body: JSON.stringify({
+                        error: 'unavailable',
+                        message: 'transient',
+                    }),
                 });
                 return;
             }
             await route.continue();
         });
 
-        // First send will trigger the alert; dismiss and retry.
-        const firstDialog = new Promise<void>((resolve) => {
-            alice.once('dialog', (d) => {
-                d.dismiss().then(resolve);
-            });
+        // The retry is transparent — no error alert should appear.
+        let dialogFired = false;
+        alice.on('dialog', (d) => {
+            dialogFired = true;
+            d.dismiss();
         });
-        await alice.locator('input[type="file"]').setInputFiles(PHOTO);
-        await firstDialog;
 
-        // Retry: pick the same file again and wait for alice's own echo.
         await alice.locator('input[type="file"]').setInputFiles(PHOTO);
+
+        // Alice's own echo appears exactly once after the internal retry.
         await expect(
             alice.locator('[data-testid="media-attachment"]'),
         ).toHaveCount(1, { timeout: 30_000 });
+        expect(sendCalls, 'one 503 then one successful retry').toBe(2);
+        expect(dialogFired, 'no error alert on a transient 503').toBe(false);
 
         await openChat(bob, aliceHandle);
         await waitForMediaImage(bob);
@@ -323,12 +321,17 @@ test.describe('Media', () => {
             bob.locator('[data-testid="media-attachment"]'),
         ).toHaveCount(1);
 
-        // PUT to media/... fired once per successful send; presign may have
-        // been called twice (once per attempt). Assert media blob count = 1.
+        // The blob was uploaded exactly once — the retry re-sends only the
+        // envelope, not the media. Scope to Alice's own prefix: the e2e
+        // bucket is shared across the whole suite, so a global `media/`
+        // count would include other tests' blobs.
+        const aliceUid = await alice.evaluate(() =>
+            localStorage.getItem('atmin:userId'),
+        );
         const keys = await listMediaKeys();
         expect(
-            keys.filter((k) => k.startsWith('media/')).length,
-        ).toBeGreaterThanOrEqual(1);
+            keys.filter((k) => k.startsWith(`media/${aliceUid}/`)).length,
+        ).toBe(1);
 
         await aliceCtx.close();
         await bobCtx.close();

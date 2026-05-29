@@ -288,8 +288,37 @@ export async function resolve(handle: string): Promise<ResolveResult> {
     return { status: 'live', ...data };
 }
 
-export function send(token: string, envelopes: Envelope[]): Promise<void> {
-    return request('POST', '/v1/send', { token, body: { envelopes } });
+// POST /v1/send is idempotent by `msg_id` (the server keys each envelope on
+// `inbox/{to}/live/{msg_id}` and overwrites on a repeat), so retrying the
+// *same* envelopes after a transient failure cannot duplicate. This is what
+// makes the ambiguous-success case — server committed the write but the
+// client saw a 5xx or a dropped connection — converge to exactly once
+// (invariant I2): the retry reuses the already-minted `msg_id`s rather than
+// surfacing an error that prompts a fresh-id resend. A 4xx (e.g. forbidden,
+// bad_request) is terminal and fails fast.
+const SEND_ATTEMPTS = 3;
+
+export async function send(
+    token: string,
+    envelopes: Envelope[],
+): Promise<void> {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < SEND_ATTEMPTS; attempt++) {
+        try {
+            await request<void>('POST', '/v1/send', {
+                token,
+                body: { envelopes },
+            });
+            return;
+        } catch (e) {
+            // 4xx is the caller's fault (auth, malformed) — don't retry.
+            if (e instanceof APIError && e.status < 500) throw e;
+            // 5xx or a network/connection error: the write may or may not
+            // have committed; retrying the same msg_ids is safe either way.
+            lastErr = e;
+        }
+    }
+    throw lastErr;
 }
 
 export function storeList(

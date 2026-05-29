@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+    APIError,
     KeyVersionStaleError,
     onAuthEvent,
     type RegisterRequest,
@@ -7,9 +8,11 @@ import {
     register,
     resolve,
     rotateKeys,
+    send,
     storeGet,
     updateProfile,
 } from './api';
+import type { Envelope } from './envelope';
 
 const fetchMock = vi.fn();
 globalThis.fetch = fetchMock as typeof fetch;
@@ -821,5 +824,82 @@ describe('api - rotateKeys()', () => {
             String((fetchMock.mock.calls[1][1] as RequestInit).body),
         );
         expect(body1.request_id).toBe(body2.request_id);
+    });
+});
+
+describe('api - send() idempotent retry', () => {
+    const envelopes = [
+        {
+            to_user: 'U_BOB',
+            from_user: 'U_ALICE',
+            from_device: 'D1',
+            msg_id: '01MSGAAA',
+        },
+    ] as unknown as Envelope[];
+
+    function errResponse(status: number): Response {
+        return {
+            ok: false,
+            status,
+            statusText: 'err',
+            headers: { get: () => null },
+            json: async () => ({ error: 'internal', message: 'boom' }),
+        } as unknown as Response;
+    }
+    function okResponse(): Response {
+        return {
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            json: async () => ({}),
+        } as unknown as Response;
+    }
+
+    it('retries a transient 5xx then succeeds, reusing the same envelopes', async () => {
+        fetchMock.mockReset();
+        fetchMock
+            .mockResolvedValueOnce(errResponse(502))
+            .mockResolvedValueOnce(okResponse());
+
+        await send('tok', envelopes);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        // Both attempts carry the identical body — same msg_id, so the
+        // server's per-msg_id overwrite cannot produce a duplicate.
+        const b1 = String((fetchMock.mock.calls[0][1] as RequestInit).body);
+        const b2 = String((fetchMock.mock.calls[1][1] as RequestInit).body);
+        expect(b1).toBe(b2);
+        expect(JSON.parse(b1).envelopes[0].msg_id).toBe('01MSGAAA');
+    });
+
+    it('retries a network error (fetch rejects) then succeeds', async () => {
+        fetchMock.mockReset();
+        fetchMock
+            .mockRejectedValueOnce(new TypeError('network down'))
+            .mockResolvedValueOnce(okResponse());
+
+        await send('tok', envelopes);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails fast on a 4xx (no retry)', async () => {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValue({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({ error: 'forbidden', message: 'no' }),
+        } as unknown as Response);
+
+        await expect(send('tok', envelopes)).rejects.toBeInstanceOf(APIError);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up after the attempt budget on persistent 5xx', async () => {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValue(errResponse(503));
+
+        await expect(send('tok', envelopes)).rejects.toBeTruthy();
+        expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 });
