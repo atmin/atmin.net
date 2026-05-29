@@ -1,13 +1,20 @@
 # MVP v0.1 Spec
 
-Status: draft (living document)
+Status: scope frozen — the v0.1 surface is fixed and nearly complete
+(remaining work in [tasks/](../../tasks/README.md)). New surface area
+(starting with background delivery) lives in
+[mvp-v0.2.md](mvp-v0.2.md), not here.
 
 ## Goals
 
 - Two clients can register, exchange an invite, establish E2E, and exchange messages.
 - Server stores and forwards opaque encrypted envelopes; clients own keys and history.
 - Sync-first message delivery via S3 inbox objects.
-- Multi-device per user via backup key.
+- Multi-device per user via a password-derived backup key (Argon2id; ADR-0011).
+- Self-service credential rotation ("change password") with multi-device cutoff (ADR-0012).
+- User-chosen handles with reserved-list + cooldown semantics (ADR-0013).
+- Message edit and delete via amendment envelopes (ADR-0014).
+- Self-service account deletion, plus server-side cleanup of abandoned data and storage-usage visibility.
 
 ## Non-goals
 
@@ -712,24 +719,12 @@ on each rotation. `kdf.m` is in KiB per the Argon2 spec convention.
 {
   "device_id":    "01HWQA...",
   "device_label": "Alice's laptop",
-  "created_at":   "2025-01-15T10:00:00Z",
-
-  // Optional; added when the user enables push notifications on
-  // this device. See ADR-0015. Server stores opaquely; updated via
-  // PUT /v1/devices/{did}/push, cleared via DELETE or on 410 Gone
-  // from the push service.
-  "push_subscription": {
-    "endpoint":   "https://fcm.googleapis.com/fcm/send/...",
-    "p256dh":     "<base64url>",
-    "auth":       "<base64url>",
-    "created_at": "2026-05-26T10:00:00Z"
-  }
+  "created_at":   "2025-01-15T10:00:00Z"
 }
 ```
 
-`push_subscription` is absent when the device has no active push
-subscription. Its presence/absence is the only push state the
-server tracks per device.
+v0.2 adds an optional `push_subscription` field to this record for
+Web Push delivery; see [mvp-v0.2.md](mvp-v0.2.md).
 
 ## Error responses
 
@@ -1045,9 +1040,9 @@ Server behavior:
 - verify `from_user` matches token's `user_id` and `from_device` matches token's `device_id`
 - write each envelope to the addressed user's inbox prefix
 - notify SSE subscribers for each recipient (`new_message`)
-- fan out best-effort Web Push to each recipient device with a
-  stored `push_subscription` (async, must not block the response;
-  see [Push notifications](#push-notifications))
+
+(v0.2 adds a best-effort Web Push fan-out to recipient devices here;
+see [mvp-v0.2.md](mvp-v0.2.md).)
 
 Send is the only endpoint that writes to other users' prefixes.
 The storage API (below) is restricted to the caller's own prefixes.
@@ -1113,51 +1108,6 @@ algorithm. See [ADR-0004](../decisions/adr-0004-sse-realtime-notifications.md).
 
 Auth token is passed as a query parameter (EventSource does not support
 custom headers).
-
-### Push notifications
-
-Background delivery via Web Push (RFC 8030 / RFC 8291 / RFC 8292).
-See [ADR-0015](../decisions/adr-0015-web-push.md) for the full
-design. Three endpoints:
-
-`GET /v1/push/vapid-public-key` — unauthenticated. Returns
-`{ "public_key": "<base64url>" }`. The client uses this when
-calling `PushManager.subscribe({ applicationServerKey })`.
-
-`PUT /v1/devices/{device_id}/push` — authenticated; caller's own
-device only. Stores or replaces the device's push subscription.
-Request:
-
-```jsonc
-{
-  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
-  "p256dh":   "<base64url>",
-  "auth":     "<base64url>"
-}
-```
-
-Server merges the fields plus a server-set `created_at` into
-`users/{uid}/devices/{did}.json` under `push_subscription`.
-
-`DELETE /v1/devices/{device_id}/push` — authenticated; clears the
-`push_subscription` field on the device record.
-
-**Delivery hook**: `POST /v1/send` writes envelopes to the
-recipient inbox prefix and notifies SSE subscribers (existing
-behaviour). Additionally, it kicks a best-effort goroutine that
-sends a Web Push to every recipient device with a stored
-`push_subscription`. The push payload is server-constructed
-(`"New message from {handle}"`), encrypted under RFC 8291, and
-sent via the device's push service endpoint. Failures are
-logged and never block `/v1/send`; a `410 Gone` from the push
-service causes the server to lazily clear the dead subscription
-from that device's record.
-
-The client service worker dedups on the visible state: if any
-window is currently visible, the push event handler returns
-without showing a notification (SSE already delivered).
-Otherwise the SW calls `showNotification` and bumps the local
-badge via `navigator.setAppBadge`.
 
 ### Storage API (generic S3 proxy)
 

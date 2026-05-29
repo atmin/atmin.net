@@ -1,7 +1,7 @@
 # ADR-0011: Argon2id credential derivation
 
-Status: Draft
-Date: 2026-05-25
+Status: Accepted
+Date: 2026-05-25 (accepted 2026-05-29)
 
 ## Context
 

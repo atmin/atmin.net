@@ -1,7 +1,7 @@
 # ADR-0013: User-chosen handles
 
-Status: Draft
-Date: 2026-05-25
+Status: Accepted
+Date: 2026-05-25 (accepted 2026-05-29)
 
 Builds on [ADR-0005](adr-0005-profiles-and-contacts.md) (two-file
 profile/handle model) and [ADR-0007](adr-0007-registration-abuse-prevention.md)

@@ -1,7 +1,7 @@
 # ADR-0012: Backup-secret rotation
 
-Status: Draft
-Date: 2026-05-25
+Status: Accepted
+Date: 2026-05-25 (accepted 2026-05-29)
 
 Builds on [ADR-0011](adr-0011-credential-derivation.md). Promotes the
 "Backup secret rotation" section of

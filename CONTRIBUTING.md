@@ -16,7 +16,7 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 │   └── .storybook/   Visual spec for components/
 ├── docs/
 │   ├── vision.md         Goals, non-goals, threat model
-│   ├── specs/mvp-v0.1.md Source of truth for protocol/API/storage layout
+│   ├── specs/            Milestone specs — source of truth for protocol/API/storage (mvp-v0.1 frozen, mvp-v0.2 draft)
 │   ├── decisions/        ADRs — *why* a decision was made (immutable, append-only)
 │   ├── scenarios/        Step-by-step user flows (e2e specs) and system invariants (invariants.md)
 │   └── evolution/        Speculative future work, not commitments
@@ -158,7 +158,7 @@ Single-package Go binary. **Stateless by design**: all durable state lives in S3
 
 ### Adding an endpoint — checklist
 
-1. Update `docs/specs/mvp-v0.1.md` (request/response shape, error codes, S3 effects).
+1. Update the active milestone spec under `docs/specs/` (request/response shape, error codes, S3 effects).
 2. Add an ADR if the change crosses a trust boundary, introduces a dependency, or affects storage layout (see `docs/decisions/README.md`).
 3. Implement the handler in `handlers.go`; wire in `routes.go` (wrap with `auth(...)` if it needs a token).
 4. Add a typed wrapper in `web/src/lib/api.ts` and a request type alongside.

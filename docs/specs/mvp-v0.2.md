@@ -1,0 +1,237 @@
+# MVP v0.2 Spec
+
+Status: draft — scope is still firming up. Sections marked _(firming up)_
+are provisional; only Push notifications has a settled design
+([ADR-0015](../decisions/adr-0015-web-push.md), still Draft). New
+decisions land as ADRs; this spec collects the protocol/API surface as
+it solidifies.
+
+v0.2 builds on the frozen [v0.1](mvp-v0.1.md) baseline; everything here
+is additive. Nothing in v0.2 changes the v0.1 wire formats.
+
+## Goals
+
+- **Background delivery.** Messages reach a user when the app is closed,
+  via Web Push — the biggest UX gap left after v0.1.
+- **Reach.** Make the PWA installable/discoverable where the platform
+  hides it (iOS), so push can actually be received there.
+- **Scale the chat view.** Keep the message list smooth as histories grow.
+- **Group chats.** Conversations beyond 1:1, reusing the Megolm + ECIES
+  primitives — the v0.2 headline, still a sketch (needs an ADR).
+- **Take your data with you.** Export message history in a documented,
+  portable format (import is less certain).
+- **Refine the experience.** Visual polish, flow simplification, a
+  time-aware timeline, and broader theming — see _UX refresh_ below.
+- _(firming up)_ Opt-in discovery, better abuse controls, optional
+  realtime hints — carried over from the vision roadmap, not yet designed.
+
+## Push notifications
+
+Background delivery via Web Push (RFC 8030 / RFC 8291 / RFC 8292). See
+[ADR-0015](../decisions/adr-0015-web-push.md) for the full design and
+[tasks/push-notifications.md](../../tasks/push-notifications.md) for the
+implementation plan. The service worker stays free of Megolm keys and
+the WASM crypto module by design — push payloads carry no message
+content.
+
+### `devices.json` gains `push_subscription`
+
+v0.2 adds an optional field to the v0.1
+[`users/{user_id}/devices/{device_id}.json`](mvp-v0.1.md#usersuser_iddevicesdevice_idjson)
+record:
+
+```jsonc
+{
+  "device_id":    "01HWQA...",
+  "device_label": "Alice's laptop",
+  "created_at":   "2025-01-15T10:00:00Z",
+
+  // Optional; added when the user enables push notifications on
+  // this device. Server stores opaquely; updated via
+  // PUT /v1/devices/{did}/push, cleared via DELETE or on 410 Gone
+  // from the push service.
+  "push_subscription": {
+    "endpoint":   "https://fcm.googleapis.com/fcm/send/...",
+    "p256dh":     "<base64url>",
+    "auth":       "<base64url>",
+    "created_at": "2026-05-26T10:00:00Z"
+  }
+}
+```
+
+`push_subscription` is absent when the device has no active push
+subscription. Its presence/absence is the only push state the server
+tracks per device. No new S3 prefix is introduced.
+
+### Endpoints
+
+`GET /v1/push/vapid-public-key` — unauthenticated. Returns
+`{ "public_key": "<base64url>" }`. The client uses this when calling
+`PushManager.subscribe({ applicationServerKey })`.
+
+`PUT /v1/devices/{device_id}/push` — authenticated; caller's own
+device only. Stores or replaces the device's push subscription.
+Request:
+
+```jsonc
+{
+  "endpoint": "https://fcm.googleapis.com/fcm/send/...",
+  "p256dh":   "<base64url>",
+  "auth":     "<base64url>"
+}
+```
+
+Server merges the fields plus a server-set `created_at` into
+`users/{uid}/devices/{did}.json` under `push_subscription`.
+
+`DELETE /v1/devices/{device_id}/push` — authenticated; clears the
+`push_subscription` field on the device record.
+
+### Delivery hook
+
+`POST /v1/send` (v0.1 behaviour: write envelopes, notify SSE) gains a
+best-effort goroutine that sends a Web Push to every recipient device
+with a stored `push_subscription`. The push payload is
+server-constructed (`"New message from {handle}"`, no preview),
+encrypted under RFC 8291, and sent via the device's push service
+endpoint. Failures are logged and never block `/v1/send`; a `410 Gone`
+from the push service causes the server to lazily clear the dead
+subscription from that device's record.
+
+The client service worker dedups on visibility: if any window is
+currently visible, the push event handler returns without showing a
+notification (SSE already delivered). Otherwise the SW calls
+`showNotification` and bumps the local badge via
+`navigator.setAppBadge`.
+
+## iOS install hint _(firming up)_
+
+iOS Safari offers no native install prompt and only delivers Web Push to
+home-screen-installed PWAs, so push is undiscoverable there without a
+nudge. v0.2 adds a dismissible "Add to Home Screen" banner on iOS
+Safari. Client-only; no protocol surface. This is a prerequisite for
+push to function on iOS. See
+[tasks/ios-install-hint.md](../../tasks/ios-install-hint.md).
+
+## Message-list virtualization _(firming up)_
+
+Replace the plain message map with windowed rendering
+(`@tanstack/react-virtual`) so long histories stay smooth. Client-only;
+no protocol surface. Parked until there is evidence of real perf
+degradation. See
+[tasks/message-virtualization.md](../../tasks/message-virtualization.md).
+
+## UX refresh _(firming up)_
+
+A pass over the experience now that the feature surface is settling.
+Client-only unless a change touches a wire format; concrete changes spin
+out into `tasks/` (and an ADR only if one adopts a new component/design
+pattern). Four threads, in rough priority:
+
+- **Polish.** Visual refinement of existing screens — spacing, type,
+  motion, empty/loading/error states — within the current shadcn/Tailwind
+  system.
+- **Simplification.** Cut steps and surface area: fewer screens to reason
+  about, clearer defaults, less chrome. Onboarding and settings are the
+  likely first targets.
+- **Timeline-awareness.** Make the message list legible over time —
+  date separators, relative/grouped timestamps, "today/yesterday"
+  boundaries, and clearer ordering cues. Pairs with
+  [message-list virtualization](#message-list-virtualization-firming-up).
+- **Theming.** Broaden beyond the current light/dark toggle (additional
+  themes / accent options), built on the existing `index.css` token set
+  so both modes keep working.
+
+Each thread is intentionally loose here; it becomes real when broken into
+tasks.
+
+## Group chats _(sketch — the v0.2 headline; needs an ADR)_
+
+The encryption primitive already fits: Megolm is a group ratchet, and 1:1
+today is just a group of two. A group extends the same shape — encrypt
+once with an outbound Megolm session, wrap the session key per member via
+ECIES, fan out one inbox envelope per member (`POST /v1/send` already
+writes to multiple recipients). The hard parts are **membership** and
+**rekeying**, not message encryption.
+
+**Group identity & state.** A group is a `group_id` (ULID) with a state
+object holding membership + metadata (name, avatar, `members[]`). Open
+question — where it lives and who is authoritative:
+
+- a server-held membership list (server learns the social graph but not
+  content), versus
+- a client-signed, encrypted group-state blob that members replicate
+  (server stays content-agnostic, consistent with the v0.1 threat model).
+
+The second fits the existing "server stores opaque blobs" stance better
+but needs a conflict-resolution story for concurrent membership edits
+(no server transactions — same constraint the per-handle mutex works
+around).
+
+**Sending.** Sender encrypts with its current outbound Megolm session,
+uploads the session key wrapped per member (ECIES to each member's
+sharing key, exactly as today), and writes one envelope per member inbox
+carrying `group_id`. Materialization groups by `group_id` instead of by
+sender pair.
+
+**Membership changes & rekey.**
+
+- _Add_ — existing members share the current session key with the joiner,
+  forward-only unless we deliberately share history (history-visibility
+  is a decision; forward-only is simpler and safer).
+- _Remove_ — the group rotates to a fresh Megolm session so the removed
+  member cannot read future messages (backward secrecy). Reuses the
+  "start a new outbound session" mechanism rotation already triggers.
+
+**Open / deferred.** Membership authority (flat vs admin roles); ordering
+of concurrent membership edits; fan-out cost at larger N (per-member key
+share + per-member inbox write — fine for small groups, needs
+batching/limits otherwise); group invites/discovery (extend handle-based
+invite, or invite links); metadata privacy (encrypt group name/avatar
+like `contacts.json`).
+
+This is the largest single feature in v0.2 and crosses the trust boundary
++ storage layout, so it gets its own ADR before implementation and likely
+splits into several tasks (state model, send/fan-out, membership + rekey,
+UI).
+
+## History export / import _(sketch — export likely, import open)_
+
+**Export (likely).** Entirely client-side: the device already holds full
+decrypted history in IndexedDB, so export is read → serialize → download,
+with no server or new endpoint.
+
+- _Format_ — a documented JSON archive: conversations and messages
+  (plaintext body, timestamps, sender handle, `msg_id`, amendment state),
+  with media either referenced by `media/{uid}/{ulid}` or bundled (e.g. a
+  zip alongside the JSON). A stable, documented schema is the main
+  deliverable so the file is useful to other tools.
+- _Privacy_ — export deliberately crosses the E2E boundary (plaintext
+  leaves the app); that is the user's choice, but surface a clear warning.
+  An optional passphrase-encrypted export is a possible add-on.
+
+**Import (open, lower certainty).** Backup-key + key-chain restore already
+rebuilds history on a new device, so import is not for the normal
+multi-device case — its real uses are migrating from another app or
+restoring an export after key loss. Open issues:
+
+- Imported messages never went through Megolm/inbox, so they cannot be
+  verified — they would be **local-only**, display-marked "imported," and
+  never re-sent or re-encrypted.
+- Mapping a foreign sender onto a handle/contact is fuzzy.
+- Whether import is in v0.2 at all, or export ships alone.
+
+No server/protocol surface for export; import (if it lands) is also
+client-only. No ADR unless an encrypted-export format introduces a new
+crypto decision.
+
+## Not yet scoped
+
+Carried from the [vision roadmap](../vision.md#milestones); no design yet:
+
+- Opt-in discovery (phone or other identifier).
+- Better abuse controls (quotas, rate limiting) beyond the v0.1
+  registration mutex + reserved list.
+- Optional realtime hints beyond best-effort SSE.
+
+Each of these needs its own ADR before it enters this spec.

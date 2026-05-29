@@ -66,5 +66,17 @@ OS-level device lock (PIN, biometrics) is the first line of defense — not the 
 
 ## Milestones (very rough)
 
-- v0.1: invite-only 1:1 messaging, E2E, S3 inbox sync, minimal media.
-- v0.2+: opt-in discovery (phone or other), better abuse controls, optional realtime hints.
+- **v0.1** — the baseline messenger. Invite-only 1:1 messaging, E2E
+  (Megolm + ECIES), S3 inbox sync, media, password credentials
+  (Argon2id) with change-password rotation, user-chosen handles,
+  message edit/delete, account deletion, server-side cleanup, and
+  storage-usage visibility. Detailed in
+  [specs/mvp-v0.1.md](specs/mvp-v0.1.md). Nearly complete — remaining
+  work tracked in [tasks/](../tasks/README.md).
+- **v0.2** — group chats, background delivery, reach, and a UX refresh.
+  Group conversations (the headline, sketched), Web Push notifications,
+  iOS "add to home screen" install hint, message-list virtualization, a
+  UX pass (polish, simplification, a time-aware timeline, broader
+  theming), history export, and (still firming up) opt-in discovery,
+  better abuse controls, and optional realtime hints. Drafted in
+  [specs/mvp-v0.2.md](specs/mvp-v0.2.md); scope iterates.
