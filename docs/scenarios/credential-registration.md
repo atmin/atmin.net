@@ -17,7 +17,7 @@ sequenceDiagram
     U->>U: zxcvbn-ts strength meter (lazy, warn-not-block)
     U->>U: generate 16-byte salt
     U->>W: {password, salt, kdf}
-    W-->>U: 16-byte secret (~3-4s, off main thread)
+    W-->>U: 16-byte secret (~1s on a low-end phone, off main thread)
     U->>U: HKDF → auth / sharing / backup keys
     U->>S: POST /v1/register (+ salt, kdf)
     S-->>U: user_id, device_id, token, handle
@@ -37,9 +37,10 @@ passwords-match check. There is **no** recovery-phrase UI on this screen.
 On submit, the client generates a random 16-byte salt and posts
 `{password, salt, kdf}` to the Argon2id Web Worker (`DEFAULT_KDF =
 { type: "argon2id", m: 65536, t: 3, p: 1 }`). The worker returns the 16-byte
-secret after ~3-4s on a mid-tier device; a "Deriving your keys…" cover renders
-meanwhile. The secret feeds the unchanged HKDF chain (auth Ed25519, sharing
-ECDH P-256, backup AES-256-GCM).
+secret in about a second on a low-end phone (informally observed; budgeted
+for up to a few seconds on worst-case hardware). A "Deriving your keys…"
+cover renders meanwhile. The secret feeds the unchanged HKDF chain
+(auth Ed25519, sharing ECDH P-256, backup AES-256-GCM).
 
 ## 3. Register
 

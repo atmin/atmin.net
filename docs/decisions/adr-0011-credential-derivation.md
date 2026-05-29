@@ -143,6 +143,15 @@ hash_len=16)`. HKDF parameters are unchanged from ADR-0002.
 
 - **First-device login cost.** ~3–4s per Argon2id run on a Pixel 4a
   budget. Once per device. Animation cover required.
+  - _Update (2026-05-29):_ informal testing on a low-end phone came in
+    near-instant — ~1s at most, well under the 3–4s budget. Not a
+    rigorous benchmark, but it indicates the `m=64 MiB / t=3 / p=1`
+    floor is *conservative* on UX. That is headroom, not just comfort:
+    the work factor could be raised for **new** accounts (per-account
+    params, no base-wide rotation) to buy more offline-brute-force
+    resistance, bounded by the iOS-WASM memory ceiling below. A precise
+    benchmark would let us pick that floor deliberately rather than by
+    feel.
 - **Memory ceiling.** 64 MiB per Argon2id call. iOS Safari's WASM
   allocation budget is ~256–384 MB; comfortable now but a future
   bump (e.g. m = 128 MiB) needs to factor this in.
