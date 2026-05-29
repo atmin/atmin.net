@@ -3,19 +3,15 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@/lib/auth';
 
-// Captured call order so we can assert chain-write-before-rotate.
-const callOrder: string[] = [];
-
 vi.mock('@/lib/api', async () => {
     const actual =
         await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
     return {
         ...actual,
-        rotateKeys: vi.fn(async (...args) => {
-            callOrder.push('rotateKeys');
-            void args;
-            return { token: 'NEW_TOKEN', key_version: 2 };
-        }),
+        rotateKeys: vi.fn(async () => ({
+            token: 'NEW_TOKEN',
+            key_version: 2,
+        })),
         storeGet: vi.fn(
             async () =>
                 new TextEncoder().encode(
@@ -71,13 +67,13 @@ vi.mock('@/lib/crypto', () => ({
 }));
 
 vi.mock('@/lib/key-chain', () => ({
-    buildChainLink: vi.fn(async () => {
-        callOrder.push('buildChainLink');
-        return { from: 1, to: 2, iv: 'a', ciphertext: 'b' };
-    }),
-    appendChainLink: vi.fn(async () => {
-        callOrder.push('appendChainLink');
-    }),
+    buildChainLink: vi.fn(async () => ({
+        from: 1,
+        to: 2,
+        iv: 'a',
+        ciphertext: 'b',
+    })),
+    appendChainLink: vi.fn(async () => {}),
 }));
 
 vi.mock('@/lib/credential', () => ({
@@ -110,7 +106,6 @@ async function loadHook() {
 describe('useRotateKeys', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        callOrder.length = 0;
     });
 
     it('happy path: derives → builds chain → rotates → swaps session', async () => {
@@ -134,14 +129,16 @@ describe('useRotateKeys', () => {
             await result.current.submit();
         });
 
-        // Chain write MUST happen before the rotate call.
-        const chainIdx = callOrder.indexOf('appendChainLink');
-        const rotateIdx = callOrder.indexOf('rotateKeys');
-        expect(chainIdx).toBeGreaterThanOrEqual(0);
-        expect(rotateIdx).toBeGreaterThan(chainIdx);
-
         expect(appendChainLink).toHaveBeenCalledOnce();
         expect(rotateKeys).toHaveBeenCalledOnce();
+
+        // Durability ordering (ADR-0012): the chain link must be persisted
+        // before the rotate call, so a failed rotate leaves only a harmless
+        // orphaned link. Asserted via Vitest's global invocation order.
+        const chainOrder =
+            vi.mocked(appendChainLink).mock.invocationCallOrder[0];
+        const rotateOrder = vi.mocked(rotateKeys).mock.invocationCallOrder[0];
+        expect(chainOrder).toBeLessThan(rotateOrder);
 
         const rotated = vi.mocked(saveSession).mock.calls[0][0];
         expect(rotated.token).toBe('NEW_TOKEN');

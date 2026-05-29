@@ -164,6 +164,59 @@ func TestRequireAuth_DeviceRevoked(t *testing.T) {
 	}
 }
 
+func TestRequireAuth_KeyVersionStale(t *testing.T) {
+	s := setupAuth(t)
+	// Another device rotated the credential: the profile is now at kv=2
+	// while the token we hold is still bound to kv=1.
+	putProfile(context.Background(), s.store, &Profile{UserID: s.userID, KeyVersion: 2})
+
+	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}, s.store, s.cfg, s.devCache, s.profCache, true)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", "Bearer "+s.token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body = %s", w.Code, w.Body.String())
+	}
+	var errResp struct {
+		Error   string `json:"error"`
+		Current int    `json:"current"`
+	}
+	json.NewDecoder(w.Body).Decode(&errResp)
+	if errResp.Error != "key_version_stale" {
+		t.Fatalf("error = %q, want key_version_stale", errResp.Error)
+	}
+	// Body carries the current version so the client can re-derive at it.
+	if errResp.Current != 2 {
+		t.Fatalf("current = %d, want 2", errResp.Current)
+	}
+}
+
+func TestRequireAuth_KeyVersionNotEnforced(t *testing.T) {
+	s := setupAuth(t)
+	// Profile rotated ahead of the token, but this route opts out of the
+	// kv check (as rotate-keys does): the stale token must still pass so an
+	// idempotent retry can reach the handler and replay its recorded outcome.
+	putProfile(context.Background(), s.store, &Profile{UserID: s.userID, KeyVersion: 2})
+
+	handler := requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}, s.store, s.cfg, s.devCache, s.profCache, false)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set("Authorization", "Bearer "+s.token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (kv check opted out); body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRequireAuth_RevocationInvalidatesCache(t *testing.T) {
 	s := setupAuth(t)
 	deviceKey := keyDevice(s.userID, s.deviceID)
