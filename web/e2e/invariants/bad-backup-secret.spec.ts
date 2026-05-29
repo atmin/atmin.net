@@ -12,13 +12,7 @@
  * user-facing trace. See docs/scenarios/invariants/i6-bad-credential-corrupt-backup.md.
  */
 
-import {
-    GetObjectCommand,
-    type GetObjectCommandOutput,
-    PutObjectCommand,
-} from '@aws-sdk/client-s3';
 import { expect, test } from '@playwright/test';
-import { decode as cborDecode, encode as cborEncode } from 'cbor-x';
 import {
     E2E_PASSWORD,
     loginUser,
@@ -28,7 +22,12 @@ import {
     sendMessage,
     waitForMessage,
 } from '../helpers';
-import { getCurrentUserId, listRemoteKeys, makeS3Client } from './helpers';
+import {
+    corruptKeyBackups,
+    getCurrentUserId,
+    listRemoteKeys,
+    makeS3Client,
+} from './helpers';
 
 test.describe('I6 — bad credential / corrupt backup fails legibly', () => {
     test('wrong password is rejected; no session established', async ({
@@ -131,109 +130,3 @@ test.describe('I6 — bad credential / corrupt backup fails legibly', () => {
         await freshCtx.close();
     });
 });
-
-async function getObject(
-    s3: ReturnType<typeof makeS3Client>,
-    key: string,
-): Promise<string> {
-    const bucket = process.env.E2E_BUCKET;
-    if (!bucket) throw new Error('E2E_BUCKET not set');
-    const out: GetObjectCommandOutput = await s3.send(
-        new GetObjectCommand({ Bucket: bucket, Key: key }),
-    );
-    if (!out.Body) throw new Error(`no body for ${key}`);
-    return out.Body.transformToString();
-}
-
-async function putObject(
-    s3: ReturnType<typeof makeS3Client>,
-    key: string,
-    body: string,
-): Promise<void> {
-    const bucket = process.env.E2E_BUCKET;
-    if (!bucket) throw new Error('E2E_BUCKET not set');
-    await s3.send(
-        new PutObjectCommand({
-            Bucket: bucket,
-            Key: key,
-            Body: body,
-            ContentType: 'application/json',
-        }),
-    );
-}
-
-async function getObjectBytes(
-    s3: ReturnType<typeof makeS3Client>,
-    key: string,
-): Promise<Uint8Array> {
-    const bucket = process.env.E2E_BUCKET;
-    if (!bucket) throw new Error('E2E_BUCKET not set');
-    const out: GetObjectCommandOutput = await s3.send(
-        new GetObjectCommand({ Bucket: bucket, Key: key }),
-    );
-    if (!out.Body) throw new Error(`no body for ${key}`);
-    return out.Body.transformToByteArray();
-}
-
-async function putObjectBytes(
-    s3: ReturnType<typeof makeS3Client>,
-    key: string,
-    body: Uint8Array,
-    contentType: string,
-): Promise<void> {
-    const bucket = process.env.E2E_BUCKET;
-    if (!bucket) throw new Error('E2E_BUCKET not set');
-    await s3.send(
-        new PutObjectCommand({
-            Bucket: bucket,
-            Key: key,
-            Body: body,
-            ContentType: contentType,
-        }),
-    );
-}
-
-// Valid base64, but too short to be a real GCM payload → AES-GCM auth fails.
-const CORRUPT_CIPHERTEXT = Buffer.from('corrupted').toString('base64');
-
-/**
- * Mangle the ciphertext of every key-backup blob under `keys/{uid}/`,
- * handling both shapes: a live/ JSON envelope and an archive/ CBOR bundle
- * (an array of envelopes). Returns how many blobs were touched. Each
- * envelope keeps its `{v, iv, ciphertext}` shape so restore parses it and
- * fails at decrypt — counted as a failed restore, not a parse error.
- */
-async function corruptKeyBackups(
-    s3: ReturnType<typeof makeS3Client>,
-    uid: string,
-): Promise<number> {
-    const keys = await listRemoteKeys(s3, `keys/${uid}/`);
-    let corrupted = 0;
-    for (const key of keys) {
-        if (key.includes('/live/')) {
-            const env = JSON.parse(await getObject(s3, key)) as {
-                ciphertext: string;
-            };
-            env.ciphertext = CORRUPT_CIPHERTEXT;
-            await putObject(s3, key, JSON.stringify(env));
-            corrupted += 1;
-        } else if (key.includes('/archive/')) {
-            const entries = cborDecode(await getObjectBytes(s3, key)) as Array<
-                Record<string, unknown>
-            >;
-            for (const e of entries) {
-                if (typeof e.ciphertext === 'string') {
-                    e.ciphertext = CORRUPT_CIPHERTEXT;
-                }
-            }
-            await putObjectBytes(
-                s3,
-                key,
-                cborEncode(entries),
-                'application/cbor',
-            );
-            corrupted += 1;
-        }
-    }
-    return corrupted;
-}

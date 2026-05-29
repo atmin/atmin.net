@@ -1,5 +1,12 @@
+import {
+    GetObjectCommand,
+    type GetObjectCommandOutput,
+    ListObjectsV2Command,
+    PutObjectCommand,
+    S3Client,
+} from '@aws-sdk/client-s3';
 import { expect, type Page } from '@playwright/test';
-import { ListObjectsV2Command, S3Client } from '@aws-sdk/client-s3';
+import { decode as cborDecode, encode as cborEncode } from 'cbor-x';
 
 const MSG_SELECTOR = '[data-testid="message"]';
 
@@ -20,9 +27,7 @@ export function makeS3Client(): S3Client {
 
 /** Read the logged-in user's ID from the page's localStorage. */
 export async function getCurrentUserId(page: Page): Promise<string> {
-    const uid = await page.evaluate(() =>
-        localStorage.getItem('atmin:userId'),
-    );
+    const uid = await page.evaluate(() => localStorage.getItem('atmin:userId'));
     if (!uid) throw new Error('no atmin:userId in localStorage');
     return uid;
 }
@@ -110,8 +115,10 @@ export async function expectLocal(
                     const tx = db.transaction('messages', 'readonly');
                     const allReq = tx.objectStore('messages').getAll();
                     allReq.onsuccess = () => {
-                        const rows: Array<{ id: string; conversationId: string }> =
-                            allReq.result;
+                        const rows: Array<{
+                            id: string;
+                            conversationId: string;
+                        }> = allReq.result;
                         const ids = rows
                             .filter((r) => r.conversationId === convId)
                             .map((r) => r.id)
@@ -142,10 +149,9 @@ export async function expectLocal(
         );
     }
     if (opts.ordered) {
-        expect(
-            state.orderedMonotonically,
-            'IDB msg_ids in ULID order',
-        ).toBe(true);
+        expect(state.orderedMonotonically, 'IDB msg_ids in ULID order').toBe(
+            true,
+        );
     }
 
     return state;
@@ -235,4 +241,99 @@ export async function expectRemote(
     }
 
     return { liveMsgIds, archiveKeys };
+}
+
+// ── Remote object read/write (raw) ─────────────────────────────────
+
+function e2eBucket(): string {
+    const b = process.env.E2E_BUCKET;
+    if (!b) throw new Error('E2E_BUCKET not set');
+    return b;
+}
+
+/** GET an object's body as text. */
+export async function getObject(s3: S3Client, key: string): Promise<string> {
+    const out: GetObjectCommandOutput = await s3.send(
+        new GetObjectCommand({ Bucket: e2eBucket(), Key: key }),
+    );
+    if (!out.Body) throw new Error(`no body for ${key}`);
+    return out.Body.transformToString();
+}
+
+/** GET an object's body as raw bytes (e.g. a CBOR archive bundle). */
+export async function getObjectBytes(
+    s3: S3Client,
+    key: string,
+): Promise<Uint8Array> {
+    const out: GetObjectCommandOutput = await s3.send(
+        new GetObjectCommand({ Bucket: e2eBucket(), Key: key }),
+    );
+    if (!out.Body) throw new Error(`no body for ${key}`);
+    return out.Body.transformToByteArray();
+}
+
+/** PUT an object (text or bytes). Defaults to application/json. */
+export async function putObject(
+    s3: S3Client,
+    key: string,
+    body: string | Uint8Array,
+    contentType = 'application/json',
+): Promise<void> {
+    await s3.send(
+        new PutObjectCommand({
+            Bucket: e2eBucket(),
+            Key: key,
+            Body: body,
+            ContentType: contentType,
+        }),
+    );
+}
+
+// ── Fault injection ────────────────────────────────────────────────
+
+// Valid base64, but too short to be a real GCM payload → AES-GCM auth fails.
+const CORRUPT_CIPHERTEXT = Buffer.from('corrupted').toString('base64');
+
+/**
+ * Mangle the ciphertext of every key-backup blob under `keys/{uid}/`,
+ * handling both shapes it can take: a `live/` JSON envelope and an
+ * `archive/` CBOR bundle (array of envelopes). Each envelope keeps its
+ * `{v, iv, ciphertext}` shape, so restore parses it and fails at AES-GCM
+ * decrypt — counted as a failed restore (not a parse error), which is what
+ * surfaces the user-facing "couldn't be restored" warning. Returns the
+ * number of blobs touched.
+ *
+ * Why both shapes: a received session key lands in `live/` but the
+ * recipient's sync compacts it into an `archive/` bundle, so where it sits
+ * is timing-dependent. Poll `keys/{uid}/` for >0 and close the client's
+ * context first (freezing compaction) before calling this.
+ */
+export async function corruptKeyBackups(
+    s3: S3Client,
+    uid: string,
+): Promise<number> {
+    const keys = await listRemoteKeys(s3, `keys/${uid}/`);
+    let corrupted = 0;
+    for (const key of keys) {
+        if (key.includes('/live/')) {
+            const env = JSON.parse(await getObject(s3, key)) as {
+                ciphertext: string;
+            };
+            env.ciphertext = CORRUPT_CIPHERTEXT;
+            await putObject(s3, key, JSON.stringify(env));
+            corrupted += 1;
+        } else if (key.includes('/archive/')) {
+            const entries = cborDecode(await getObjectBytes(s3, key)) as Array<
+                Record<string, unknown>
+            >;
+            for (const entry of entries) {
+                if (typeof entry.ciphertext === 'string') {
+                    entry.ciphertext = CORRUPT_CIPHERTEXT;
+                }
+            }
+            await putObject(s3, key, cborEncode(entries), 'application/cbor');
+            corrupted += 1;
+        }
+    }
+    return corrupted;
 }

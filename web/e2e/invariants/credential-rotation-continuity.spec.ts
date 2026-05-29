@@ -15,10 +15,6 @@
  * See docs/scenarios/invariants/i9-chain-walker.md.
  */
 
-import {
-    GetObjectCommand,
-    type GetObjectCommandOutput,
-} from '@aws-sdk/client-s3';
 import { expect, test } from '@playwright/test';
 import {
     E2E_PASSWORD,
@@ -36,6 +32,7 @@ import {
     expectRemote,
     expectUI,
     getCurrentUserId,
+    getObject,
     makeS3Client,
 } from './helpers';
 
@@ -163,10 +160,7 @@ test.describe('I9 — chain walker recovers history across N rotations', () => {
         ).toBe(remote.liveMsgIds.length);
 
         // Remote: key_chain.json has exactly two links — {1→2, 2→3}.
-        const chainObj = await getObject(
-            s3,
-            `keys/${aliceUid}/key_chain.json`,
-        );
+        const chainObj = await getObject(s3, `keys/${aliceUid}/key_chain.json`);
         const chain = JSON.parse(chainObj) as {
             links: Array<{ from: number; to: number }>;
         };
@@ -180,16 +174,3 @@ test.describe('I9 — chain walker recovers history across N rotations', () => {
         await freshCtx.close();
     });
 });
-
-async function getObject(
-    s3: ReturnType<typeof makeS3Client>,
-    key: string,
-): Promise<string> {
-    const bucket = process.env.E2E_BUCKET;
-    if (!bucket) throw new Error('E2E_BUCKET not set');
-    const out: GetObjectCommandOutput = await s3.send(
-        new GetObjectCommand({ Bucket: bucket, Key: key }),
-    );
-    if (!out.Body) throw new Error(`no body for ${key}`);
-    return out.Body.transformToString();
-}
