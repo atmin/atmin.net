@@ -1022,6 +1022,15 @@ distinguish "this handle is unavailable but coming back" from
 not secrets, and senders ignore them. Only the account holder's
 login flow consumes them.
 
+This endpoint is **intentionally unauthenticated**: handles are public
+identifiers, and the three states above reveal that a handle exists
+(`200`), never existed (`404`), or was deleted and when (`410`). That
+is an accepted v0.1 stance — handle/account enumeration is possible and
+not treated as a leak (see threat model and
+[ADR-0013](../decisions/adr-0013-user-chosen-handles.md)). Resolve is
+unthrottled; rate-limiting is a deferred abuse control. Nothing behind
+the handle (messages, contacts, devices, keys) is exposed here.
+
 The registration UI uses this endpoint debounced (~300 ms) for
 real-time availability checking — no separate availability endpoint
 exists.

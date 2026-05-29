@@ -65,12 +65,15 @@ list:
 
 ```
 admin root atmin system support help info api www mail abuse
-postmaster security anonymous deleted me
+postmaster security anonymous deleted
 ```
 
-(System routes — `login`, `register`, `settings`, `saved` — do
-**not** need to be reserved. PWA routes for users live under the
-`/@` prefix; see *UI routing* below.)
+(Names below the 3-character minimum — e.g. `me` — need no entry:
+the charset rule already rejects them as `handle_invalid` before the
+reserved check runs, and a name in this file must be claimable enough
+to reach that check. System routes — `login`, `register`, `settings`,
+`saved` — likewise do **not** need reserving; PWA user routes live
+under the `/@` prefix, see *UI routing* below.)
 
 The file path is overridable via `RESERVED_HANDLES_PATH` env var
 for operator control without a rebuild.

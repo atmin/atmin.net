@@ -36,6 +36,23 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 - Server is honest-but-curious: it may observe metadata and traffic patterns.
 - E2E provides confidentiality and integrity of message content.
 - No attempt to hide who talks to whom (traffic analysis resistance is out of scope).
+- Handles are public identifiers, not secrets. `GET /v1/resolve/{handle}`
+  is unauthenticated, so handle/account existence — and, via the `410`
+  cooldown response, that an account was deleted and roughly when — is
+  intentionally observable. Bulk enumeration of the namespace is therefore
+  possible and **accepted for v0.1** (see
+  [ADR-0013](./decisions/adr-0013-user-chosen-handles.md)); resolve is
+  unthrottled and rate-limiting is a deferred abuse control (see
+  [Open questions](#open-questions)). What stays secret is everything
+  behind the handle — messages, contacts, devices, keys.
+  - _Known, deferrable lever:_ bare **existence** can't be hidden (resolve
+    must be open on the pre-login path so a returning device can fetch
+    `salt`/`kdf` before it can authenticate), but the **deletion-timing**
+    leak is a design choice, not an inherent property. The `410` cooldown
+    response exists only to let the registration UI distinguish "deleted,
+    coming back" from "never used"; collapsing `410`→`404` would hide that
+    an account ever existed at the cost of that UX nicety. Revisit if
+    deletion-privacy ever becomes a goal.
 - If all devices are lost and no backup key exists, history is unrecoverable by design.
 
 ### Device compromise
@@ -54,8 +71,10 @@ the server rejects all subsequent API calls. Without API access, the attacker's
 cryptographic keys are useless — they cannot obtain new ciphertexts to decrypt.
 Damage is limited to whatever was already downloaded before revocation.
 
-Backup secret rotation (defense-in-depth against compound threats) is deferred.
-See [evolution notes](./evolution/device-revocation.md).
+Backup-secret rotation (defense-in-depth against compound threats, and a
+user-facing "change password") shipped in v0.1 — see
+[ADR-0012](./decisions/adr-0012-backup-secret-rotation.md). Rotating
+re-keys the account and cuts off every other device immediately.
 
 This is inherent to any E2E messenger where keys must be available on-device for operation.
 OS-level device lock (PIN, biometrics) is the first line of defense — not the application.
