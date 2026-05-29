@@ -9,7 +9,7 @@
  *
  * The second half is the load-bearing one: before this, a corrupt blob was
  * silently dropped (console.error only), so history could vanish with no
- * user-facing trace. See docs/scenarios/invariants.md § I6.
+ * user-facing trace. See docs/scenarios/invariants/i6-bad-credential-corrupt-backup.md.
  */
 
 import {

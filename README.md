@@ -33,7 +33,7 @@ To run locally, see [CONTRIBUTING.md](CONTRIBUTING.md).
 [Vision](docs/vision.md) keeps the soul.  
 [ADRs](docs/decisions/) keep the why.  
 [Specs](docs/specs/mvp-v0.1.md) keep the shape.  
-[Invariants](docs/scenarios/invariants.md) keep the truth.  
+[Invariants](docs/scenarios/invariants/) keep the truth.  
 [Tasks](tasks/) keep the next step.  
 Tests keep the agent honest.  
 Commits keep the story readable.
@@ -60,7 +60,7 @@ Sync must be idempotent.
 Failure must be explicit.  
 User experience must not expose infrastructure nonsense.
 
-A local improvement that breaks [vision](docs/vision.md), [ADRs](docs/decisions/), [specs](docs/specs/mvp-v0.1.md), or [invariants](docs/scenarios/invariants.md) is a regression.  
+A local improvement that breaks [vision](docs/vision.md), [ADRs](docs/decisions/), [specs](docs/specs/mvp-v0.1.md), or [invariants](docs/scenarios/invariants/) is a regression.  
 When in doubt, preserve the documented constraints.
 
 ## Contributing

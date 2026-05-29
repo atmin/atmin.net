@@ -12,7 +12,7 @@
  * chain walker traverses more than a single link and any off-by-one
  * in the walking logic shows up here, not in production.
  *
- * See docs/scenarios/invariants.md § I9.
+ * See docs/scenarios/invariants/i9-chain-walker.md.
  */
 
 import {

@@ -309,7 +309,7 @@ task).
 **Invariant (fault-injection)** — folds in **I7 — Account deletion
 races terminate cleanly**
 ([`web/e2e/invariants/account-deletion-races.spec.ts`](../web/e2e/invariants/account-deletion-races.spec.ts),
-see [invariants.md § I7](../docs/scenarios/invariants.md)). Distinct
+see [invariants § I7](../docs/scenarios/invariants/i7-deletion-races.md)). Distinct
 from the scenario e2e above: it injects the *race*, not the happy path,
 and asserts across UI + Local (IDB) + Remote (S3), per the invariant
 template.
@@ -327,7 +327,7 @@ template.
    [server-cleanup-routine](server-cleanup-routine.md)) or rejected —
    never silently lost.
 
-This closes the I7 coverage gap (documented in invariants.md, currently
+This closes the I7 coverage gap (documented in invariants/i7-deletion-races.md, currently
 unimplemented) — its server-race property is exactly what this task's
 delete flow exercises, so the spec lands with the feature rather than
 waiting on a separate task.

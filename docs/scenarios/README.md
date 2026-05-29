@@ -21,4 +21,4 @@ the resulting S3 state, and is used to generate end-to-end tests.
 
 ## Invariants
 
-- [Invariants](./invariants.md) — properties that must hold under adverse conditions (network faults, retries, restores). Sibling to user-flow scenarios; split into `invariants/` directory when the list grows.
+- [Invariants](./invariants/README.md) — properties that must hold under adverse conditions (network faults, retries, restores). Sibling to user-flow scenarios; one file per invariant under [`invariants/`](./invariants/).
