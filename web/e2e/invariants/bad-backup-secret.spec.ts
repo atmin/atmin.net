@@ -18,6 +18,7 @@ import {
     PutObjectCommand,
 } from '@aws-sdk/client-s3';
 import { expect, test } from '@playwright/test';
+import { decode as cborDecode, encode as cborEncode } from 'cbor-x';
 import {
     E2E_PASSWORD,
     loginUser,
@@ -83,41 +84,36 @@ test.describe('I6 — bad credential / corrupt backup fails legibly', () => {
         await openChat(alice, bobHandle);
         await waitForMessage(alice, 'hello');
 
-        // ── 2. Wait until Alice has backed up the inbound session key ─
-        // The backup is fire-and-forget after receipt; poll S3 until the
-        // blob exists under Alice's key-backup prefix.
+        // ── 2. Wait until Alice's inbound session key is backed up ────
+        // It lands in keys/{uid}/live/ but Alice's sync compacts that prefix
+        // into a keys/{uid}/archive/ CBOR bundle — so poll the WHOLE prefix,
+        // not just live/, or we race compaction.
         const s3 = makeS3Client();
-        let liveKeys: string[] = [];
         await expect
             .poll(
-                async () => {
-                    liveKeys = await listRemoteKeys(
-                        s3,
-                        `keys/${aliceUid}/live/`,
-                    );
-                    return liveKeys.length;
-                },
+                async () =>
+                    (await listRemoteKeys(s3, `keys/${aliceUid}/`)).length,
                 { timeout: 20_000 },
             )
             .toBeGreaterThan(0);
 
-        // Close the original devices so no background write races the
-        // corruption we're about to inject.
+        // Close the original devices and let any in-flight compaction settle
+        // so the blob set is stable before we corrupt it.
         await aliceCtx.close();
         await bobCtx.close();
+        await new Promise((r) => setTimeout(r, 500));
 
-        // ── 3. Corrupt the ciphertext of one key-backup blob ─────────
-        // Keep the envelope shape valid ({v, iv, ciphertext}) so it parses
-        // and reaches AES-GCM, which then fails the auth tag → the blob is
-        // counted as a failed restore, not a parse error.
-        const target = liveKeys[0];
-        const env = JSON.parse(await getObject(s3, target)) as {
-            v: number;
-            iv: string;
-            ciphertext: string;
-        };
-        env.ciphertext = Buffer.from('corrupted').toString('base64'); // valid b64, too short to be a real GCM payload
-        await putObject(s3, target, JSON.stringify(env));
+        // ── 3. Corrupt every key-backup blob under Alice's prefix ─────
+        // Whether the session key sits in a live/ JSON envelope or an
+        // archive/ CBOR bundle, mangle its ciphertext while keeping the
+        // envelope shape valid ({v, iv, ciphertext}) — so it parses, reaches
+        // AES-GCM, and fails the auth tag → counted as a failed restore
+        // (not a parse/decode error), which is what surfaces the warning.
+        const corrupted = await corruptKeyBackups(s3, aliceUid);
+        expect(
+            corrupted,
+            'at least one key-backup blob to corrupt',
+        ).toBeGreaterThan(0);
 
         // ── 4. Fresh device, CORRECT password ────────────────────────
         const freshCtx = await browser.newContext();
@@ -164,4 +160,80 @@ async function putObject(
             ContentType: 'application/json',
         }),
     );
+}
+
+async function getObjectBytes(
+    s3: ReturnType<typeof makeS3Client>,
+    key: string,
+): Promise<Uint8Array> {
+    const bucket = process.env.E2E_BUCKET;
+    if (!bucket) throw new Error('E2E_BUCKET not set');
+    const out: GetObjectCommandOutput = await s3.send(
+        new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    if (!out.Body) throw new Error(`no body for ${key}`);
+    return out.Body.transformToByteArray();
+}
+
+async function putObjectBytes(
+    s3: ReturnType<typeof makeS3Client>,
+    key: string,
+    body: Uint8Array,
+    contentType: string,
+): Promise<void> {
+    const bucket = process.env.E2E_BUCKET;
+    if (!bucket) throw new Error('E2E_BUCKET not set');
+    await s3.send(
+        new PutObjectCommand({
+            Bucket: bucket,
+            Key: key,
+            Body: body,
+            ContentType: contentType,
+        }),
+    );
+}
+
+// Valid base64, but too short to be a real GCM payload → AES-GCM auth fails.
+const CORRUPT_CIPHERTEXT = Buffer.from('corrupted').toString('base64');
+
+/**
+ * Mangle the ciphertext of every key-backup blob under `keys/{uid}/`,
+ * handling both shapes: a live/ JSON envelope and an archive/ CBOR bundle
+ * (an array of envelopes). Returns how many blobs were touched. Each
+ * envelope keeps its `{v, iv, ciphertext}` shape so restore parses it and
+ * fails at decrypt — counted as a failed restore, not a parse error.
+ */
+async function corruptKeyBackups(
+    s3: ReturnType<typeof makeS3Client>,
+    uid: string,
+): Promise<number> {
+    const keys = await listRemoteKeys(s3, `keys/${uid}/`);
+    let corrupted = 0;
+    for (const key of keys) {
+        if (key.includes('/live/')) {
+            const env = JSON.parse(await getObject(s3, key)) as {
+                ciphertext: string;
+            };
+            env.ciphertext = CORRUPT_CIPHERTEXT;
+            await putObject(s3, key, JSON.stringify(env));
+            corrupted += 1;
+        } else if (key.includes('/archive/')) {
+            const entries = cborDecode(await getObjectBytes(s3, key)) as Array<
+                Record<string, unknown>
+            >;
+            for (const e of entries) {
+                if (typeof e.ciphertext === 'string') {
+                    e.ciphertext = CORRUPT_CIPHERTEXT;
+                }
+            }
+            await putObjectBytes(
+                s3,
+                key,
+                cborEncode(entries),
+                'application/cbor',
+            );
+            corrupted += 1;
+        }
+    }
+    return corrupted;
 }
