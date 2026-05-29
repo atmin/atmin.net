@@ -316,8 +316,10 @@ crashing the client.
   a recognised auth error. No uncaught exceptions, no infinite retry.
 - After deletion settles: device 2 receives 401 on the next request, is
   logged out, IDB is cleared.
-- Remote: all `users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`,
-  `media/{uid}/`, `handles/{handle}.json` objects are absent.
+- Remote: all `users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`, and
+  `media/{uid}/` objects are absent. `handles/{handle}.json` is *not*
+  absent — deletion replaces it with a 30-day cooldown tombstone
+  (custom-handles / ADR-0013); resolve returns `410`, not `404`.
 - Bob's outbound `POST /v1/send` during the window: either accepted
   (object orphaned and cleaned up) or rejected — must be one of the two,
   never silently lost.

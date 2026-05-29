@@ -301,6 +301,37 @@ done, error.
 8. From the same third context, registration with `aliceHandle`
    returns the form's "in cooldown until YYYY-MM-DD" indicator.
 
+This spec doubles as the missing e2e for
+[`docs/scenarios/account-deletion.md`](../docs/scenarios/account-deletion.md)
+(the scenario has no spec today — closing that 1:1 gap is part of this
+task).
+
+**Invariant (fault-injection)** — folds in **I7 — Account deletion
+races terminate cleanly**
+([`web/e2e/invariants/account-deletion-races.spec.ts`](../web/e2e/invariants/account-deletion-races.spec.ts),
+see [invariants.md § I7](../docs/scenarios/invariants.md)). Distinct
+from the scenario e2e above: it injects the *race*, not the happy path,
+and asserts across UI + Local (IDB) + Remote (S3), per the invariant
+template.
+
+1. Alice device 1 begins `DELETE /v1/profile`; Alice device 2 is online
+   and mid-sync; Bob sends a message during the window.
+2. Device 2's in-flight sync resolves deterministically — completes
+   (200) against pre-delete state, or fails with a recognised auth
+   error. No uncaught exception, no infinite retry.
+3. After deletion settles: device 2 gets `401` on its next request, is
+   logged out, IDB cleared. Remote has no `users/{uid}/`, `inbox/{uid}/`,
+   `keys/{uid}/`, `media/{uid}/` objects; `handles/{handle}.json` is the
+   cooldown **tombstone** (resolve `410`), not absent. Bob's send during
+   the window was either accepted (orphan, swept later by
+   [server-cleanup-routine](server-cleanup-routine.md)) or rejected —
+   never silently lost.
+
+This closes the I7 coverage gap (documented in invariants.md, currently
+unimplemented) — its server-race property is exactly what this task's
+delete flow exercises, so the spec lands with the feature rather than
+waiting on a separate task.
+
 ## Out of scope
 
 - **Server-side changes.** None — `DELETE /v1/profile` is already
@@ -332,9 +363,10 @@ done, error.
 
 - All `useDeleteAccount.test.ts` cases pass.
 - Storybook renders all panel states without console errors.
-- The new e2e spec passes; existing e2es (especially
-  credential-rotate-ui, credential-multi-device-cutoff,
-  custom-handles, invariants/credential-rotation-continuity)
+- The new scenario e2e and the I7 `account-deletion-races` invariant
+  spec both pass; existing e2es (especially credential-rotate-ui,
+  credential-multi-device-cutoff, custom-handles,
+  invariants/credential-rotation-continuity, invariants/bad-backup-secret)
   stay green.
 - Manual on staging: delete an account, confirm the handle is
   410-resolvable, confirm a second device gets kicked to /login,
