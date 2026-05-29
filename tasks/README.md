@@ -23,6 +23,8 @@ for the design.
 
 5. **[credential-multi-device-cutoff](credential-multi-device-cutoff.md)** — Client reaction to `401 key_version_stale`: clear local state, route to `/login`, show "rotated on another device" notice. Depends on task 2.
 
+6. **[legacy-mnemonic-cleanup](legacy-mnemonic-cleanup.md)** — Retires the v1 BIP39 mnemonic credential paths kept in tasks 1–5 as a deliberate migration-rehearsal vehicle. Removes the autodetect helper, the `omitempty` v1 fields on profile/handle projections, the v1 token + auth-proof shapes, the "missing `v` field ⇒ v: 1" envelope fallback, and the corresponding tests + spec/ADR sections. **Gated** on staging + production audits confirming zero v1 accounts remain — see the *Prerequisites* section. ADR-0011 and ADR-0012 are still Draft, so amendments are direct edits (no follow-up ADR needed).
+
 ## User-chosen handles
 
 Replaces the auto-generated BIP39 handle (`copper-falcon`) with a
@@ -33,7 +35,7 @@ remaining WTF moments in onboarding. See
 [ADR-0013](../docs/decisions/adr-0013-user-chosen-handles.md) for
 the design.
 
-6. **[custom-handles](custom-handles.md)** — User-typed handle at registration with charset/length validation, reserved-list check, atomic claim via per-handle in-server mutex (same backend constraint as task 2 — see [ops.md](../docs/ops.md#object-storage-constraints)), 30-day cooldown after account deletion, `/@{handle}` URL prefix for PWA routes, "Surprise me" client-side BIP39 button. Adds a small cleanup-routine sweep to GC expired tombstones — that part depends on the cleanup-routine task below.
+7. **[custom-handles](custom-handles.md)** — User-typed handle at registration with charset/length validation, reserved-list check, atomic claim via per-handle in-server mutex (same backend constraint as task 2 — see [ops.md](../docs/ops.md#object-storage-constraints)), 30-day cooldown after account deletion, `/@{handle}` URL prefix for PWA routes, "Surprise me" client-side BIP39 button. Adds a small cleanup-routine sweep to GC expired tombstones — that part depends on the cleanup-routine task below.
 
 ## Message amendments (edit + delete)
 
@@ -46,7 +48,7 @@ in its own S3 object. See
 [ADR-0014](../docs/decisions/adr-0014-message-amendments.md) for
 the design.
 
-7. **[message-amendments](message-amendments.md)** — New inner-plaintext `type: 'amendment'` carrying `target_msg_id` + `action: edit|delete` + optional `body`. Two-pass materializer applies the chain at chat-view assembly time. "(edited)" tag with timestamp delta; "[deleted]" placeholder preserves reply context. Media delete also fires `DELETE /v1/store/object`. No protocol changes server-side beyond reusing the existing inbox + media-delete endpoints. Independent of all other open tasks.
+8. **[message-amendments](message-amendments.md)** — New inner-plaintext `type: 'amendment'` carrying `target_msg_id` + `action: edit|delete` + optional `body`. Two-pass materializer applies the chain at chat-view assembly time. "(edited)" tag with timestamp delta; "[deleted]" placeholder preserves reply context. Media delete also fires `DELETE /v1/store/object`. No protocol changes server-side beyond reusing the existing inbox + media-delete endpoints. Independent of all other open tasks.
 
 ## Background delivery (push notifications)
 
@@ -58,16 +60,18 @@ per-device. Service worker stays free of Megolm keys and the
 WASM crypto module by design. See
 [ADR-0015](../docs/decisions/adr-0015-web-push.md).
 
-8. **[push-notifications](push-notifications.md)** — VAPID-keyed Web Push, subscription stored as a field on `users/{uid}/devices/{did}.json` (no new prefix), best-effort fan-out on `/v1/send`, custom service worker (VitePWA `injectManifest`) with `push` + `notificationclick` + `pushsubscriptionchange` handlers, local badge counter, settings toggle. iOS users need [ios-install-hint](ios-install-hint.md) (task 10) landed first to receive push at all; everywhere else it ships independently.
+9. **[push-notifications](push-notifications.md)** — VAPID-keyed Web Push, subscription stored as a field on `users/{uid}/devices/{did}.json` (no new prefix), best-effort fan-out on `/v1/send`, custom service worker (VitePWA `injectManifest`) with `push` + `notificationclick` + `pushsubscriptionchange` handlers, local badge counter, settings toggle. iOS users need [ios-install-hint](ios-install-hint.md) (task 11) landed first to receive push at all; everywhere else it ships independently.
 
 ## Other active tasks
 
-9. **[server-cleanup-routine](server-cleanup-routine.md)** — Automated S3 cleanup for inactive and abandoned accounts plus expired handle tombstones (new sweep target added by custom-handles). The `last_active` tracking prerequisite is already in place; this is the production-health item most at risk of being deferred indefinitely.
+10. **[server-cleanup-routine](server-cleanup-routine.md)** — Automated S3 cleanup for inactive and abandoned accounts plus expired handle tombstones (new sweep target added by custom-handles). The `last_active` tracking prerequisite is already in place; this is the production-health item most at risk of being deferred indefinitely.
 
-10. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform. Prerequisite for push notifications (task 8) to work on iOS.
+11. **[account-deletion-ui](account-deletion-ui.md)** — Settings → Danger zone panel that wires `DELETE /v1/profile` (already implemented + tested server-side) to a user-facing flow. Password is re-derived against `profile.auth_public_key` as a cryptographic gate (same pattern as change-password), plus typed-handle confirmation + acknowledgement checkbox before the destructive call. Covers the 30-day handle cooldown surfacing and the multi-device-sign-out propagation. Closes the GDPR-baseline gap of "user cannot leave without operator help."
 
-11. **[draft-persist](draft-persist.md)** — Persist unsent message drafts to localStorage across reloads. Small and self-contained; also unblocks the SW update path in `SWUpdateToast`, which suppresses auto-reload while a draft exists but has nothing to check yet.
+12. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform. Prerequisite for push notifications (task 9) to work on iOS.
 
-12. **[storage-indicator](storage-indicator.md)** — `GET /v1/store/usage` endpoint backed by the existing quota cache, surfaced as a "X MB / 1 GB" line in settings with a warning at 90%. Straightforward now that media upload has landed and the quota infrastructure is in place.
+13. **[draft-persist](draft-persist.md)** — Persist unsent message drafts to localStorage across reloads. Small and self-contained; also unblocks the SW update path in `SWUpdateToast`, which suppresses auto-reload while a draft exists but has nothing to check yet.
 
-13. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+14. **[storage-indicator](storage-indicator.md)** — `GET /v1/store/usage` endpoint backed by the existing quota cache, surfaced as a "X MB / 1 GB" line in settings with a warning at 90%. Straightforward now that media upload has landed and the quota infrastructure is in place.
+
+15. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
