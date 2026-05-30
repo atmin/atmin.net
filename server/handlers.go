@@ -169,22 +169,29 @@ func handleRegister(store Store, cfg Config, handleMu *handleMutexMap) http.Hand
 	}
 }
 
-// validKDFParams checks a v2 account's Argon2id parameters and salt. The
-// server does not set the security floor (the client picks reasonable
-// params) but it refuses values that would brick the account or pin
-// unrealistic cost: m in [8 KiB, 1 GiB], t in [1, 16], p in [1, 8], and
-// a salt that decodes to exactly 16 bytes.
+// Argon2id floor, server-enforced on every client so a weak client can't
+// register or rotate below it. Matches the client DEFAULT_KDF. See ADR-0016.
+const (
+	kdfFloorMemoryKiB  = 65536 // 64 MiB
+	kdfFloorIterations = 3
+	kdfMaxMemoryKiB    = 1048576 // 1 GiB ceiling — client self-DoS guard
+	kdfMaxIterations   = 16
+	kdfMaxParallelism  = 8
+)
+
+// validKDFParams checks a v2 account's salt + Argon2id params against the floor:
+// m in [64 MiB, 1 GiB], t in [3, 16], p in [1, 8], salt exactly 16 bytes.
 func validKDFParams(salt string, kdf *KDFParams) bool {
 	if kdf.Type != "argon2id" {
 		return false
 	}
-	if kdf.M < 8 || kdf.M > 1048576 {
+	if kdf.M < kdfFloorMemoryKiB || kdf.M > kdfMaxMemoryKiB {
 		return false
 	}
-	if kdf.T < 1 || kdf.T > 16 {
+	if kdf.T < kdfFloorIterations || kdf.T > kdfMaxIterations {
 		return false
 	}
-	if kdf.P < 1 || kdf.P > 8 {
+	if kdf.P < 1 || kdf.P > kdfMaxParallelism {
 		return false
 	}
 	saltBytes, err := b64url.DecodeString(salt)

@@ -135,6 +135,10 @@ func TestRegisterMalformedKDF(t *testing.T) {
 	}{
 		{"wrong type", validSalt, map[string]any{"type": "scrypt", "m": 65536, "t": 3, "p": 1}, http.StatusBadRequest},
 		{"m zero", validSalt, map[string]any{"type": "argon2id", "m": 0, "t": 3, "p": 1}, http.StatusBadRequest},
+		// Below the production security floor (ADR-0016): a non-stock client
+		// cannot register an account weaker than DEFAULT_KDF.
+		{"m below floor", validSalt, map[string]any{"type": "argon2id", "m": 32768, "t": 3, "p": 1}, http.StatusBadRequest},
+		{"t below floor", validSalt, map[string]any{"type": "argon2id", "m": 65536, "t": 2, "p": 1}, http.StatusBadRequest},
 		{"m over cap", validSalt, map[string]any{"type": "argon2id", "m": 2097152, "t": 3, "p": 1}, http.StatusBadRequest},
 		{"t zero", validSalt, map[string]any{"type": "argon2id", "m": 65536, "t": 0, "p": 1}, http.StatusBadRequest},
 		{"t over cap", validSalt, map[string]any{"type": "argon2id", "m": 65536, "t": 100, "p": 1}, http.StatusBadRequest},

@@ -145,9 +145,11 @@ backup_key   = HKDF-Expand(PRK, info="backup-v1",  L=32)  → AES-256-GCM key
 ```
 
 Argon2id runs in a Web Worker. The default parameters at registration
-are `m=65536 KiB, t=3, p=1`. The chosen `(salt, m, t, p)` are stored on
-`profile.json` and surfaced via `GET /v1/resolve/{handle}` so any device
-can re-derive the same keys from the password.
+are `m=65536 KiB, t=3, p=1`, which the server also enforces as the
+floor on every account ([ADR-0016](../decisions/adr-0016-server-enforced-kdf-floor.md)).
+The chosen `(salt, m, t, p)` are stored on `profile.json` and surfaced
+via `GET /v1/resolve/{handle}` so any device can re-derive the same keys
+from the password.
 
 The credential field used to be a 12-word BIP39 mnemonic; that path was
 removed once every account had migrated to the password flow. Every
@@ -811,7 +813,11 @@ public keys. The server stores all of `auth_public_key`,
 `sharing_public_key`, `salt`, `kdf`, and `key_version: 1` (the rotation
 counter starts at 1; it is bumped on each rotation) into `profile.json`.
 A request missing either `salt` or `kdf`, or carrying only one of the
-pair, is rejected `400 bad_request`.
+pair, is rejected `400 bad_request`. The server enforces an Argon2id
+**floor** ([ADR-0016](../decisions/adr-0016-server-enforced-kdf-floor.md)):
+`kdf` outside `m∈[64 MiB, 1 GiB], t∈[3, 16], p∈[1, 8]` (or a salt not
+16 bytes) is rejected. The same check gates `POST /v1/rotate-keys`, so a
+client can neither register nor rotate below the floor.
 
 Handle claim flow (see
 [ADR-0013](../decisions/adr-0013-user-chosen-handles.md) for the

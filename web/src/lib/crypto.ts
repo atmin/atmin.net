@@ -74,6 +74,7 @@ export interface KdfParams {
     p: number; // parallelism
 }
 
+// Floor for new accounts; the server enforces the same minimum (ADR-0016).
 export const DEFAULT_KDF: KdfParams = {
     type: 'argon2id',
     m: 65536,
