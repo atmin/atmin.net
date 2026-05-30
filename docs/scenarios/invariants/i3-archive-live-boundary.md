@@ -1,30 +1,40 @@
 # I3 — Archive/live boundary is consistent
 
 > Part of the [invariants index](./README.md). Priority **P0**.
-> Spec: _not yet implemented._
+> Spec: `web/e2e/invariants/archive-live-boundary.spec.ts`.
 
-**Statement.** During and after compaction, every message is reachable
-through exactly one path. No message is double-counted (live + archive),
-no message is dropped at the boundary. Re-running sync after compaction
-is idempotent: it produces no additional writes and does not change
-message count or order.
+**Statement.** After compaction, every message is reachable through
+exactly one path: no `msg_id` lives in both `inbox/{uid}/live/` and an
+`inbox/{uid}/archive/` bundle, nothing is dropped at the boundary, and a
+fresh device reconstructs the complete set exactly once and in order.
+Re-syncing with no new messages changes nothing.
 
-**Fault construction.**
+**Fault construction.** Compaction is a single server operation
+(`POST /v1/store/compact` writes the archive bundle, then deletes the
+live objects), so the literal "sync during an *in-progress* compaction"
+window is server-internal and can't be observed from the client. The
+spec instead reproduces both halves directly:
 
-1. Generate enough messages to trigger one compaction.
-2. Interleave a fresh device sync with an in-progress compaction.
-3. Assert the new device sees every message exactly once.
-4. Trigger sync again on the new device (no new messages sent); assert
-   no change.
+1. _Boundary._ Bob sends a batch; Alice's sync compacts it into the
+   archive (poll until `archive/` is non-empty and `live/` has drained).
+   Close Alice's client so a second batch stays in `live/`, post-boundary.
+   Now both prefixes are populated.
+2. _Overlap (the transient state compaction holds only briefly)._ With
+   the client frozen, put an archived message envelope back into `live/`
+   so the same `msg_id` exists in both prefixes, and let a fresh device
+   sync it.
 
 **Assertions.**
 
-- `expectRemote(s3, uid, { liveCount: N, archiveCount: M })` where
-  `N + M` equals total messages sent.
-- `expectLocal(newDevice, convId, { uniqueMsgIdCount: N + M })`
-- No `msg_id` appears in both `inbox/{uid}/live/` and any
-  `inbox/{uid}/archive/` object (post-compaction).
-- After a second sync pass: counts and order unchanged at all layers.
+- _Boundary:_ the `msg_id` sets of `live/` and `archive/` are disjoint.
+- _Completeness + order:_ a fresh device shows every message exactly once
+  (`expectUI` count + texts) and `expectLocal` has the same unique count,
+  monotonic by ULID.
+- _Idempotent re-sync:_ a second sync with no new messages leaves UI and
+  Local count/order unchanged.
+- _Overlap:_ with a `msg_id` deliberately in both prefixes, the fresh
+  device shows it once — `fetchMessages` syncs live first, seeds
+  `seenMsgIds`, and `syncArchive` skips already-seen ids (live-first dedup).
 
 **Permitted divergence.** Mid-compaction, Remote may briefly hold a
 message in both live and archive (until the live object is deleted).

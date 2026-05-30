@@ -289,6 +289,33 @@ export async function putObject(
     );
 }
 
+/** An inbox envelope as stored on the wire (only the fields tests read). */
+export interface InboxEnvelope {
+    msg_id: string;
+    content_type: string;
+    [k: string]: unknown;
+}
+
+/**
+ * Decode every `inbox/{uid}/archive/` CBOR bundle into a flat list of the
+ * envelopes they hold. Use it to inspect what compaction folded away —
+ * e.g. to assert the live and archive prefixes share no `msg_id`.
+ */
+export async function inboxArchiveEnvelopes(
+    s3: S3Client,
+    uid: string,
+): Promise<InboxEnvelope[]> {
+    const keys = await listRemoteKeys(s3, `inbox/${uid}/archive/`);
+    const envelopes: InboxEnvelope[] = [];
+    for (const key of keys) {
+        const entries = cborDecode(
+            await getObjectBytes(s3, key),
+        ) as InboxEnvelope[];
+        envelopes.push(...entries);
+    }
+    return envelopes;
+}
+
 // ── Fault injection ────────────────────────────────────────────────
 
 // Valid base64, but too short to be a real GCM payload → AES-GCM auth fails.
