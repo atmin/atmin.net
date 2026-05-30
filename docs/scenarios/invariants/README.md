@@ -85,7 +85,7 @@ links the implementing Playwright file, or marks it as not-yet-written.
 | [I5](./i5-send-outcomes.md) | Send outcomes are unambiguous | **P1** | `send-outcomes.spec.ts` |
 | [I6](./i6-bad-credential-corrupt-backup.md) | Bad credential / corrupt backup fails legibly | **P1** | `bad-backup-secret.spec.ts` |
 | [I7](./i7-deletion-races.md) | Account deletion races terminate cleanly | **P2** | _todo — folded into [account-deletion-ui](../../../tasks/account-deletion-ui.md)_ |
-| [I8](./i8-sync-idempotent.md) | Sync is idempotent | **P2** | _todo_ |
+| [I8](./i8-sync-idempotent.md) | Sync is idempotent | **P2** | `sync-idempotent.spec.ts` |
 | [I9](./i9-chain-walker.md) | Chain walker recovers history across N rotations | **P1** | `credential-rotation-continuity.spec.ts` |
 
 ## Adding a new invariant

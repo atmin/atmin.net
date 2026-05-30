@@ -1,7 +1,7 @@
 # I8 — Sync is idempotent
 
 > Part of the [invariants index](./README.md). Priority **P2**.
-> Spec: _not yet implemented._
+> Spec: `web/e2e/invariants/sync-idempotent.spec.ts`.
 
 **Statement.** Re-running sync any number of times when the cursor is
 unchanged (no new remote objects since the last successful sync) does not
@@ -15,17 +15,24 @@ are in scope.
 
 **Fault construction.**
 
-1. Alice and Bob exchange N messages; all syncs settle.
-2. Trigger sync on Alice's page K additional times (navigate away and
-   back, or call the sync hook directly via `page.evaluate`).
-3. Assert no change after each additional sync.
+1. Alice and Bob exchange N messages; let the inbox settle (compacted into
+   the archive, live drained).
+2. Trigger sync on Alice K additional times. Note: `useInboxSync` is mounted
+   once at the app level, so in-app navigation does **not** re-run
+   `fetchMessages` — a full **page reload** does (re-mount → `syncAndPublish`).
+   Each reload is a real sync pass that, thanks to the persisted cursor,
+   finds nothing new.
+3. Assert no change after each reload.
 
 **Assertions.**
 
-- `expectUI` count and order unchanged after each additional sync.
-- `expectLocal` `uniqueMsgIdCount` and `orderedMonotonically` unchanged.
-- `expectRemote` live and archive key sets unchanged (no new compaction
-  triggered, no objects written).
-- Conversation summary (last message, count) unchanged.
+- `expectUI` count and order unchanged after each re-sync.
+- `expectLocal` `ids` (and thus `uniqueMsgIdCount` + order) identical to the
+  baseline — no duplicate row, no reordering. (Covers the conversation
+  summary too, which is derived from these.)
+- The inbox `live/` set stays empty and the `archive/` key set is unchanged
+  — no spurious re-compaction, no objects written.
+- Background `keys/` writes (session-key backup/rotation on restore) are
+  carved out and not asserted.
 
 **Permitted divergence.** None.
