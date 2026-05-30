@@ -81,8 +81,8 @@ links the implementing Playwright file, or marks it as not-yet-written.
 | [I1](./i1-message-identity.md) | Message identity is unique across layers | **P0** | `no-duplicate-messages.spec.ts` |
 | [I2](./i2-no-lost-messages.md) | No lost messages under fault | **P0** | `no-lost-messages.spec.ts` |
 | [I3](./i3-archive-live-boundary.md) | Archive/live boundary is consistent | **P0** | `archive-live-boundary.spec.ts` |
-| [I4](./i4-restore-equivalence.md) | Restore-equivalence across devices | **P1** | _todo_ |
-| [I5](./i5-send-outcomes.md) | Send outcomes are unambiguous | **P1** | _todo_ |
+| [I4](./i4-restore-equivalence.md) | Restore-equivalence across devices | **P1** | `restore-equivalence.spec.ts` |
+| [I5](./i5-send-outcomes.md) | Send outcomes are unambiguous | **P1** | `send-outcomes.spec.ts` |
 | [I6](./i6-bad-credential-corrupt-backup.md) | Bad credential / corrupt backup fails legibly | **P1** | `bad-backup-secret.spec.ts` |
 | [I7](./i7-deletion-races.md) | Account deletion races terminate cleanly | **P2** | _todo — folded into [account-deletion-ui](../../../tasks/account-deletion-ui.md)_ |
 | [I8](./i8-sync-idempotent.md) | Sync is idempotent | **P2** | _todo_ |
