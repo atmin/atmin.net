@@ -5,12 +5,39 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestClientGone(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	live := context.Background()
+
+	cases := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"canceled context", canceled, nil, true},
+		{"wrapped context.Canceled", live, fmt.Errorf("s3 get: %w", context.Canceled), true},
+		{"deadline exceeded", live, context.DeadlineExceeded, true},
+		{"genuine error", live, ErrNotFound, false},
+		{"no error", live, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := clientGone(tc.ctx, tc.err); got != tc.want {
+				t.Fatalf("clientGone = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
 
 // helpers shared across middleware tests
 

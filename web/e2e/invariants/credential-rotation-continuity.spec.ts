@@ -128,10 +128,13 @@ test.describe('I9 — chain walker recovers history across N rotations', () => {
         // ── 8. Three-layer assertions on the fresh device ────────────
         const eras = ['era-1', 'era-2', 'era-3'];
 
-        // UI: all three messages, in send order.
+        // UI: all three messages, in send order. Fresh device must restore +
+        // walk the chain (kv3→kv2→kv1) + decrypt before anything renders, so
+        // give it well beyond the 15s default.
         await expectUI(fresh, {
             messageCount: eras.length,
             messageTexts: eras,
+            timeout: 30_000,
         });
 
         // Local: three unique msg_ids, monotonic by ULID.

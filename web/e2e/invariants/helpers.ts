@@ -54,19 +54,24 @@ export async function expectUI(
          * among all rendered message bubbles.
          */
         messageTexts?: string[];
+        /**
+         * Override the default 15s wait. Use a larger value for a fresh device
+         * that must restore + decrypt (archive / chain walk) before rendering.
+         */
+        timeout?: number;
     },
 ): Promise<void> {
+    const timeout = opts.timeout ?? 15_000;
     if (opts.messageCount !== undefined) {
-        await expect(page.locator(MSG_SELECTOR)).toHaveCount(
-            opts.messageCount,
-            { timeout: 15_000 },
-        );
+        await expect(page.locator(MSG_SELECTOR)).toHaveCount(opts.messageCount, {
+            timeout,
+        });
     }
     if (opts.messageTexts) {
         for (const text of opts.messageTexts) {
             await expect(
                 page.locator(MSG_SELECTOR).filter({ hasText: text }),
-            ).toBeVisible({ timeout: 15_000 });
+            ).toBeVisible({ timeout });
         }
         // Use p:first-child to get only the message text, not the
         // concatenated text+timestamp that allTextContents() returns

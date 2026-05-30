@@ -89,6 +89,9 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, devCache *devic
 					writeError(w, errDeviceRevoked)
 					return
 				}
+				if clientGone(r.Context(), err) {
+					return
+				}
 				slog.Error("device check failed", "key", deviceKey, "err", err)
 				writeError(w, APIError{http.StatusInternalServerError, "internal", "Device check failed"})
 				return
@@ -108,6 +111,9 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, devCache *devic
 					if errors.Is(err, ErrNotFound) {
 						slog.Warn("auth: profile gone", "ip", ip, "user_id", userID)
 						writeError(w, errUnauthorized)
+						return
+					}
+					if clientGone(r.Context(), err) {
 						return
 					}
 					slog.Error("profile load failed", "user_id", userID, "err", err)
@@ -133,6 +139,16 @@ func requireAuth(next http.HandlerFunc, store Store, cfg Config, devCache *devic
 		ctx = context.WithValue(ctx, ctxKeyVersion, currentKV)
 		next(w, r.WithContext(ctx))
 	}
+}
+
+// clientGone reports whether the request was aborted by the client (context
+// canceled / deadline) rather than failing server-side. Such errors are normal
+// teardown — e.g. an EventSource closing — so callers bail quietly instead of
+// logging an error or answering 500.
+func clientGone(ctx context.Context, err error) bool {
+	return ctx.Err() != nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
 
 // deviceCache is a simple TTL cache for device existence checks.

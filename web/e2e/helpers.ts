@@ -106,15 +106,18 @@ export async function sendMessage(page: Page, text: string): Promise<void> {
 }
 
 /**
- * Wait until a message containing the given text is visible.
+ * Wait until a message containing the given text is visible. The default suits
+ * live delivery; pass a larger timeout for fresh-device restore / chain-walk
+ * paths, which re-derive (Argon2id) + restore + decrypt before rendering.
  */
 export async function waitForMessage(
     page: Page,
     text: string,
+    timeout = 15_000,
 ): Promise<void> {
     await expect(
         page.locator(MSG_SELECTOR).filter({ hasText: text }),
-    ).toBeVisible({ timeout: 15_000 });
+    ).toBeVisible({ timeout });
 }
 
 /**

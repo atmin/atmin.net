@@ -76,9 +76,12 @@ test.describe('I4 — restore-equivalence across devices', () => {
             messageCount: history.length,
             messageTexts: history,
         });
+        // Device 2 restores the archived history and decrypts (after Argon2id)
+        // before rendering — beyond the 15s live-delivery default.
         await expectUI(alice2, {
             messageCount: history.length,
             messageTexts: history,
+            timeout: 30_000,
         });
         const d1 = await expectLocal(alice1, convId, {
             uniqueMsgIdCount: history.length,

@@ -86,8 +86,10 @@ test.describe('Credential rotation (Change password)', () => {
         await loginUser(aliceFresh, aliceHandle, NEW_PASSWORD);
 
         await openChat(aliceFresh, bobHandle);
-        await waitForMessage(aliceFresh, 'note 1');
-        await waitForMessage(aliceFresh, 'note 2');
+        // Fresh device: re-derive (Argon2id) + restore + chain-walk + decrypt
+        // before "note 1" renders — beyond the 15s live-delivery default.
+        await waitForMessage(aliceFresh, 'note 1', 30_000);
+        await waitForMessage(aliceFresh, 'note 2', 30_000);
 
         // ── 7. The OLD password no longer works ─────────────────────────
         const stalenessCtx = await browser.newContext();

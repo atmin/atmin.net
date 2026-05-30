@@ -116,7 +116,13 @@ test.describe('I3 — archive/live boundary is consistent', () => {
         await openChat(fresh, bobHandle);
 
         const all = [...batch1, ...batch2];
-        await expectUI(fresh, { messageCount: all.length, messageTexts: all });
+        // Fresh device restores archive + live and decrypts (after Argon2id)
+        // before rendering — beyond the 15s live-delivery default.
+        await expectUI(fresh, {
+            messageCount: all.length,
+            messageTexts: all,
+            timeout: 30_000,
+        });
         await expectLocal(fresh, convId, {
             uniqueMsgIdCount: all.length,
             ordered: true,
