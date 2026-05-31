@@ -25,6 +25,11 @@ type MediaQuotaStore interface {
 	// (both surface to clients as the same 413 quota_exceeded).
 	ReserveUpload(ctx context.Context, userID string, bytes int64) (ok bool, reason string, err error)
 
+	// GetUsage returns the user's current media usage (bytes + blob count),
+	// reading from the same cache ReserveUpload writes — populated from S3 on a
+	// miss. Backs the GET /v1/store/usage indicator.
+	GetUsage(ctx context.Context, userID string) (usedBytes int64, blobCount int, err error)
+
 	// Invalidate drops the cached usage for a user so the next ReserveUpload
 	// re-probes S3 for exact usage. Called after a media delete — the handler
 	// has only the key, not the blob's byte size, so it can't decrement
@@ -90,6 +95,27 @@ func (q *inProcessMediaQuota) ReserveUpload(ctx context.Context, userID string, 
 	e.usageBytes += bytes
 	e.blobCount++
 	return true, "", nil
+}
+
+// GetUsage returns cached usage, re-probing S3 on a miss/expiry — the same
+// read path as ReserveUpload, minus the reservation. Read-only: it never
+// increments, so opening the indicator can't affect quota accounting.
+func (q *inProcessMediaQuota) GetUsage(ctx context.Context, userID string) (int64, int, error) {
+	v, _ := q.entries.LoadOrStore(userID, &quotaEntry{})
+	e := v.(*quotaEntry)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if q.now().After(e.expiresAt) {
+		total, count, err := s3UsageProbe(ctx, q.store, userID)
+		if err != nil {
+			return 0, 0, err
+		}
+		e.usageBytes = total
+		e.blobCount = count
+		e.expiresAt = q.now().Add(QUOTA_CACHE_TTL)
+	}
+	return e.usageBytes, e.blobCount, nil
 }
 
 // Invalidate expires a user's cached entry (if present) so the next

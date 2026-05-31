@@ -1153,6 +1153,27 @@ Output:
 `GET /v1/store/object?key=...`
 (or redirect to presigned GET)
 
+#### Usage
+
+`GET /v1/store/usage`
+
+Output:
+
+```json
+{
+  "used_bytes": 357564416,
+  "quota_bytes": 1073741824,
+  "blob_count": 12,
+  "quota_blob_cap": 1000
+}
+```
+
+Returns the caller's media usage from the server's quota cache (TTL 10 min);
+on miss the server probes S3 via `ListObjectSizes` under `media/{uid}/`. No
+prefix authorization — the endpoint takes no key and is implicitly scoped to
+the authenticated user. Read-only: it never adjusts quota accounting. Usage
+can lag a successful upload by up to the cache TTL.
+
 #### Delete object
 
 `DELETE /v1/store/object?key=...`

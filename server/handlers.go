@@ -674,6 +674,28 @@ func handleStoreList(store Store) http.HandlerFunc {
 	}
 }
 
+// GET /v1/store/usage
+//
+// Returns the caller's media usage from the quota cache (re-probing S3 on a
+// miss). No prefix authorization needed — the endpoint is implicitly scoped to
+// the authenticated user, takes no key, and only reads.
+func handleStoreUsage(quota MediaQuotaStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFrom(r.Context())
+		used, count, err := quota.GetUsage(r.Context(), userID)
+		if err != nil {
+			internalError(w, "GetUsage failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"used_bytes":     used,
+			"quota_bytes":    USER_MEDIA_QUOTA_BYTES,
+			"blob_count":     count,
+			"quota_blob_cap": USER_MEDIA_BLOB_CAP,
+		})
+	}
+}
+
 // GET /v1/store/object
 func handleStoreObject(store Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

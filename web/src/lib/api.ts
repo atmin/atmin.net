@@ -343,6 +343,19 @@ export async function storeGet(
     return res.arrayBuffer();
 }
 
+export interface StorageUsage {
+    used_bytes: number;
+    quota_bytes: number;
+    blob_count: number;
+    quota_blob_cap: number;
+}
+
+// The caller's media usage, for the settings storage indicator. Server-cached
+// (TTL 10 min), so the figure can lag a recent upload.
+export function getStorageUsage(token: string): Promise<StorageUsage> {
+    return request('GET', '/v1/store/usage', { token });
+}
+
 // Owner-only delete of an S3 object. Used by the message-delete amendment
 // path to drop the underlying media blob (ADR-0014). Idempotent server-side:
 // deleting an absent key returns 200.

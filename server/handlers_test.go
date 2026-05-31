@@ -755,6 +755,106 @@ func TestStoreDeleteObjectRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestStoreUsageGolden(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	store.PutObject(nil, "media/"+alice.UserID+"/01A", make([]byte, 100), "application/octet-stream")
+	store.PutObject(nil, "media/"+alice.UserID+"/01B", make([]byte, 250), "application/octet-stream")
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", "/v1/store/usage", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	var got struct {
+		UsedBytes    int64 `json:"used_bytes"`
+		QuotaBytes   int64 `json:"quota_bytes"`
+		BlobCount    int   `json:"blob_count"`
+		QuotaBlobCap int   `json:"quota_blob_cap"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.UsedBytes != 350 {
+		t.Errorf("used_bytes = %d, want 350", got.UsedBytes)
+	}
+	if got.BlobCount != 2 {
+		t.Errorf("blob_count = %d, want 2", got.BlobCount)
+	}
+	if got.QuotaBytes != USER_MEDIA_QUOTA_BYTES {
+		t.Errorf("quota_bytes = %d, want %d", got.QuotaBytes, USER_MEDIA_QUOTA_BYTES)
+	}
+	if got.QuotaBlobCap != USER_MEDIA_BLOB_CAP {
+		t.Errorf("quota_blob_cap = %d, want %d", got.QuotaBlobCap, USER_MEDIA_BLOB_CAP)
+	}
+}
+
+func TestStoreUsageEmpty(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", "/v1/store/usage", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var got struct {
+		UsedBytes int64 `json:"used_bytes"`
+		BlobCount int   `json:"blob_count"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.UsedBytes != 0 || got.BlobCount != 0 {
+		t.Fatalf("used_bytes=%d blob_count=%d, want 0/0", got.UsedBytes, got.BlobCount)
+	}
+}
+
+func TestStoreUsageUnauthenticated(t *testing.T) {
+	_, mux, _ := testServer(t)
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest("GET", "/v1/store/usage", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestStoreUsageSharesQuotaCache(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Reserve via presign (no actual PUT). The usage endpoint must reflect the
+	// optimistic reservation, proving it reads the same quota instance the
+	// presign handler wrote — a separate cache would still report 0.
+	body, _ := json.Marshal(map[string]any{
+		"key":   "media/" + alice.UserID + "/01RESV",
+		"bytes": 4242,
+	})
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "POST", "/v1/store/presign", alice.Token, string(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("presign status = %d; body = %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", "/v1/store/usage", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("usage status = %d", w.Code)
+	}
+	var got struct {
+		UsedBytes int64 `json:"used_bytes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.UsedBytes != 4242 {
+		t.Fatalf("used_bytes = %d, want 4242 (shared cache reflects the reserve)", got.UsedBytes)
+	}
+}
+
 func TestStorePresign(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice")

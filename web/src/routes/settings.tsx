@@ -1,9 +1,11 @@
 import ChangePasswordPanel from '@/components/ChangePasswordPanel';
 import DeviceSettings from '@/components/DeviceSettings';
 import ProfileSettings from '@/components/ProfileSettings';
+import { StorageIndicator } from '@/components/StorageIndicator';
 import { useDevices } from '@/hooks/useDevices';
 import { usePasswordStrength } from '@/hooks/usePasswordStrength';
 import { useRotateKeys } from '@/hooks/useRotateKeys';
+import { useStorageUsage } from '@/hooks/useStorageUsage';
 import type { Session } from '@/lib/auth';
 
 interface Props {
@@ -15,9 +17,11 @@ export default function SettingsRoute({ session, onSessionChange }: Props) {
     const devicesState = useDevices(session.token, session.userId);
     const rotate = useRotateKeys(session, onSessionChange);
     const strength = usePasswordStrength(rotate.newPassword);
+    const storage = useStorageUsage(session.token);
 
     return (
         <ProfileSettings handle={session.handle} token={session.token}>
+            <StorageIndicator usage={storage.usage} loading={storage.loading} />
             <ChangePasswordPanel
                 step={rotate.step}
                 currentPassword={rotate.currentPassword}

@@ -42,6 +42,7 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 	// One shared quota instance across presign (reserve) and delete
 	// (invalidate) so the delete path can expire the same cached usage.
 	mediaQuota := NewMediaQuota(store)
+	mux.HandleFunc("GET /v1/store/usage", auth(handleStoreUsage(mediaQuota)))
 	mux.HandleFunc("GET /v1/store/object", auth(handleStoreObject(store)))
 	mux.HandleFunc("DELETE /v1/store/object", auth(handleDeleteObject(store, mediaQuota)))
 	mux.HandleFunc("POST /v1/store/presign", auth(handleStorePresign(store, mediaQuota)))
