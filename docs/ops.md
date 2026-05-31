@@ -108,6 +108,7 @@ GitHub Actions (`.github/workflows/deploy.yml`):
 | `SCW_REGISTRY_ENDPOINT` | e.g. `rg.fr-par.scw.cloud/atmin` |
 | `SCW_CONTAINER_ID` | Serverless Container ID (production) |
 | `SCW_STAGING_CONTAINER_ID` | Serverless Container ID (staging) |
+| `SCW_CLEANUP_JOB_DEFINITION_ID` | Serverless **Job** definition ID for the data-retention cleanup (see "Scheduled cleanup") |
 
 ### Server runtime env vars
 
@@ -126,6 +127,8 @@ staging and production):
 | `VAPID_PUBLIC_KEY` | Web Push public key (base64url-encoded). See [ADR-0015](decisions/adr-0015-web-push.md). |
 | `VAPID_PRIVATE_KEY` | Web Push private key (base64url-encoded) |
 | `VAPID_SUBJECT` | RFC 8292 contact, e.g. `mailto:admin@atmin.net` |
+| `CLEANUP_INACTIVE_DAYS` | cleanup job only — inactive-user deletion threshold (default `180`) |
+| `CLEANUP_BATCH_SIZE` | cleanup job only — max users deleted per run (default `100`) |
 
 Generate the VAPID keypair once per environment with
 `webpush-go`'s `vapid.GenerateVAPIDKeys()` helper or any
@@ -215,6 +218,75 @@ scw container container create \
 Same Docker image as production — only env vars differ (`S3_BUCKET`, `SERVER_SECRET`).
 The Go server serves the SPA; all fetch calls are same-origin relative, so no build-time
 URL changes are needed.
+
+### Scheduled cleanup
+
+Data-retention cleanup (ADR-0006) runs the **same image** as a one-shot
+**Scaleway Serverless Job** on a daily cron — not in-process (the server is
+stateless and only one runner should sweep). It deletes abandoned and inactive
+users, and sweeps expired handle tombstones once past the 30-day cooldown
+(ADR-0013). The `cleanup` subcommand reuses the server's S3 client; output is
+logs (`user_id`/`handle_key`, `policy`, `dry_run`), which flow to the same log
+pipeline (ADR-0010).
+
+```sh
+./atmin cleanup            # dry-run, logs matches only
+./atmin cleanup --apply    # actually deletes
+```
+
+One-time setup (production region/bucket):
+
+```bash
+# 1. Create the job definition. Small tier — the sweep is I/O-bound (S3
+#    list/delete), nothing like the app's request path. command overrides the
+#    image ENTRYPOINT (/atmin) args.
+#
+#    NOTE: loadConfig() requires SERVER_SECRET, S3_ENDPOINT, S3_BUCKET,
+#    S3_ACCESS_KEY, S3_SECRET_KEY even though cleanup only touches S3 — set the
+#    same values as the container (SERVER_SECRET can be any non-empty value).
+scw jobs definition create \
+  name=atmin-cleanup \
+  image-uri=rg.fr-par.scw.cloud/atmin/atmindotnet:latest \
+  cpu-limit=140 memory-limit=256 \
+  job-timeout=10m \
+  command="cleanup --apply" \
+  environment-variables.S3_REGION=fr-par \
+  environment-variables.CLEANUP_INACTIVE_DAYS=180 \
+  environment-variables.CLEANUP_BATCH_SIZE=100 \
+  secret-environment-variables.0.key=SERVER_SECRET \
+  secret-environment-variables.0.value=<any non-empty value> \
+  secret-environment-variables.1.key=S3_ENDPOINT \
+  secret-environment-variables.1.value=https://s3.fr-par.scw.cloud \
+  secret-environment-variables.2.key=S3_BUCKET \
+  secret-environment-variables.2.value=atmindotnet \
+  secret-environment-variables.3.key=S3_ACCESS_KEY \
+  secret-environment-variables.3.value=<KEY> \
+  secret-environment-variables.4.key=S3_SECRET_KEY \
+  secret-environment-variables.4.value=<SECRET>
+
+# 2. Store the returned job-definition-id as the GitHub secret
+#    SCW_CLEANUP_JOB_DEFINITION_ID (so CI can repoint it at new images).
+
+# 3. Attach a daily cron schedule (03:00 Europe/Brussels).
+scw jobs cron create \
+  job-definition-id=<JOB_DEFINITION_ID> \
+  schedule="0 3 * * *" \
+  timezone="Europe/Brussels"
+```
+
+**Rollout (ADR-0006 safeguard):** create the definition with `command="cleanup"`
+(dry-run) first, let the cron run for ~a week, review the `cleanup match` logs,
+then update to `command="cleanup --apply"` once the matches look right:
+
+```bash
+scw jobs definition update <JOB_DEFINITION_ID> command="cleanup --apply"
+```
+
+Manually trigger a run any time (e.g. to verify after setup):
+
+```bash
+scw jobs run create job-definition-id=<JOB_DEFINITION_ID>
+```
 
 ### Bucket CORS
 

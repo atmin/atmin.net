@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -14,6 +15,10 @@ type Config struct {
 	S3Region         string
 	S3AccessKey      string
 	S3SecretKey      string
+
+	// Data-retention cleanup (ADR-0006), used by the `cleanup` subcommand.
+	CleanupInactiveDays int
+	CleanupBatchSize    int
 }
 
 func loadConfig() Config {
@@ -27,6 +32,9 @@ func loadConfig() Config {
 		S3Region:         envOr("S3_REGION", "auto"),
 		S3AccessKey:      envRequired("S3_ACCESS_KEY"),
 		S3SecretKey:      envRequired("S3_SECRET_KEY"),
+
+		CleanupInactiveDays: envIntOr("CLEANUP_INACTIVE_DAYS", 180),
+		CleanupBatchSize:    envIntOr("CLEANUP_BATCH_SIZE", 100),
 	}
 	return cfg
 }
@@ -44,4 +52,16 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envIntOr(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		log.Fatalf("invalid integer for %s: %q", key, v)
+	}
+	return n
 }
