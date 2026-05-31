@@ -10,6 +10,8 @@
  * - 'sync_cursors' store: Persist sync cursors for incremental inbox fetching
  */
 
+import { isAmendment } from './payload';
+
 const DB_NAME = 'atmin';
 const DB_VERSION = 6;
 const KEYS_STORE = 'keys';
@@ -292,6 +294,10 @@ export async function saveMessages(
     >();
 
     for (const msg of messages) {
+        // Amendments (edit/delete) are stored, but must not bump a
+        // conversation's preview/timestamp/count — editing an old message
+        // should not reorder the chat list. They are still written below.
+        if (isAmendment(msg.text)) continue;
         const ts = msg.timestamp.getTime();
         const prev = convUpdates.get(msg.conversationId);
         if (!prev || ts > prev.ts) {

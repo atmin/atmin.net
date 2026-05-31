@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
+import { useChatAmendments } from '@/hooks/useChatAmendments';
 import { useChatScroll } from '@/hooks/useChatScroll';
 import { useMedia } from '@/hooks/useMedia';
 import type { Session } from '@/lib/auth';
@@ -31,6 +32,13 @@ export default function ChatRoute({
         sendMedia,
     } = useChat(handle, session, sessionManager);
 
+    const { editMessage, deleteMessage } = useChatAmendments(
+        handle,
+        handle === 'saved',
+        session,
+        sessionManager,
+    );
+
     useEffect(() => {
         onSendingChange?.(sending);
     }, [sending, onSendingChange]);
@@ -60,6 +68,8 @@ export default function ChatRoute({
             onMediaRetry={onMediaRetry}
             onSend={sendMessage}
             onSendMedia={sendMedia}
+            onEditMessage={editMessage}
+            onDeleteMessage={deleteMessage}
             scrollContainerRef={scroll.setScrollEl}
             showJumpToBottom={scroll.showJumpToBottom}
             onJumpToBottom={scroll.jumpToBottom}

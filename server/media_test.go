@@ -232,6 +232,50 @@ func TestMediaQuota_CacheTTL(t *testing.T) {
 	}
 }
 
+func TestMediaQuota_InvalidateForcesReprobe(t *testing.T) {
+	store := NewMemStore()
+	q := NewMediaQuota(store)
+	ctx := context.Background()
+	fakeNow := time.Unix(1_000_000, 0)
+	q.now = func() time.Time { return fakeNow }
+
+	// Seed two blobs (105 bytes), warm the cache via a zero-byte reserve
+	// (asserting on usageBytes, which a 0-byte reserve leaves at the probed
+	// total — blobCount carries the optimistic +1 per reserve and is noisy).
+	store.PutObject(ctx, "media/alice/a/blob", make([]byte, 5), "application/octet-stream")
+	store.PutObject(ctx, "media/alice/b/blob", make([]byte, 100), "application/octet-stream")
+	if ok, _, _ := q.ReserveUpload(ctx, "alice", 0); !ok {
+		t.Fatal("warm-up reserve should succeed")
+	}
+	e, _ := q.entries.Load("alice")
+	entry := e.(*quotaEntry)
+	if entry.usageBytes != 105 {
+		t.Fatalf("after warm-up: usageBytes=%d, want 105", entry.usageBytes)
+	}
+
+	// Delete one blob in S3 and invalidate — still well within TTL, so without
+	// the invalidation the next reserve would keep the stale 105.
+	store.DeleteObject(ctx, "media/alice/b/blob")
+	q.Invalidate("alice")
+
+	// Next reserve must re-probe and see only the remaining 5 bytes.
+	if ok, _, _ := q.ReserveUpload(ctx, "alice", 0); !ok {
+		t.Fatal("post-invalidate reserve should succeed")
+	}
+	if entry.usageBytes != 5 {
+		t.Fatalf("post-invalidate: usageBytes=%d, want 5 (re-probe absorbed the delete)", entry.usageBytes)
+	}
+}
+
+func TestMediaQuota_InvalidateUnknownUserIsNoop(t *testing.T) {
+	q := NewMediaQuota(NewMemStore())
+	// Must not panic or create an entry for a user that was never seen.
+	q.Invalidate("ghost")
+	if _, ok := q.entries.Load("ghost"); ok {
+		t.Fatal("Invalidate created an entry for an unknown user")
+	}
+}
+
 // --- Concurrent presign: per-user mutex prevents lost updates ---
 
 func TestMediaQuota_ConcurrentReserveNoLostUpdates(t *testing.T) {

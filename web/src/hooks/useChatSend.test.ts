@@ -28,6 +28,7 @@ vi.mock('@/lib/media', () => ({
 
 vi.mock('@/lib/messaging', () => ({
     sendTextMessage: vi.fn().mockResolvedValue(undefined),
+    sendInnerPayload: vi.fn().mockResolvedValue(undefined),
 }));
 
 const fakeSession: Session = {
@@ -137,10 +138,10 @@ describe('useChatSend', () => {
         );
     });
 
-    it('sendMedia calls encryptMedia + uploadMedia then sendTextMessage + syncAndPublish', async () => {
+    it('sendMedia calls encryptMedia + uploadMedia then sendInnerPayload + syncAndPublish', async () => {
         const { resolve, uploadMedia } = await import('@/lib/api');
         const { encryptMedia } = await import('@/lib/media');
-        const { sendTextMessage } = await import('@/lib/messaging');
+        const { sendInnerPayload } = await import('@/lib/messaging');
         const { syncAndPublish } = await import('@/lib/inbox-sync');
         vi.mocked(resolve).mockResolvedValue({
             status: 'live',
@@ -164,7 +165,14 @@ describe('useChatSend', () => {
 
         expect(encryptMedia).toHaveBeenCalledWith(file);
         expect(uploadMedia).toHaveBeenCalled();
-        expect(sendTextMessage).toHaveBeenCalled();
+        // Media flows through the typed-payload path (not double-wrapped text).
+        expect(sendInnerPayload).toHaveBeenCalled();
+        const payload = vi.mocked(sendInnerPayload).mock.calls[0][6];
+        expect(payload).toMatchObject({
+            type: 'media',
+            body: 'photo.jpg',
+            file: { url: 'media/user1/01ABC', name: 'photo.jpg' },
+        });
         expect(syncAndPublish).toHaveBeenCalled();
     });
 

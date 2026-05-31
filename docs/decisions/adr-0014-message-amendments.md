@@ -1,6 +1,6 @@
 # ADR-0014: Message edits and deletes via amendment envelopes
 
-Status: Draft
+Status: Accepted
 Date: 2026-05-25
 
 ## Context

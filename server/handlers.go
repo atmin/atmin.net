@@ -709,6 +709,40 @@ func handleStoreObject(store Store) http.HandlerFunc {
 	}
 }
 
+// DELETE /v1/store/object
+//
+// Owner-only (authorizeKeyWrite): unlike GET, which is capability-protected so
+// any authenticated user holding the ULID path may read a media blob, deletion
+// is restricted to the prefix owner. Used by the message-delete amendment path
+// to drop the underlying media/{uid}/{ulid} blob (see ADR-0014). Idempotent:
+// deleting an absent key is not an error. On a media delete the user's cached
+// quota usage is invalidated (the handler has only the key, not the byte size,
+// so it can't decrement precisely — the next upload re-probes S3 for exact
+// usage; see media_quota.go).
+func handleDeleteObject(store Store, quota MediaQuotaStore) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		userID := userIDFrom(r.Context())
+		key := r.URL.Query().Get("key")
+		if key == "" {
+			writeError(w, errBadRequest)
+			return
+		}
+		if !authorizeKeyWrite(userID, key) {
+			writeError(w, errForbidden)
+			return
+		}
+
+		if err := store.DeleteObject(r.Context(), key); err != nil {
+			internalError(w, "Delete failed")
+			return
+		}
+		if strings.HasPrefix(key, "media/") {
+			quota.Invalidate(userID)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
 // POST /v1/store/presign
 func handleStorePresign(store Store, quota MediaQuotaStore) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

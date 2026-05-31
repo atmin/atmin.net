@@ -19,6 +19,8 @@ interface Props {
     onMediaRetry?: (url: string) => void;
     onSend: (text: string) => void;
     onSendMedia?: (file: File) => void;
+    onEditMessage?: (id: string, newBody: string) => void;
+    onDeleteMessage?: (id: string, mediaUrl?: string) => void;
     scrollContainerRef?: (el: HTMLDivElement | null) => void;
     showJumpToBottom?: boolean;
     onJumpToBottom?: () => void;
@@ -37,11 +39,16 @@ export default function ChatView({
     onMediaRetry = () => {},
     onSend,
     onSendMedia,
+    onEditMessage,
+    onDeleteMessage,
     scrollContainerRef,
     showJumpToBottom = false,
     onJumpToBottom,
 }: Props) {
     const [inputValue, setInputValue] = useState('');
+    // Which message is in inline-edit mode. Only one at a time — starting an
+    // edit on another message replaces the target.
+    const [editingId, setEditingId] = useState<string | null>(null);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -88,21 +95,65 @@ export default function ChatView({
                             </div>
                         ) : (
                             <div className="space-y-3">
-                                {messages.map((msg) => (
-                                    <ChatMessage
-                                        key={msg.id}
-                                        text={msg.text}
-                                        timestamp={msg.timestamp}
-                                        sent={msg.sent}
-                                        media={msg.media}
-                                        mediaState={
-                                            msg.media
-                                                ? mediaStates[msg.media.url]
-                                                : undefined
-                                        }
-                                        onMediaRetry={onMediaRetry}
-                                    />
-                                ))}
+                                {messages.map((msg) => {
+                                    // Own, non-deleted messages can be amended.
+                                    // Edit is offered only for text or a media
+                                    // caption (not a pure-media bubble).
+                                    const canAmend =
+                                        msg.sent &&
+                                        !msg.deleted &&
+                                        !!onDeleteMessage;
+                                    const canEdit =
+                                        canAmend &&
+                                        !!onEditMessage &&
+                                        (!msg.media || msg.text !== '');
+                                    return (
+                                        <ChatMessage
+                                            key={msg.id}
+                                            text={msg.text}
+                                            timestamp={msg.timestamp}
+                                            sent={msg.sent}
+                                            media={msg.media}
+                                            mediaState={
+                                                msg.media
+                                                    ? mediaStates[msg.media.url]
+                                                    : undefined
+                                            }
+                                            onMediaRetry={onMediaRetry}
+                                            editedAt={msg.editedAt}
+                                            deleted={msg.deleted}
+                                            editing={editingId === msg.id}
+                                            onStartEdit={
+                                                canEdit
+                                                    ? () => setEditingId(msg.id)
+                                                    : undefined
+                                            }
+                                            onCancelEdit={() =>
+                                                setEditingId(null)
+                                            }
+                                            onSaveEdit={
+                                                onEditMessage
+                                                    ? (body) => {
+                                                          onEditMessage(
+                                                              msg.id,
+                                                              body,
+                                                          );
+                                                          setEditingId(null);
+                                                      }
+                                                    : undefined
+                                            }
+                                            onDelete={
+                                                canAmend
+                                                    ? () =>
+                                                          onDeleteMessage(
+                                                              msg.id,
+                                                              msg.media?.url,
+                                                          )
+                                                    : undefined
+                                            }
+                                        />
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

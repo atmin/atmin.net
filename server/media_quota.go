@@ -24,6 +24,13 @@ type MediaQuotaStore interface {
 	// distinguishes "quota_exceeded_bytes", "quota_exceeded_count"
 	// (both surface to clients as the same 413 quota_exceeded).
 	ReserveUpload(ctx context.Context, userID string, bytes int64) (ok bool, reason string, err error)
+
+	// Invalidate drops the cached usage for a user so the next ReserveUpload
+	// re-probes S3 for exact usage. Called after a media delete — the handler
+	// has only the key, not the blob's byte size, so it can't decrement
+	// precisely; eagerly invalidating closes the stale-overcount window to
+	// "until the next upload" instead of the full cache TTL.
+	Invalidate(userID string)
 }
 
 type quotaEntry struct {
@@ -83,4 +90,18 @@ func (q *inProcessMediaQuota) ReserveUpload(ctx context.Context, userID string, 
 	e.usageBytes += bytes
 	e.blobCount++
 	return true, "", nil
+}
+
+// Invalidate expires a user's cached entry (if present) so the next
+// ReserveUpload re-probes S3. Cheap: no S3 call here, no extra allocation —
+// the re-probe is work ReserveUpload would do at TTL expiry anyway.
+func (q *inProcessMediaQuota) Invalidate(userID string) {
+	v, ok := q.entries.Load(userID)
+	if !ok {
+		return
+	}
+	e := v.(*quotaEntry)
+	e.mu.Lock()
+	e.expiresAt = time.Time{}
+	e.mu.Unlock()
 }

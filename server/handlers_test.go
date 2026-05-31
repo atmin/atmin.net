@@ -691,6 +691,70 @@ func TestStoreGetObjectOtherUserForbidden(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteObject(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	key := "media/" + alice.UserID + "/01HWQA"
+	store.PutObject(nil, key, []byte("ciphertext"), "application/octet-stream")
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE",
+		"/v1/store/object?key="+key, alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if _, err := store.GetObject(context.Background(), key); err == nil {
+		t.Fatal("object still present after delete")
+	}
+}
+
+func TestStoreDeleteObjectIdempotent(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	// Deleting an absent key is a no-op, not an error.
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE",
+		"/v1/store/object?key=media/"+alice.UserID+"/NOPE", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
+
+func TestStoreDeleteObjectOtherUserForbidden(t *testing.T) {
+	store, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+	bob := registerTestUser(t, mux, "Bob")
+
+	// Bob's media blob — readable by anyone with the path, deletable only by Bob.
+	key := "media/" + bob.UserID + "/01HWQA"
+	store.PutObject(nil, key, []byte("ciphertext"), "application/octet-stream")
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE",
+		"/v1/store/object?key="+key, alice.Token, ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+	if _, err := store.GetObject(context.Background(), key); err != nil {
+		t.Fatal("Bob's object was deleted by Alice")
+	}
+}
+
+func TestStoreDeleteObjectRequiresAuth(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest("DELETE",
+		"/v1/store/object?key=media/"+alice.UserID+"/01HWQA", nil)
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
 func TestStorePresign(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice")

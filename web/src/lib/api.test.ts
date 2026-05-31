@@ -9,6 +9,7 @@ import {
     resolve,
     rotateKeys,
     send,
+    storeDelete,
     storeGet,
     updateProfile,
 } from './api';
@@ -591,6 +592,40 @@ describe('api - unauthorized (401)', () => {
         });
 
         expect(onUnauth).toHaveBeenCalledOnce();
+    });
+});
+
+describe('api - storeDelete()', () => {
+    beforeEach(() => {
+        resetFetchMock();
+    });
+
+    it('issues a DELETE with the key and bearer token', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+        } as unknown as Response);
+
+        await storeDelete('tok', 'media/U1/01HWQA');
+
+        const [url, init] = fetchMock.mock.calls[0];
+        expect(init.method).toBe('DELETE');
+        expect(url).toBe('/v1/store/object?key=media%2FU1%2F01HWQA');
+        expect(init.headers.Authorization).toBe('Bearer tok');
+    });
+
+    it('rejects on a non-ok response', async () => {
+        fetchMock.mockResolvedValueOnce({
+            ok: false,
+            status: 403,
+            statusText: 'Forbidden',
+            json: async () => ({ error: 'forbidden', message: 'nope' }),
+        } as Response);
+
+        await expect(
+            storeDelete('tok', 'media/U2/01HWQA'),
+        ).rejects.toMatchObject({ status: 403 });
     });
 });
 

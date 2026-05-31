@@ -140,3 +140,77 @@ export const Offline: Story = {
         online: false,
     },
 };
+
+export const WithAmendments: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'Hello Bob (edited)',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: true,
+                editedAt: new Date('2024-01-15T10:31:00Z'),
+            },
+            {
+                id: '2',
+                text: '',
+                timestamp: new Date('2024-01-15T10:32:00Z'),
+                sent: true,
+                deleted: true,
+            },
+            {
+                id: '3',
+                text: 'A normal received message',
+                timestamp: new Date('2024-01-15T10:33:00Z'),
+                sent: false,
+            },
+        ],
+        loading: false,
+        sending: false,
+        onEditMessage: fn(),
+        onDeleteMessage: fn(),
+    },
+};
+
+// Confirms the "only one message edits at a time" invariant: bubble 2 is in
+// inline-edit mode (Save/Cancel visible) while the others render normally.
+export const WithOneMessageEditing: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'First message',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: true,
+            },
+            {
+                id: '2',
+                text: 'This one is being edited',
+                timestamp: new Date('2024-01-15T10:31:00Z'),
+                sent: true,
+            },
+            {
+                id: '3',
+                text: 'Third message',
+                timestamp: new Date('2024-01-15T10:32:00Z'),
+                sent: true,
+            },
+        ],
+        loading: false,
+        sending: false,
+        onEditMessage: fn(),
+        onDeleteMessage: fn(),
+    },
+    play: async ({ canvas, userEvent }) => {
+        // Open message 2's action menu and click Edit.
+        const triggers = canvas.getAllByTestId('message-actions-trigger');
+        await userEvent.click(triggers[1]);
+        await userEvent.click(canvas.getByTestId('message-action-edit'));
+    },
+};

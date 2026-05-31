@@ -113,3 +113,81 @@ export const MediaLoading: Story = {
         onMediaRetry: noop,
     },
 };
+
+// --- Amendment variants ---
+
+export const Edited: Story = {
+    args: {
+        text: 'Hello Bob (fixed)',
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: true,
+        editedAt: new Date('2025-01-15T14:31:00'),
+        onStartEdit: noop,
+        onCancelEdit: noop,
+        onSaveEdit: noop,
+        onDelete: noop,
+    },
+};
+
+export const EditedRecently: Story = {
+    args: {
+        text: 'typo fixed moments later',
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: true,
+        editedAt: new Date('2025-01-15T14:30:20'),
+        onStartEdit: noop,
+        onCancelEdit: noop,
+        onSaveEdit: noop,
+        onDelete: noop,
+    },
+};
+
+// Mid tier (1h–24h): the delta becomes visible, full-opacity foreground.
+export const EditedHoursLater: Story = {
+    args: {
+        text: 'fixed it a few hours on',
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: true,
+        editedAt: new Date('2025-01-15T19:30:00'),
+        onStartEdit: noop,
+        onCancelEdit: noop,
+        onSaveEdit: noop,
+        onDelete: noop,
+    },
+};
+
+// Loud tier (≥ 24h): amber + medium weight so a late rewrite is conspicuous.
+export const EditedLongAfter: Story = {
+    args: {
+        text: 'rewriting history',
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: true,
+        editedAt: new Date('2025-02-05T09:00:00'),
+        onStartEdit: noop,
+        onCancelEdit: noop,
+        onSaveEdit: noop,
+        onDelete: noop,
+    },
+};
+
+export const Deleted: Story = {
+    args: {
+        text: '',
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: true,
+        deleted: true,
+    },
+};
+
+export const EditingInline: Story = {
+    args: {
+        text: 'the current body, pre-filled',
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: true,
+        editing: true,
+        onStartEdit: noop,
+        onCancelEdit: noop,
+        onSaveEdit: noop,
+        onDelete: noop,
+    },
+};

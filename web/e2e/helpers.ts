@@ -171,6 +171,65 @@ export async function getMessageCount(page: Page): Promise<number> {
 }
 
 /**
+ * Edit one of the user's own messages via the per-bubble action menu.
+ * Matches the bubble by its current text, opens the menu, picks Edit,
+ * replaces the body, and saves.
+ */
+export async function editMessage(
+    page: Page,
+    oldText: string,
+    newText: string,
+): Promise<void> {
+    const bubble = page
+        .locator(MSG_SELECTOR)
+        .filter({ hasText: oldText })
+        .first();
+    await bubble.getByTestId('message-actions-trigger').click();
+    await page.getByTestId('message-action-edit').click();
+    const input = page.getByTestId('message-edit-input');
+    await input.fill(newText);
+    await page.getByTestId('message-edit-save').click();
+}
+
+/**
+ * Delete one of the user's own messages via the per-bubble action menu,
+ * confirming the two-step delete prompt.
+ */
+export async function deleteMessage(page: Page, text: string): Promise<void> {
+    const bubble = page
+        .locator(MSG_SELECTOR)
+        .filter({ hasText: text })
+        .first();
+    await bubble.getByTestId('message-actions-trigger').click();
+    await page.getByTestId('message-action-delete').click();
+    await page.getByTestId('message-delete-confirm').click();
+}
+
+/**
+ * Wait until an edited message with the given text shows its "edited" tag.
+ */
+export async function waitForEdited(
+    page: Page,
+    text: string,
+    timeout = 15_000,
+): Promise<void> {
+    const bubble = page.locator(MSG_SELECTOR).filter({ hasText: text }).first();
+    await expect(bubble.getByTestId('edited-tag')).toBeVisible({ timeout });
+}
+
+/**
+ * Wait until a `[deleted]` placeholder bubble is visible.
+ */
+export async function waitForDeleted(
+    page: Page,
+    timeout = 15_000,
+): Promise<void> {
+    await expect(
+        page.locator(MSG_SELECTOR).filter({ hasText: '[deleted]' }).first(),
+    ).toBeVisible({ timeout });
+}
+
+/**
  * Read Megolm session state from IndexedDB.
  */
 export async function getMegolmState(page: Page) {

@@ -26,7 +26,42 @@ export function conversationId(userA: string, userB: string): string {
     return `dm:${a}:${b}`;
 }
 
-export async function sendTextMessage(
+// Inner plaintext shapes (what gets Megolm-encrypted). Every message is a
+// self-describing JSON object discriminated by `type`; see
+// docs/specs/mvp-v0.1.md "Payload by content type" and ADR-0014. The
+// materializer (useChat) also accepts legacy bare-string plaintext from
+// pre-typed-envelope clients and treats it as text.
+export interface TextPayload {
+    type: 'text';
+    body: string;
+}
+
+export interface MediaPayload {
+    type: 'media';
+    body: string; // caption (defaults to the file name)
+    file: {
+        url: string;
+        key: string;
+        iv: string;
+        name: string;
+        size: number;
+    };
+}
+
+export type AmendmentAction = 'edit' | 'delete';
+
+export interface AmendmentPayload {
+    type: 'amendment';
+    target_msg_id: string;
+    action: AmendmentAction;
+    body?: string; // present iff action === 'edit'
+}
+
+export type InnerPayload = TextPayload | MediaPayload | AmendmentPayload;
+
+// Thin wrapper preserving the historical string API: text is the common
+// case and most callers (and tests) pass a bare string.
+export function sendTextMessage(
     token: string,
     fromUserId: string,
     fromDeviceId: string,
@@ -34,6 +69,31 @@ export async function sendTextMessage(
     toPublicKeyBytes: Uint8Array,
     selfPublicKeyBytes: Uint8Array,
     messageText: string,
+    sessionManager: SessionManager,
+): Promise<void> {
+    return sendInnerPayload(
+        token,
+        fromUserId,
+        fromDeviceId,
+        toUserId,
+        toPublicKeyBytes,
+        selfPublicKeyBytes,
+        { type: 'text', body: messageText },
+        sessionManager,
+    );
+}
+
+// Encrypt and send an inner payload. Text, media, and amendments all flow
+// through here so the session-rotation, key-share, and self-copy logic lives
+// in exactly one place. The payload is JSON-serialized before encryption.
+export async function sendInnerPayload(
+    token: string,
+    fromUserId: string,
+    fromDeviceId: string,
+    toUserId: string,
+    toPublicKeyBytes: Uint8Array,
+    selfPublicKeyBytes: Uint8Array,
+    payload: InnerPayload,
     sessionManager: SessionManager,
 ): Promise<void> {
     let [session, isNew] = await sessionManager.getOutbound();
@@ -96,7 +156,7 @@ export async function sendTextMessage(
         }
     }
 
-    const ciphertext = session.encrypt(messageText);
+    const ciphertext = session.encrypt(JSON.stringify(payload));
     const msgId = ulid();
 
     envelopes.push({

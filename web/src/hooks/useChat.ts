@@ -12,6 +12,7 @@ import { onInboxUpdated } from '@/lib/inbox-sync';
 import type { MediaFile } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
 import { conversationId } from '@/lib/messaging';
+import { parseInner } from '@/lib/payload';
 import { useChatSend } from './useChatSend';
 
 export interface Message {
@@ -20,68 +21,84 @@ export interface Message {
     timestamp: Date;
     sent: boolean;
     media?: MediaFile;
+    // Set by the materializer when an `edit` amendment was applied. Carries the
+    // amendment's send time so the UI can surface long-after edits.
+    editedAt?: Date;
+    // Set when a `delete` amendment was applied; the bubble renders a
+    // `[deleted]` placeholder in the original's position.
+    deleted?: boolean;
 }
 
-interface MediaEnvelope {
-    type: 'media';
-    body: string;
-    file: {
-        url: string;
-        key: string;
-        iv: string;
-        name: string;
-        size: number;
-    };
+interface ParsedRow {
+    m: { id: string; text: string; timestamp: Date; fromUser: string };
+    p: ReturnType<typeof parseInner>;
 }
 
-function parseMediaEnvelope(text: string): MediaEnvelope | null {
-    if (!text.startsWith('{')) return null;
-    try {
-        const obj = JSON.parse(text);
-        if (
-            obj?.type === 'media' &&
-            typeof obj.body === 'string' &&
-            obj.file?.url &&
-            obj.file?.key &&
-            obj.file?.iv &&
-            typeof obj.file?.name === 'string' &&
-            typeof obj.file?.size === 'number'
-        ) {
-            return obj as MediaEnvelope;
-        }
-    } catch {
-        // not JSON
-    }
-    return null;
-}
-
+// Two-pass materializer (docs/specs/mvp-v0.1.md "Materialization", ADR-0014):
+// partition originals from amendments, then walk the originals applying each
+// one's amendment chain in ULID order. Orphan amendments (no matching original
+// in this conversation) are simply left unapplied — they stay in IDB and land
+// naturally on a later pass once the original arrives.
 function toMessages(
     msgs: { id: string; text: string; timestamp: Date; fromUser: string }[],
     userId: string,
 ): Message[] {
-    return msgs.map((m) => {
-        const env = parseMediaEnvelope(m.text);
-        if (env) {
-            return {
-                id: m.id,
-                text: env.body,
-                timestamp: m.timestamp,
-                sent: m.fromUser === userId,
-                media: {
-                    url: env.file.url,
-                    key: base64UrlDecode(env.file.key),
-                    iv: base64UrlDecode(env.file.iv),
-                    name: env.file.name,
-                    size: env.file.size,
-                },
-            };
+    // First pass — parse once, partition.
+    const amendmentsByTarget = new Map<string, ParsedRow[]>();
+    const originals: ParsedRow[] = [];
+    for (const m of msgs) {
+        const p = parseInner(m.text);
+        if (p.kind === 'amendment') {
+            const list = amendmentsByTarget.get(p.targetMsgId) ?? [];
+            list.push({ m, p });
+            amendmentsByTarget.set(p.targetMsgId, list);
+        } else if (p.kind !== 'unknown') {
+            originals.push({ m, p });
         }
-        return {
+        // 'unknown' (future inner type) → dropped from materialization.
+    }
+
+    // Second pass — materialize each original and apply its amendments.
+    return originals.map(({ m, p }) => {
+        const base: Message = {
             id: m.id,
-            text: m.text,
+            text: p.kind === 'text' || p.kind === 'media' ? p.body : '',
             timestamp: m.timestamp,
             sent: m.fromUser === userId,
         };
+        if (p.kind === 'media') {
+            base.media = {
+                url: p.file.url,
+                key: base64UrlDecode(p.file.key),
+                iv: base64UrlDecode(p.file.iv),
+                name: p.file.name,
+                size: p.file.size,
+            };
+        }
+
+        const chain = (amendmentsByTarget.get(m.id) ?? [])
+            .slice()
+            .sort((a, b) => (a.m.id < b.m.id ? -1 : a.m.id > b.m.id ? 1 : 0));
+        for (const { m: am, p: a } of chain) {
+            if (a.kind !== 'amendment') continue;
+            // Authorization: only the original's sender may amend it.
+            if (am.fromUser !== m.fromUser) continue;
+            if (a.action === 'delete') {
+                base.deleted = true;
+                base.text = '';
+                base.media = undefined;
+                break; // terminal — delete trumps any later amendment
+            }
+            if (a.action === 'edit') {
+                if (a.body === undefined) continue; // malformed edit
+                // Pure-media message (no caption): edit is malformed, ignore.
+                if (base.media && base.text === '') continue;
+                base.text = a.body;
+                base.editedAt = am.timestamp;
+            }
+            // Unknown action → silently skipped.
+        }
+        return base;
     });
 }
 

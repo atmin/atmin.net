@@ -319,6 +319,47 @@ describe('db - Conversations', () => {
         expect(convs[0].messageCount).toBe(3);
     });
 
+    it('amendments do not bump the conversation summary', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'original' }),
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+        ]);
+
+        // A later edit amendment must not change the preview, timestamp, or count.
+        await saveMessages(userId, [
+            {
+                id: 'msg-2',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({
+                    type: 'amendment',
+                    target_msg_id: 'msg-1',
+                    action: 'edit',
+                    body: 'edited',
+                }),
+                timestamp: new Date('2024-01-01T11:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        expect(convs[0].lastMessageText).toBe(
+            JSON.stringify({ type: 'text', body: 'original' }),
+        );
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-01T10:00:00Z').getTime(),
+        );
+        // Count reflects only the original, not the amendment.
+        expect(convs[0].messageCount).toBe(1);
+    });
+
     it('returns empty array when no conversations exist', async () => {
         const convs = await loadConversations();
         expect(convs).toEqual([]);

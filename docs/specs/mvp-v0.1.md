@@ -318,6 +318,11 @@ Megolm inner plaintext (what gets encrypted/decrypted):
 {"type": "text", "body": "Hey Alice"}
 ```
 
+For backward compatibility the materializer also treats a decrypted
+plaintext that is *not* a recognized typed envelope (e.g. a bare string
+from a pre-typed-envelope client) as text — a migration affordance that
+can be dropped once no such clients remain.
+
 Media reference (inside Megolm-encrypted plaintext):
 
 ```json
@@ -1126,7 +1131,7 @@ custom headers).
 
 ### Storage API (generic S3 proxy)
 
-The server exposes three generic endpoints for all S3 operations.
+The server exposes a small set of generic endpoints for all S3 operations.
 Authorization is prefix-scoped: a user's token grants access only to their own prefixes
 (`inbox/{user_id}/`, `keys/{user_id}/`, `media/{user_id}/`, `users/{user_id}/`).
 Reads under `users/` are open (needed to fetch other users' public keys);
@@ -1147,6 +1152,20 @@ Output:
 
 `GET /v1/store/object?key=...`
 (or redirect to presigned GET)
+
+#### Delete object
+
+`DELETE /v1/store/object?key=...`
+
+Owner-only: authorization is the write rule, not the read rule. Any
+authenticated user may `GET` a `media/{uid}/{ulid}` blob whose path they
+hold (capability-protected), but only the prefix owner may delete it.
+Idempotent — deleting an absent key returns `200`. Used by the
+message-delete amendment path to drop the underlying media blob
+(see [ADR-0014](../decisions/adr-0014-message-amendments.md)). On a media
+delete the user's cached quota usage is invalidated so the next upload
+re-probes S3 for exact usage (the handler has only the key, not the byte
+size, so it can't decrement precisely).
 
 #### Presign PUT
 
@@ -1212,10 +1231,11 @@ hook materializes the messages for display in a **two-pass walk**:
      further amendments are processed for this `target_msg_id`.
    - Unknown `action` → drop the amendment silently.
 3. **Orphans.** Amendments whose `target_msg_id` is not yet in
-   IDB are queued (kept in IDB with a "pending" flag) and
-   re-attempted on each subsequent materialization. They land
-   naturally as the original arrives via live sync, archive
-   walk-back, or key-backup-driven decryption.
+   IDB are simply left unapplied — no separate flag is needed,
+   since the partition is recomputed from the stored messages on
+   every materialization. They land naturally as the original
+   arrives via live sync, archive walk-back, or
+   key-backup-driven decryption.
 
 See [ADR-0014](../decisions/adr-0014-message-amendments.md).
 

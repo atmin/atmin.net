@@ -343,6 +343,19 @@ export async function storeGet(
     return res.arrayBuffer();
 }
 
+// Owner-only delete of an S3 object. Used by the message-delete amendment
+// path to drop the underlying media blob (ADR-0014). Idempotent server-side:
+// deleting an absent key returns 200.
+export function storeDelete(token: string, key: string): Promise<void> {
+    return request(
+        'DELETE',
+        `/v1/store/object?${new URLSearchParams({ key })}`,
+        {
+            token,
+        },
+    );
+}
+
 export function storePresign(
     token: string,
     key: string,

@@ -210,3 +210,207 @@ describe('useChat', () => {
         expect(result.current.messages[0].text).toBe('{not valid json at all');
     });
 });
+
+describe('useChat - amendment materialization', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    interface RowInit {
+        id: string;
+        fromUser?: string;
+        text: string;
+    }
+
+    function row({ id, fromUser = 'user1', text }: RowInit) {
+        return {
+            id,
+            userId: 'user1',
+            conversationId: 'self:user1',
+            fromUser,
+            fromDevice: 'dev1',
+            text,
+            // ULID ids sort chronologically; mirror that in the timestamp so the
+            // userId_timestamp ordering the real DB applies is reproduced.
+            timestamp: 1_000 + id.charCodeAt(id.length - 1),
+        };
+    }
+
+    const text = (body: string) => JSON.stringify({ type: 'text', body });
+    const amend = (targetMsgId: string, action: string, body?: string) =>
+        JSON.stringify({
+            type: 'amendment',
+            target_msg_id: targetMsgId,
+            action,
+            ...(body !== undefined ? { body } : {}),
+        });
+
+    async function materialize(rows: ReturnType<typeof row>[]) {
+        const { loadMessages } = await import('@/lib/db');
+        vi.mocked(loadMessages).mockResolvedValue(rows);
+        const { useChat } = await import('./useChat');
+        const { result } = renderHook(() =>
+            useChat('saved', fakeSession, fakeMgr as never),
+        );
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+        return result;
+    }
+
+    it('applies a single edit and tags editedAt', async () => {
+        const result = await materialize([
+            row({ id: 'A0', text: text('A') }),
+            row({ id: 'A1', text: amend('A0', 'edit', 'B') }),
+        ]);
+        expect(result.current.messages).toHaveLength(1);
+        expect(result.current.messages[0].text).toBe('B');
+        expect(result.current.messages[0].editedAt).toBeInstanceOf(Date);
+    });
+
+    it('applies multiple edits in ULID order — last wins', async () => {
+        const result = await materialize([
+            row({ id: 'A0', text: text('A') }),
+            row({ id: 'A2', text: amend('A0', 'edit', 'second') }),
+            row({ id: 'A1', text: amend('A0', 'edit', 'first') }),
+        ]);
+        expect(result.current.messages[0].text).toBe('second');
+    });
+
+    it('delete trumps a subsequent edit', async () => {
+        const result = await materialize([
+            row({ id: 'A0', text: text('A') }),
+            row({ id: 'A1', text: amend('A0', 'edit', 'B') }),
+            row({ id: 'A2', text: amend('A0', 'delete') }),
+            row({ id: 'A3', text: amend('A0', 'edit', 'C') }),
+        ]);
+        expect(result.current.messages[0].deleted).toBe(true);
+        expect(result.current.messages[0].text).toBe('');
+    });
+
+    it('drops an amendment from a different sender (authz)', async () => {
+        const result = await materialize([
+            row({ id: 'A0', fromUser: 'user1', text: text('A') }),
+            row({
+                id: 'A1',
+                fromUser: 'mallory',
+                text: amend('A0', 'edit', 'hax'),
+            }),
+        ]);
+        expect(result.current.messages[0].text).toBe('A');
+        expect(result.current.messages[0].editedAt).toBeUndefined();
+    });
+
+    it('silently skips an unknown action', async () => {
+        const result = await materialize([
+            row({ id: 'A0', text: text('A') }),
+            row({ id: 'A1', text: amend('A0', 'wat', 'B') }),
+        ]);
+        expect(result.current.messages[0].text).toBe('A');
+        expect(result.current.messages[0].editedAt).toBeUndefined();
+        expect(result.current.messages[0].deleted).toBeUndefined();
+    });
+
+    it('keeps an orphan amendment unsurfaced, then applies it once the original arrives', async () => {
+        const orphan = await materialize([
+            row({ id: 'A1', text: amend('A0', 'edit', 'B') }),
+        ]);
+        expect(orphan.current.messages).toHaveLength(0);
+
+        const resolved = await materialize([
+            row({ id: 'A0', text: text('A') }),
+            row({ id: 'A1', text: amend('A0', 'edit', 'B') }),
+        ]);
+        expect(resolved.current.messages).toHaveLength(1);
+        expect(resolved.current.messages[0].text).toBe('B');
+    });
+
+    it('does not let an amendment target another amendment', async () => {
+        // A2 targets A1 (itself an amendment), not the original X.
+        const result = await materialize([
+            row({ id: 'X0', text: text('X') }),
+            row({ id: 'A1', text: amend('X0', 'edit', 'edited') }),
+            row({ id: 'A2', text: amend('A1', 'edit', 'hijack') }),
+        ]);
+        // Only the original is surfaced; its chain (A1) applied; A2 is an orphan.
+        expect(result.current.messages).toHaveLength(1);
+        expect(result.current.messages[0].text).toBe('edited');
+    });
+
+    it('deletes a media message — drops the media reference', async () => {
+        const media = JSON.stringify({
+            type: 'media',
+            body: 'photo.jpg',
+            file: {
+                url: 'media/user1/01ABC',
+                key: 'k',
+                iv: 'iv',
+                name: 'photo.jpg',
+                size: 10,
+            },
+        });
+        const result = await materialize([
+            row({ id: 'A0', text: media }),
+            row({ id: 'A1', text: amend('A0', 'delete') }),
+        ]);
+        expect(result.current.messages[0].deleted).toBe(true);
+        expect(result.current.messages[0].media).toBeUndefined();
+    });
+
+    it('edits a media caption without touching the media reference', async () => {
+        const media = JSON.stringify({
+            type: 'media',
+            body: 'old caption',
+            file: {
+                url: 'media/user1/01ABC',
+                key: 'k',
+                iv: 'iv',
+                name: 'photo.jpg',
+                size: 10,
+            },
+        });
+        const result = await materialize([
+            row({ id: 'A0', text: media }),
+            row({ id: 'A1', text: amend('A0', 'edit', 'new caption') }),
+        ]);
+        expect(result.current.messages[0].text).toBe('new caption');
+        expect(result.current.messages[0].media).toBeDefined();
+        expect(result.current.messages[0].media?.name).toBe('photo.jpg');
+    });
+
+    it('ignores an edit on a pure-media message (empty caption)', async () => {
+        const media = JSON.stringify({
+            type: 'media',
+            body: '',
+            file: {
+                url: 'media/user1/01ABC',
+                key: 'k',
+                iv: 'iv',
+                name: 'photo.jpg',
+                size: 10,
+            },
+        });
+        const result = await materialize([
+            row({ id: 'A0', text: media }),
+            row({ id: 'A1', text: amend('A0', 'edit', 'sneaky caption') }),
+        ]);
+        expect(result.current.messages[0].text).toBe('');
+        expect(result.current.messages[0].editedAt).toBeUndefined();
+        expect(result.current.messages[0].media).toBeDefined();
+    });
+
+    it('handles a long edit chain (N=50) without quadratic blowup', async () => {
+        const rows = [row({ id: 'M000', text: text('orig') })];
+        for (let i = 1; i <= 50; i++) {
+            const id = `M${String(i).padStart(3, '0')}`;
+            rows.push(row({ id, text: amend('M000', 'edit', `edit-${i}`) }));
+        }
+        const start = performance.now();
+        const result = await materialize(rows);
+        const elapsed = performance.now() - start;
+        expect(result.current.messages).toHaveLength(1);
+        expect(result.current.messages[0].text).toBe('edit-50');
+        // Generous CI bound — confirms the walk is linear, not accidentally O(n²).
+        expect(elapsed).toBeLessThan(500);
+    });
+});
