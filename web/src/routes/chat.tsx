@@ -3,6 +3,7 @@ import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
 import { useChatAmendments } from '@/hooks/useChatAmendments';
 import { useChatScroll } from '@/hooks/useChatScroll';
+import { useDraft } from '@/hooks/useDraft';
 import { useMedia } from '@/hooks/useMedia';
 import type { Session } from '@/lib/auth';
 import type { MediaFile } from '@/lib/media';
@@ -53,6 +54,7 @@ export default function ChatRoute({
     );
 
     const scroll = useChatScroll(messages, handle);
+    const [inputValue, setInputValue] = useDraft(handle ?? '');
 
     return (
         <ChatView
@@ -68,6 +70,8 @@ export default function ChatRoute({
             onMediaRetry={onMediaRetry}
             onSend={sendMessage}
             onSendMedia={sendMedia}
+            inputValue={inputValue}
+            setInputValue={setInputValue}
             onEditMessage={editMessage}
             onDeleteMessage={deleteMessage}
             scrollContainerRef={scroll.setScrollEl}

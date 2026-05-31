@@ -19,6 +19,11 @@ interface Props {
     onMediaRetry?: (url: string) => void;
     onSend: (text: string) => void;
     onSendMedia?: (file: File) => void;
+    // Controlled draft input — persisted across reloads by useDraft in the
+    // route. setInputValue('') after a send both clears the field and removes
+    // the stored draft key.
+    inputValue: string;
+    setInputValue: (v: string) => void;
     onEditMessage?: (id: string, newBody: string) => void;
     onDeleteMessage?: (id: string, mediaUrl?: string) => void;
     scrollContainerRef?: (el: HTMLDivElement | null) => void;
@@ -39,13 +44,14 @@ export default function ChatView({
     onMediaRetry = () => {},
     onSend,
     onSendMedia,
+    inputValue,
+    setInputValue,
     onEditMessage,
     onDeleteMessage,
     scrollContainerRef,
     showJumpToBottom = false,
     onJumpToBottom,
 }: Props) {
-    const [inputValue, setInputValue] = useState('');
     // Which message is in inline-edit mode. Only one at a time — starting an
     // edit on another message replaces the target.
     const [editingId, setEditingId] = useState<string | null>(null);

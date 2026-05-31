@@ -9,6 +9,8 @@ const meta = {
         onSend: fn(),
         encryptionReady: true,
         online: true,
+        inputValue: '',
+        setInputValue: fn(),
     },
 } satisfies Meta<typeof ChatView>;
 
@@ -34,6 +36,19 @@ export const SavedEmpty: Story = {
         messages: [],
         loading: false,
         sending: false,
+    },
+};
+
+// A restored draft: the input is pre-filled (e.g. after a refresh).
+export const Draft: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [],
+        loading: false,
+        sending: false,
+        inputValue: 'half-typed message…',
     },
 };
 
