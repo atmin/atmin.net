@@ -1,11 +1,38 @@
 // @vitest-environment happy-dom
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useDraft } from './useDraft';
+
+// Install a fresh in-memory localStorage per test rather than relying on the
+// ambient one. The unit project runs in node (DOM comes only from the
+// per-file happy-dom directive); a sibling test file that defineProperty's
+// globalThis.localStorage can otherwise leak across files in a reused CI
+// worker, so we stub our own deterministic Storage and restore after.
+function memoryStorage(): Storage {
+    const m = new Map<string, string>();
+    return {
+        get length() {
+            return m.size;
+        },
+        clear: () => m.clear(),
+        getItem: (k) => (m.has(k) ? (m.get(k) as string) : null),
+        key: (i) => [...m.keys()][i] ?? null,
+        removeItem: (k) => {
+            m.delete(k);
+        },
+        setItem: (k, v) => {
+            m.set(k, String(v));
+        },
+    };
+}
 
 describe('useDraft', () => {
     beforeEach(() => {
-        localStorage.clear();
+        vi.stubGlobal('localStorage', memoryStorage());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it('is empty when no draft is stored', () => {

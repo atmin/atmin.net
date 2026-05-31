@@ -17,7 +17,10 @@ beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
     globalThis.IDBKeyRange = FakeIDBKeyRange;
 
-    // Setup localStorage mock
+    // Setup localStorage mock. configurable so the test environment can be
+    // torn down / overridden between files — without it the property leaks
+    // into sibling test files in a reused worker (caused a CI-only failure in
+    // useDraft.test.ts, which expects happy-dom's own localStorage).
     Object.defineProperty(globalThis, 'localStorage', {
         value: {
             getItem: (key: string) => localStorageMock[key] || null,
@@ -34,6 +37,7 @@ beforeEach(() => {
             },
         },
         writable: true,
+        configurable: true,
     });
 });
 
