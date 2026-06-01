@@ -3,7 +3,7 @@
 Status: scope frozen — the v0.1 surface is fixed and nearly complete
 (remaining work in [tasks/](../../tasks/README.md)). New surface area
 (starting with background delivery) lives in
-[mvp-v0.2.md](mvp-v0.2.md), not here.
+[v0.2.md](v0.2.md), not here.
 
 ## Goals
 
@@ -731,7 +731,7 @@ on each rotation. `kdf.m` is in KiB per the Argon2 spec convention.
 ```
 
 v0.2 adds an optional `push_subscription` field to this record for
-Web Push delivery; see [mvp-v0.2.md](mvp-v0.2.md).
+Web Push delivery; see [v0.2.md](v0.2.md).
 
 ## Error responses
 
@@ -1062,7 +1062,7 @@ Server behavior:
 - notify SSE subscribers for each recipient (`new_message`)
 
 (v0.2 adds a best-effort Web Push fan-out to recipient devices here;
-see [mvp-v0.2.md](mvp-v0.2.md).)
+see [v0.2.md](v0.2.md).)
 
 Send is the only endpoint that writes to other users' prefixes.
 The storage API (below) is restricted to the caller's own prefixes.

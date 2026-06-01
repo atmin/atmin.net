@@ -16,7 +16,7 @@ and account deletion (Settings → Danger zone, `DELETE /v1/profile`, invariant
 
 ## MVP v0.2 — background delivery & reach
 
-Scope is still firming up — see [mvp-v0.2.md](../docs/specs/mvp-v0.2.md).
+Scope is still firming up — see [v0.2.md](../docs/specs/v0.2.md).
 Push is the headline; the other two support and scale it. New items may
 be added here as v0.2 is iterated on.
 

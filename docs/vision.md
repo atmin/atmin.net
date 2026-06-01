@@ -98,4 +98,4 @@ OS-level device lock (PIN, biometrics) is the first line of defense — not the 
   UX pass (polish, simplification, a time-aware timeline, broader
   theming), history export, and (still firming up) opt-in discovery,
   better abuse controls, and optional realtime hints. Drafted in
-  [specs/mvp-v0.2.md](specs/mvp-v0.2.md); scope iterates.
+  [specs/v0.2.md](specs/v0.2.md); scope iterates.
