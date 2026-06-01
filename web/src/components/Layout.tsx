@@ -24,7 +24,7 @@ export default function Layout({
             )}
         >
             {topBar && (
-                <header className="fixed top-0 right-0 left-0 z-10 border-b border-border bg-background/80 backdrop-blur-md">
+                <header className="fixed top-0 right-0 left-0 z-10 bg-background/80 backdrop-blur-md">
                     <div className="mx-auto flex h-14 w-full max-w-2xl items-center px-4">
                         {topBar}
                     </div>

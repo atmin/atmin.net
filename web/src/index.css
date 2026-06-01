@@ -144,49 +144,4 @@ select {
 }
 
 @layer components {
-    .bubble-tail-sent {
-        &::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            right: -10px;
-            width: 10px;
-            height: 20px;
-            background: var(--bubble-sent);
-        }
-
-        &::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            right: -10px;
-            width: 10px;
-            height: 20px;
-            background: var(--background);
-            border-top-left-radius: 10px;
-        }
-    }
-
-    .bubble-tail-received {
-        &::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: -10px;
-            width: 10px;
-            height: 20px;
-            background: var(--bubble-received);
-        }
-
-        &::after {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: -10px;
-            width: 10px;
-            height: 20px;
-            background: var(--background);
-            border-top-right-radius: 10px;
-        }
-    }
 }

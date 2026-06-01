@@ -89,7 +89,7 @@ export default function ChatView({
                                 </div>
                             </div>
                         ) : messages.length === 0 ? (
-                            <div className="flex h-96 items-center justify-center rounded border border-dashed border-border text-center text-muted-foreground">
+                            <div className="flex h-96 items-center justify-center text-center text-muted-foreground">
                                 <div>
                                     <p className="mb-2">No messages yet</p>
                                     <p className="text-xs">
@@ -172,7 +172,7 @@ export default function ChatView({
             </div>
 
             {/* Message input */}
-            <div className="border-t border-border bg-background px-4 py-3">
+            <div className="bg-background px-4 py-3">
                 <form
                     onSubmit={handleSubmit}
                     className="mx-auto flex max-w-2xl gap-2"

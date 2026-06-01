@@ -147,8 +147,8 @@ export default function ChatMessage({
 }: Props) {
     const bubbleClass = `group relative px-4 py-2.5 ${
         sent
-            ? 'ml-8 rounded-tl-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-sent text-bubble-sent-foreground bubble-tail-sent'
-            : 'mr-8 rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-received text-bubble-received-foreground bubble-tail-received'
+            ? 'ml-8 rounded-tl-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-sent text-bubble-sent-foreground'
+            : 'mr-8 rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-received text-bubble-received-foreground'
     }`;
 
     const timeLabel =
