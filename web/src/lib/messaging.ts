@@ -251,7 +251,15 @@ async function processEnvelopes(
                     ).catch((err) => console.error('Key backup failed:', err));
                 }
             } catch (error) {
-                console.error(`Failed to process key share ${key}:`, error);
+                // Non-fatal and usually expected: a key share encrypted to a
+                // superseded sharing key (pre-rotation) won't ECIES-decrypt
+                // with the current one (OperationError). The session it
+                // carried is recovered from the key-backup chain instead
+                // (ADR-0012 / invariant I9), so this is belt-and-suspenders
+                // failing, not lost history — that surfaces separately as a
+                // restore warning (I6). Logged at debug to avoid alarming
+                // console.error noise on accounts that have rotated.
+                console.debug(`Skipped key share ${key}:`, error);
             }
         }
     }
