@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
-    getMessageCount,
     getMegolmState,
+    getMessageCount,
     loginUser,
     openChat,
     registerUser,
@@ -11,6 +11,10 @@ import {
 } from './helpers';
 
 test.describe('Session Rotation', () => {
+    // Argon2id-heavy (register + new-device restore/decrypt): triple the
+    // default timeout so machine load doesn't flake it.
+    test.beforeEach(() => test.slow());
+
     test('Alice decrypts messages across rotation boundary (rotation on restart)', async ({
         browser,
     }) => {

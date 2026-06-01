@@ -142,6 +142,12 @@ e2e: web-build
 #   make e2e-local SPEC="media -g 'inline image'" # filter by test title
 e2e-local: web-build server-build
 	@$(DOCKER) rm -f atmin-e2e 2>/dev/null || true
+	@# Clean slate to deflake: kill any stray server from an interrupted run
+	@# (frees :8080) and wipe MinIO's volume so no accumulated state or a
+	@# recycled bucket name leaks across runs. The server's in-process caches
+	@# also start empty since it's (re)started below.
+	@pkill -f 'bin/atmin' 2>/dev/null || true
+	$(DOCKER) compose down -v 2>/dev/null || true
 	$(DOCKER) compose up -d
 	@BUCKET=atmin-e2e-local-$$$$; \
 	export SERVER_SECRET=e2e-test-secret; \

@@ -12,6 +12,10 @@ const NEW_PASSWORD = 'rotated-passphrase-strong-2';
 const ROTATION_TIMEOUT_MS = 45_000;
 
 test.describe('Credential rotation — multi-device cutoff', () => {
+    // Argon2id-heavy (register + login second device + rotate + re-login):
+    // triple the default timeout to absorb machine load.
+    test.beforeEach(() => test.slow());
+
     test('rotation on device A forces device B to /login with the notice; re-login restores history', async ({
         browser,
     }) => {

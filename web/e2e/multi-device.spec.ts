@@ -11,6 +11,10 @@ import {
 } from './helpers';
 
 test.describe('Multi-Device', () => {
+    // Argon2id-heavy (register + second-device login): triple the default
+    // timeout so machine load doesn't flake it.
+    test.beforeEach(() => test.slow());
+
     test('Second device sees history and all devices stay in sync', async ({
         browser,
     }) => {

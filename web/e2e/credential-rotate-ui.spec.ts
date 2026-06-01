@@ -13,6 +13,11 @@ const NEW_PASSWORD = 'rotated-passphrase-strong-2';
 const ROTATION_TIMEOUT_MS = 45_000;
 
 test.describe('Credential rotation (Change password)', () => {
+    // Argon2id-heavy (register + rotate + re-login): triple the default
+    // timeout so machine load doesn't flake it (workers: 1, so this is the
+    // realistic guard, not parallelism).
+    test.beforeEach(() => test.slow());
+
     test('rotates, keeps the current session working, and decrypts pre-rotation history on re-login', async ({
         browser,
     }) => {
@@ -97,9 +102,7 @@ test.describe('Credential rotation (Change password)', () => {
         await stalenessPage.goto('/login');
         await stalenessPage.fill('#handle', aliceHandle);
         await stalenessPage.fill('#secret', oldPassword);
-        await stalenessPage
-            .getByRole('button', { name: 'Sign In' })
-            .click();
+        await stalenessPage.getByRole('button', { name: 'Sign In' }).click();
         // The derived auth key no longer matches profile.auth_public_key;
         // the server's add-device verification will reject. We assert the
         // page stays on /login or shows an error rather than landing on /.

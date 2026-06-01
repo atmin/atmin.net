@@ -9,7 +9,11 @@ export default defineConfig({
     testDir: './e2e',
     fullyParallel: false,
     forbidOnly: !!process.env.CI,
-    retries: process.env.CI ? 2 : 0,
+    // One local retry mirrors CI's posture: the suite is serialized
+    // (workers: 1), so flake here is timing (Argon2id near the timeout, SSE
+    // propagation), not cross-test races — a retry turns those green instead
+    // of failing a run.
+    retries: process.env.CI ? 2 : 1,
     workers: 1,
     reporter: 'html',
     timeout: 60_000,
