@@ -247,6 +247,13 @@ export function deleteDevice(token: string): Promise<void> {
     return request('DELETE', '/v1/devices', { token });
 }
 
+// Permanently delete the caller's account: server wipes all per-user data and
+// writes a 30-day handle tombstone (ADR-0013). The token authenticates the
+// in-flight request; subsequent requests 401 once the device file is gone.
+export function deleteProfile(token: string): Promise<void> {
+    return request('DELETE', '/v1/profile', { token });
+}
+
 export function revokeDevice(
     token: string,
     req: RevokeDeviceRequest,

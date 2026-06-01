@@ -187,6 +187,47 @@ describe('useSession', () => {
         expect(result.current.notice).toBe('rotated_elsewhere');
     });
 
+    it('handleAccountDeleted clears session, wipes IDB, sets account_deleted notice', async () => {
+        const { loadSession, clearSession } = await import('@/lib/auth');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+
+        await act(async () => {
+            await result.current.handleAccountDeleted();
+        });
+
+        expect(clearSession).toHaveBeenCalled();
+        expect(result.current.session).toBeNull();
+        expect(result.current.notice).toBe('account_deleted');
+    });
+
+    it('clearNotice clears the account_deleted notice', async () => {
+        const { loadSession } = await import('@/lib/auth');
+        vi.mocked(loadSession).mockResolvedValue(fakeSession);
+
+        const { useSession } = await import('./useSession');
+        const { result } = renderHook(() => useSession());
+
+        await act(async () => {
+            await new Promise((r) => setTimeout(r, 0));
+        });
+        await act(async () => {
+            await result.current.handleAccountDeleted();
+        });
+        expect(result.current.notice).toBe('account_deleted');
+
+        act(() => {
+            result.current.clearNotice();
+        });
+        expect(result.current.notice).toBeNull();
+    });
+
     it('handleLogin clears any pending notice', async () => {
         const { loadSession } = await import('@/lib/auth');
         const { onAuthEvent } = await import('@/lib/api');

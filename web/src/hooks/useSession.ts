@@ -10,7 +10,7 @@ import { restoreContacts } from '@/lib/contact-backup';
 import { restoreSessionKeys } from '@/lib/key-backup';
 import type { SessionManager } from '@/lib/megolm-session';
 
-export type LoginNotice = 'rotated_elsewhere' | null;
+export type LoginNotice = 'rotated_elsewhere' | 'account_deleted' | null;
 
 export interface SessionState {
     session: Session | null;
@@ -25,6 +25,7 @@ export interface SessionState {
     restoreWarning: number | null;
     handleLogin: (session: Session) => void;
     handleLogout: () => Promise<void>;
+    handleAccountDeleted: () => Promise<void>;
     clearNotice: () => void;
     clearRestoreWarning: () => void;
 }
@@ -148,6 +149,22 @@ export function useSession(): SessionState {
         await clearSession();
     }, []);
 
+    // User deleted their own account (Settings → Danger zone). The account is
+    // gone server-side; tear down exactly like a logout (drop session first so
+    // IDB consumers unmount before the wipe), then surface a one-shot
+    // confirmation that renders on Landing. Same teardown shape as
+    // handleKeyVersionStale, different notice + destination.
+    const handleAccountDeleted = useCallback(async () => {
+        setSessionManager((prev) => {
+            prev?.destroy();
+            return null;
+        });
+        setSession(null);
+        await new Promise((r) => setTimeout(r, 0));
+        await clearSession();
+        setNotice('account_deleted');
+    }, []);
+
     const handleUnauthorized = useCallback(async () => {
         setSessionManager((prev) => {
             prev?.destroy();
@@ -201,6 +218,7 @@ export function useSession(): SessionState {
         restoreWarning,
         handleLogin,
         handleLogout,
+        handleAccountDeleted,
         clearNotice,
         clearRestoreWarning,
     };

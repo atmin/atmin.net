@@ -76,6 +76,7 @@ export default function App() {
         restoreWarning,
         handleLogin,
         handleLogout,
+        handleAccountDeleted,
         clearNotice,
         clearRestoreWarning,
     } = useSession();
@@ -123,6 +124,7 @@ export default function App() {
                             <Settings
                                 session={session}
                                 onSessionChange={handleLogin}
+                                onDeleted={handleAccountDeleted}
                             />
                         ) : (
                             <Navigate to="/login" replace />
@@ -141,7 +143,10 @@ export default function App() {
                                 onLogout={handleLogout}
                             />
                         ) : (
-                            <Landing />
+                            <Landing
+                                notice={notice}
+                                onDismissNotice={clearNotice}
+                            />
                         )
                     }
                 />

@@ -374,6 +374,38 @@ func TestDeleteProfile(t *testing.T) {
 	}
 }
 
+func TestDeleteProfileInvalidatesDeviceCache(t *testing.T) {
+	_, mux, _ := testServer(t)
+	alice := registerTestUser(t, mux, "Alice")
+
+	listURL := "/v1/store/list?prefix=inbox/" + alice.UserID + "/live/"
+
+	// Prime the device-existence cache with a successful authed request.
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", listURL, alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("priming list: status = %d", w.Code)
+	}
+
+	// Delete the account.
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "DELETE", "/v1/profile", alice.Token, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: status = %d", w.Code)
+	}
+
+	// The next request with the same (still cryptographically valid) token must
+	// be rejected immediately: deletion evicts the device-cache entry, so the
+	// device check misses → HeadObject → gone → 403 device_revoked. A stale
+	// cache would instead skip the device check and 401 on the missing profile,
+	// leaving other devices briefly authenticated — the bug this guards.
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, authedRequest(t, "GET", listURL, alice.Token, ""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("post-delete list: status = %d, want 403 device_revoked", w.Code)
+	}
+}
+
 func TestDeleteProfileAlreadyDeleted(t *testing.T) {
 	_, mux, _ := testServer(t)
 	alice := registerTestUser(t, mux, "Alice")
@@ -385,11 +417,14 @@ func TestDeleteProfileAlreadyDeleted(t *testing.T) {
 		t.Fatalf("first delete status = %d", w.Code)
 	}
 
-	// Second delete should 404
+	// Second delete is rejected at auth: the first delete evicted the device
+	// from the cache and removed its file, so requireAuth returns 403
+	// device_revoked before the handler runs. (The client treats that as a
+	// logout — the account is gone either way.)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, authedRequest(t, "DELETE", "/v1/profile", alice.Token, ""))
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("second delete status = %d, want 404", w.Code)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("second delete status = %d, want 403 device_revoked", w.Code)
 	}
 }
 

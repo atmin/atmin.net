@@ -8,10 +8,27 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 
-export default function LandingPage() {
+interface Props {
+    // One-shot confirmation after a successful account deletion.
+    accountDeleted?: boolean;
+    onDismiss?: () => void;
+}
+
+export default function LandingPage({
+    accountDeleted = false,
+    onDismiss = () => {},
+}: Props) {
     return (
         <div className="flex min-h-screen items-center justify-center bg-background p-8">
             <div className="w-full max-w-md">
+                {accountDeleted && (
+                    <p
+                        className="mb-6 text-sm text-muted-foreground"
+                        data-testid="account-deleted-notice"
+                    >
+                        ✓ Your account has been deleted.
+                    </p>
+                )}
                 <h1 className="mb-8 text-3xl font-bold">atmin</h1>
 
                 <Card className="mb-6">
@@ -33,10 +50,14 @@ export default function LandingPage() {
 
                 <div className="flex gap-3">
                     <Button asChild className="flex-1">
-                        <Link to="/register">Create Account</Link>
+                        <Link to="/register" onClick={onDismiss}>
+                            Create Account
+                        </Link>
                     </Button>
                     <Button asChild variant="outline" className="flex-1">
-                        <Link to="/login">Sign In</Link>
+                        <Link to="/login" onClick={onDismiss}>
+                            Sign In
+                        </Link>
                     </Button>
                 </div>
 

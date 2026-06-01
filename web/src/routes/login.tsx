@@ -20,6 +20,9 @@ export default function LoginRoute({
         <LoginForm
             loading={loading}
             error={error}
+            // Both rotated_elsewhere and account_deleted can land here (a
+            // deleted session's background 401 redirects a protected route to
+            // /login); the form renders either confirmation.
             notice={notice}
             onDismissNotice={onDismissNotice}
             onLogin={handleLogin}

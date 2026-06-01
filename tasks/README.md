@@ -3,17 +3,16 @@
 Active implementation tasks, grouped by milestone and in priority order.
 Delete a file once its change lands.
 
-## MVP v0.1 — finish the baseline
+## MVP v0.1 — complete ✅
 
-The remaining work to complete [v0.1](../docs/specs/mvp-v0.1.md). Once
-this lands, the v0.1 milestone is done: a self-contained,
-self-service E2E messenger (password credentials, handles, rotation,
-media, edit/delete, account deletion, cleanup, storage visibility).
-Edit/delete landed via [message-amendments / ADR-0014](../docs/decisions/adr-0014-message-amendments.md);
+The v0.1 baseline is done: a self-contained, self-service E2E messenger
+(password credentials, handles, rotation, media, edit/delete, account
+deletion, cleanup, storage visibility). The last pieces landed as
+message-amendments ([ADR-0014](../docs/decisions/adr-0014-message-amendments.md)),
 draft persistence (`useDraft`), the storage indicator (`GET /v1/store/usage`),
-and the data-retention cleanup (`cleanup` subcommand, ADR-0006) landed.
-
-1. **[account-deletion-ui](account-deletion-ui.md)** — Settings → Danger zone panel that wires `DELETE /v1/profile` (already implemented + tested server-side) to a user-facing flow. Password is re-derived against `profile.auth_public_key` as a cryptographic gate (same pattern as change-password), plus typed-handle confirmation + acknowledgement checkbox before the destructive call. Covers the 30-day handle cooldown surfacing and the multi-device-sign-out propagation. Closes the GDPR-baseline gap of "user cannot leave without operator help." Also carries the deferred account-deletion scenario e2e and the **I7** (deletion-races) invariant spec — both land with this flow.
+data-retention cleanup (`cleanup` subcommand, [ADR-0006](../docs/decisions/adr-0006-data-retention.md)),
+and account deletion (Settings → Danger zone, `DELETE /v1/profile`, invariant
+[I7](../docs/scenarios/invariants/i7-deletion-races.md)).
 
 ## MVP v0.2 — background delivery & reach
 
@@ -21,8 +20,8 @@ Scope is still firming up — see [mvp-v0.2.md](../docs/specs/mvp-v0.2.md).
 Push is the headline; the other two support and scale it. New items may
 be added here as v0.2 is iterated on.
 
-2. **[push-notifications](push-notifications.md)** — VAPID-keyed Web Push, subscription stored as a field on `users/{uid}/devices/{did}.json` (no new prefix), best-effort fan-out on `/v1/send`, custom service worker (VitePWA `injectManifest`) with `push` + `notificationclick` + `pushsubscriptionchange` handlers, local badge counter, settings toggle. See [ADR-0015](../docs/decisions/adr-0015-web-push.md). iOS users need [ios-install-hint](ios-install-hint.md) (task 3) landed first to receive push at all; everywhere else it ships independently.
+1. **[push-notifications](push-notifications.md)** — VAPID-keyed Web Push, subscription stored as a field on `users/{uid}/devices/{did}.json` (no new prefix), best-effort fan-out on `/v1/send`, custom service worker (VitePWA `injectManifest`) with `push` + `notificationclick` + `pushsubscriptionchange` handlers, local badge counter, settings toggle. See [ADR-0015](../docs/decisions/adr-0015-web-push.md). iOS users need [ios-install-hint](ios-install-hint.md) (task 2) landed first to receive push at all; everywhere else it ships independently.
 
-3. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform. Prerequisite for push notifications (task 2) to work on iOS.
+2. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform. Prerequisite for push notifications (task 1) to work on iOS.
 
-4. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+3. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.

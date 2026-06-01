@@ -1,9 +1,8 @@
 # I7 — Account deletion races terminate cleanly
 
 > Part of the [invariants index](./README.md). Priority **P2**.
-> Spec: _not yet implemented — folded into the
-> [account-deletion-ui](../../../tasks/account-deletion-ui.md) task, lands
-> with that flow._
+> Spec: [`web/e2e/invariants/account-deletion-races.spec.ts`](../../../web/e2e/invariants/account-deletion-races.spec.ts)
+> (landed with the account-deletion-ui flow).
 
 **Statement.** A `DELETE` initiated while a sync is in flight resolves
 deterministically: either the sync completes against pre-delete state and
@@ -20,8 +19,11 @@ crashing the client.
 
 - Device 2's in-flight sync either completes (returns 200) or fails with
   a recognised auth error. No uncaught exceptions, no infinite retry.
-- After deletion settles: device 2 receives 401 on the next request, is
-  logged out, IDB is cleared.
+- After deletion settles: device 2's next request hits the deleted device file
+  → `403 device_revoked` (the delete evicts the device-existence cache, so this
+  is prompt, not TTL-bounded) → device 2 is logged out and its IDB is wiped
+  (the `device_revoked` path runs the full logout, same as an explicit revoke),
+  then redirected to `/login`.
 - Remote: all `users/{uid}/`, `inbox/{uid}/`, `keys/{uid}/`, and
   `media/{uid}/` objects are absent. `handles/{handle}.json` is *not*
   absent — deletion replaces it with a 30-day cooldown tombstone
@@ -30,6 +32,8 @@ crashing the client.
   (object orphaned and cleaned up) or rejected — must be one of the two,
   never silently lost.
 
-**Permitted divergence.** Brief window where Remote is partially deleted
-while Local still reflects logged-in state on device 2. Window bounded by
-device 2's next request.
+**Permitted divergence.** Brief window where Remote is partially deleted while
+Local still reflects logged-in state on device 2 — bounded by device 2's next
+request. The freed handle's tombstone persists until the 30-day cooldown
+elapses or the cleanup routine sweeps it (resolve returns `410`, not `404`,
+throughout).

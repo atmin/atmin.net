@@ -484,7 +484,7 @@ func handleProfile(store Store) http.HandlerFunc {
 // handle remains reserved for 30 days. Acquires the per-handle mutex to
 // serialise against any in-flight registration of the same handle —
 // rare, but possible if the deletion races a takeover attempt.
-func handleDeleteProfile(store Store, handleMu *handleMutexMap) http.HandlerFunc {
+func handleDeleteProfile(store Store, handleMu *handleMutexMap, devCache *deviceCache) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		userID := userIDFrom(r.Context())
 
@@ -510,6 +510,15 @@ func handleDeleteProfile(store Store, handleMu *handleMutexMap) http.HandlerFunc
 			if err != nil {
 				internalError(w, "Failed to list objects")
 				return
+			}
+			// Evict the device-existence cache for every device we're about to
+			// delete, so other signed-in devices are cut off on their next
+			// request rather than lingering for up to the cache TTL. Same
+			// reason handleDeleteDevice/handleRevokeDevice invalidate.
+			for _, k := range keys {
+				if strings.HasPrefix(k, prefixUserDevices(userID)) {
+					devCache.invalidate(k)
+				}
 			}
 			if len(keys) > 0 {
 				if err := store.DeleteObjects(r.Context(), keys); err != nil {

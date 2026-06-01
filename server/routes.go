@@ -32,7 +32,7 @@ func newMux(store Store, cfg Config, hub *EventHub) http.Handler {
 		return requireAuth(h, store, cfg, devCache, profCache, false)
 	}
 	mux.HandleFunc("PUT /v1/profile", auth(handleProfile(store)))
-	mux.HandleFunc("DELETE /v1/profile", auth(handleDeleteProfile(store, handleMu)))
+	mux.HandleFunc("DELETE /v1/profile", auth(handleDeleteProfile(store, handleMu, devCache)))
 	mux.HandleFunc("DELETE /v1/devices", auth(handleDeleteDevice(store, devCache)))
 	mux.HandleFunc("POST /v1/devices/revoke", auth(handleRevokeDevice(store, cfg, devCache)))
 	mux.HandleFunc("POST /v1/rotate-keys", authNoKV(handleRotateKeys(store, cfg, profCache, rotationMu)))

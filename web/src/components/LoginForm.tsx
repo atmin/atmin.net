@@ -10,7 +10,7 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 
-export type LoginFormNotice = 'rotated_elsewhere' | null;
+export type LoginFormNotice = 'rotated_elsewhere' | 'account_deleted' | null;
 
 interface Props {
     loading: boolean;
@@ -26,6 +26,10 @@ const NOTICE_TEXT: Record<
 > = {
     rotated_elsewhere:
         'This account was rotated on another device. Please sign in with your new password.',
+    // A just-deleted account lands here when its background session 401s
+    // during teardown (the redirect from a protected route is /login). The
+    // one-shot confirmation rides the same notice channel.
+    account_deleted: '✓ Your account has been deleted.',
 };
 
 export default function LoginForm({
@@ -67,7 +71,11 @@ export default function LoginForm({
                         {notice && (
                             <p
                                 className="mb-4 text-sm text-muted-foreground"
-                                data-testid="login-notice"
+                                data-testid={
+                                    notice === 'account_deleted'
+                                        ? 'account-deleted-notice'
+                                        : 'login-notice'
+                                }
                             >
                                 {NOTICE_TEXT[notice]}
                             </p>
