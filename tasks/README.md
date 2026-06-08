@@ -25,3 +25,9 @@ be added here as v0.2 is iterated on.
 2. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform. Prerequisite for push notifications (task 1) to work on iOS.
 
 3. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+
+## Experiments
+
+Not milestone scope — exploratory work gated by its own exit criteria.
+
+- **[rust-backend-spike](rust-backend-spike.md)** — Phase 1 of the Rust backend port experiment ([ADR-0018](../docs/decisions/adr-0018-rust-backend-experiment.md), branch `rust-port-experiment`): prove the Rust crates reproduce the Go server's token/auth-proof/JCS/CBOR wire formats against Go + TS golden vectors before any handler work. Carries the whole-experiment phase checklist.
