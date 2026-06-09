@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/fxamacker/cbor/v2"
 	"github.com/gowebpki/jcs"
 )
 
@@ -23,10 +24,17 @@ import (
 //	cd server && GEN_VECTORS=1 go test -run TestGenerateInteropVectors
 
 type interopVectors struct {
-	Note       string          `json:"_note"`
-	Tokens     []tokenVector   `json:"tokens"`
-	AuthProof  authProofVector `json:"auth_proof"`
-	JCSBattery []jcsCase       `json:"jcs_battery"`
+	Note        string            `json:"_note"`
+	Tokens      []tokenVector     `json:"tokens"`
+	AuthProof   authProofVector   `json:"auth_proof"`
+	JCSBattery  []jcsCase         `json:"jcs_battery"`
+	CBORArchive cborArchiveVector `json:"cbor_archive"`
+}
+
+type cborArchiveVector struct {
+	BlobHex string   `json:"blob_hex"` // cbor.Marshal of the []any archive
+	MsgIDs  []string `json:"msg_ids"`  // msg_id of each entry that has one, in order
+	Count   int      `json:"count"`    // total entries
 }
 
 type tokenVector struct {
@@ -136,6 +144,39 @@ func TestGenerateInteropVectors(t *testing.T) {
 			t.Fatalf("jcs %s: %v", c.name, err)
 		}
 		v.JCSBattery = append(v.JCSBattery, jcsCase{Name: c.name, InputJSON: c.input, CanonicalHex: hex.EncodeToString(canon)})
+	}
+
+	// --- CBOR archive: mirror compaction exactly (live JSON -> any -> cbor array).
+	// Note the consequences this pins for the Rust reader: JSON numbers decode to
+	// float64 and so marshal as CBOR doubles (`v` below), and map key order follows
+	// Go's randomized iteration (archives are not canonically encoded).
+	liveJSON := []string{
+		`{"to_user":"u-bob","from_user":"u-alice","from_device":"d-1","msg_id":"01HZMSGAAAA0000000000000001","type":"text","v":1,"ciphertext":"Q0lQSEVS"}`,
+		`{"v":1,"iv":"aXYtYnl0ZXM","ciphertext":"a2V5LWN0","session_id":"sess-1","msg_id":"01HZMSGBBBB0000000000000002"}`,
+		`{"v":1,"kind":"backup","data":"YmFja3Vw"}`, // no msg_id (key-backup style)
+	}
+	archiveObjs := make([]any, 0, len(liveJSON))
+	var msgIDs []string
+	for _, j := range liveJSON {
+		var obj any
+		if err := json.Unmarshal([]byte(j), &obj); err != nil {
+			t.Fatal(err)
+		}
+		archiveObjs = append(archiveObjs, obj)
+		if m, ok := obj.(map[string]any); ok {
+			if id, ok := m["msg_id"].(string); ok {
+				msgIDs = append(msgIDs, id)
+			}
+		}
+	}
+	blob, err := cbor.Marshal(archiveObjs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.CBORArchive = cborArchiveVector{
+		BlobHex: hex.EncodeToString(blob),
+		MsgIDs:  msgIDs,
+		Count:   len(archiveObjs),
 	}
 
 	out, err := json.MarshalIndent(v, "", "  ")

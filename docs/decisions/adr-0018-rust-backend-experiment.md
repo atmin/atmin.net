@@ -183,6 +183,17 @@ all of them.
     inputs only). Promote it to a normative spec line only if the port is adopted, or if
     a future signed field could carry numbers — not before.
 
+- **CBOR archives are non-canonical and store JSON numbers as doubles.** Compaction
+  `json.Unmarshal`s live objects into `any` (numbers → `float64`) before `cbor.Marshal`,
+  so numeric fields like `v` are CBOR doubles, and map-key order follows Go's randomized
+  iteration — archives are *not* canonically encoded. `ciborium` decodes Go/`fxamacker`
+  archives correctly (entries, text fields, `msg_id` order) and round-trips them
+  semantically; byte-identity is neither expected nor required. The Go `map[any]any`
+  vs `map[string]any` split is a Go-internal artifact with no Rust analogue.
+  - *Impact: none.* A Rust reader must simply expect floats for numeric fields and not
+    assume canonical encoding — both already true of `ciborium`. Verified by
+    `cbor_decodes_go_archive` / `cbor_roundtrip_stable`.
+
 ## Alternatives considered
 
 - **Keep Go (status quo).** Zero risk; foregoes the spec audit and the TS+Rust consolidation.

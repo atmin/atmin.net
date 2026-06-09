@@ -5,8 +5,9 @@
 //! both `GEN_VECTORS=1` — and embedded here at compile time. See
 //! `tasks/rust-backend-spike.md` (ADR-0018, phase 1).
 
-use atmin_server::{authproof, token};
+use atmin_server::{authproof, cbor, token};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use ciborium::value::Value;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -14,6 +15,14 @@ struct Vectors {
     tokens: Vec<TokenVec>,
     auth_proof: AuthProofVec,
     jcs_battery: Vec<JcsCase>,
+    cbor_archive: CborArchiveVec,
+}
+
+#[derive(Deserialize)]
+struct CborArchiveVec {
+    blob_hex: String,
+    msg_ids: Vec<String>,
+    count: usize,
 }
 
 #[derive(Deserialize)]
@@ -245,4 +254,42 @@ fn auth_proof_rejects_tampered_payload() {
         authproof::verify(&pubkey, tampered.as_bytes(), &sig),
         Err(authproof::AuthProofError::VerifyFailed),
     );
+}
+
+#[test]
+fn cbor_decodes_go_archive() {
+    let a = vectors().cbor_archive;
+    let blob = hex::decode(&a.blob_hex).unwrap();
+
+    let entries = cbor::decode_archive(&blob).expect("decode Go-marshaled archive");
+    assert_eq!(entries.len(), a.count);
+
+    // msg_ids decode in order; the entry without one is skipped (as dedup does).
+    let ids: Vec<&str> = entries
+        .iter()
+        .filter_map(|e| cbor::get_text(e, "msg_id"))
+        .collect();
+    assert_eq!(ids, a.msg_ids);
+
+    // A text field round-trips...
+    assert_eq!(cbor::get_text(&entries[0], "to_user"), Some("u-bob"));
+
+    // ...and the finding holds: JSON numbers are stored as CBOR doubles.
+    assert!(
+        matches!(cbor::get(&entries[0], "v"), Some(Value::Float(_))),
+        "expected `v` to be a CBOR double (compaction: json.Unmarshal -> float64 -> cbor)"
+    );
+}
+
+#[test]
+fn cbor_roundtrip_stable() {
+    let blob = hex::decode(&vectors().cbor_archive.blob_hex).unwrap();
+    let entries = cbor::decode_archive(&blob).unwrap();
+
+    let reencoded = cbor::encode_archive(&entries).unwrap();
+    let again = cbor::decode_archive(&reencoded).unwrap();
+
+    // Semantic stability. Byte-identity is *not* asserted: archives aren't
+    // canonically encoded (Go map iteration order), so re-encoded bytes may differ.
+    assert_eq!(entries, again);
 }
