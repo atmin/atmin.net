@@ -170,7 +170,10 @@ all of them.
   `1e-7`, `-0`→`0`, `1.0`→`1`.
   - *Impact on the current protocol: none.* Signed payloads (auth proofs, rotation
     continuity) carry only strings and a small-integer `key_version`, well within the
-    JS-safe range. The divergence is unreachable by current inputs.
+    JS-safe range. The divergence is unreachable by current inputs. Verified: the
+    `go_and_ts_agree` interop test shows the production signer (`canonicalize`) and the
+    Go verifier (`gowebpki/jcs`) agree on *every* battery case — so `serde_jcs` is the
+    sole outlier, and only for inputs the protocol never produces.
   - *Recommended constraint:* any JSON value signed over its JCS bytes should be
     restricted to strings, booleans, null, and integers in ±(2⁵³−1) — no
     floating-point, no large integers. Pinned by `jcs_known_number_divergence_pinned`
