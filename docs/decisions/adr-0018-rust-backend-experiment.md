@@ -159,6 +159,27 @@ all of them.
 
 ---
 
+## Findings (phase 1)
+
+- **JCS number canonicalization diverges beyond 2⁵³.** `serde_jcs` preserves JSON
+  integers larger than 2⁵³ exactly (`10000000000000001`), whereas `gowebpki/jcs` —
+  and the TS `canonicalize` signer, since JS numbers are IEEE-754 doubles — round to
+  the nearest double (`10000000000000000`), as RFC 8785 requires. Every other tested
+  form agrees byte-for-byte: full UTF-8 incl. 4-byte/astral (`😀 𝄞`), Cyrillic, Kanji,
+  control-char short escapes, `/`, and the float/exponent forms `1e21`→`1e+21`,
+  `1e-7`, `-0`→`0`, `1.0`→`1`.
+  - *Impact on the current protocol: none.* Signed payloads (auth proofs, rotation
+    continuity) carry only strings and a small-integer `key_version`, well within the
+    JS-safe range. The divergence is unreachable by current inputs.
+  - *Recommended constraint:* any JSON value signed over its JCS bytes should be
+    restricted to strings, booleans, null, and integers in ±(2⁵³−1) — no
+    floating-point, no large integers. Pinned by `jcs_known_number_divergence_pinned`
+    in `server-rs/tests/interop.rs`, which flips if `serde_jcs` ever changes.
+  - *Placement (decided):* this constraint lives **only here, in ADR-0018** — not in
+    the spec. `mvp-v0.1` is frozen (ADR-0017) and the protocol is not wrong today (safe
+    inputs only). Promote it to a normative spec line only if the port is adopted, or if
+    a future signed field could carry numbers — not before.
+
 ## Alternatives considered
 
 - **Keep Go (status quo).** Zero risk; foregoes the spec audit and the TS+Rust consolidation.

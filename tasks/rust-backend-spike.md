@@ -57,18 +57,19 @@ reasons, so compare canonical bytes directly.
 - [x] `server-rs/tests/vectors/` for golden fixtures (committed regression guards); `/target` gitignored.
 
 ### 1. Golden-vector generation (the oracle)
-- [ ] Go emitter: a `go test`-guarded helper (or `go run` tool) in `server/` that writes `vectors.json` — tokens for known `(secret,uid,did,kv)`, an auth-proof `{pubkey, payload, signature, jcs_canonical_bytes(hex)}` signed with a fixed-seed key, and a CBOR archive blob (hex) + its decoded values. Fixed seeds only — no `time.Now()` in committed vectors (use a fixed timestamp).
-- [ ] TS emitter: extend the `jcs-rotation-vector` fixture pattern to emit `canonicalize()` output (hex) for the **same** payload battery, so Rust is checked against the production signer too.
-- [ ] Payload battery for JCS must include the adversarial cases: unicode/escapes, integer vs float, key-ordering, nested objects, empty/absent `key_version`.
+- [x] Go emitter: `cd server && GEN_VECTORS=1 go test -run TestGenerateInteropVectors` ([interop_vectors_test.go](../server/interop_vectors_test.go)) writes [go-vectors.json](../server-rs/tests/vectors/go-vectors.json) — tokens, an auth-proof (`pubkey`, `payload`, `signature`, `jcs_canonical` hex), JCS battery. Fixed seed/timestamp; gated so `make test` skips it. **CBOR vectors deferred to step 4.**
+- [ ] TS emitter: extend the `jcs-rotation-vector` fixture pattern to emit `canonicalize()` output (hex) for the **same** payload battery, so Rust is checked against the production signer too. _Still pending — the Go baseline is green; TS is the production-signer confirmation._
+- [x] Payload battery, two passes. **Pass 1** (broader UTF-8 + escaping — Cyrillic, Kanji, 4-byte emoji/astral, `\b\f\n\r\t`, `/`): all match Go. **Pass 2** (number finding-hunt): `1e21`/`1e-7`/`-0`/trailing-zeros all match; **integers > 2⁵³ diverge** — see Findings below.
 
 ### 2. `token` module
 - [x] `generate(secret, uid, did, kv) -> String`; `parse(secret, token) -> Result<(uid,did,kv)>`. ([token.rs](../server-rs/src/token.rs))
 - [x] Round-trip + rejection tests pass (3-segment, tampered-sig, bad-kv, wrong-secret, garbage encoding). _Rust-internal._
-- [ ] Assert **byte-identical to Go token vectors** — blocked on step 1 emitter.
+- [x] Assert **byte-identical to Go token vectors** — green ([interop.rs](../server-rs/tests/interop.rs), `token_byte_identity_with_go`): Rust generates the same token bytes Go does, and parses/verifies Go-produced tokens.
 
-### 3. `authproof` module
-- [ ] `canonicalize(payload) -> Vec<u8>` via `serde_jcs`; assert **equal to Go and TS** canonical-byte vectors across the full battery.
-- [ ] `verify(pubkey, proof)` via `ed25519-dalek`; verify Go-signed and TS-signed proofs; reject tampered payload, expired (>5 min), `key_version < 1`.
+### 3. `authproof` module ([authproof.rs](../server-rs/src/authproof.rs))
+- [x] `canonicalize(payload) -> Vec<u8>` via `serde_jcs`; **equal to Go** across the full battery (`jcs_battery_matches_go`). ⭐ The gate cleared against Go. _TS half pending (step 1 TS emitter)._
+- [x] `verify(pubkey, payload, sig)` via `ed25519-dalek`; verifies the Go-signed proof and rejects a tampered payload (`auth_proof_*`).
+- [ ] Freshness (>5 min) + `key_version < 1` checks — **deferred to phase 3** (handler concern; `verify` here is signature-only by design).
 
 ### 4. `cbor` module
 - [ ] Decode the Go-marshaled archive blob via `ciborium`; assert field values + `msg_id` dedup semantics.
@@ -100,3 +101,5 @@ Append one entry per step with date + outcome. Durable memory for the experiment
 
 - _2026-06-08_ — Task created. Spike not yet started. Next: step 0 scaffold.
 - _2026-06-08_ — Step 0 done: `server-rs/` standalone lib crate (edition 2021), all deps resolve together (`serde_jcs 0.1` + `ed25519-dalek 2` + `ciborium 0.2` coexist — a real de-risk), `cargo build` warning-clean. `token` module implemented and its Rust-internal tests pass (7 green): round-trip, kv-clamp-to-1, wrong-secret, 3-segment reject, non-numeric-kv reject, tampered-payload reject, garbage-encoding reject. Mirrors `server/auth.go` incl. signing over the verbatim kv segment. **Next: step 1** — Go vector emitter (fixed seeds/timestamp), then assert token byte-identity + start `authproof` (the JCS battery is the gate).
+- _2026-06-09_ — **JCS finding (the point of pass 2):** `serde_jcs` keeps integers > 2⁵³ exact; Go/RFC-8785/JS-TS round to nearest f64 (`...0001` vs `...0000`). Every other case (4-byte/astral UTF-8, Cyrillic, Kanji, control escapes, `/`, `1e21`/`1e-7`/`-0`/trailing-zeros) matches Go. No impact on the protocol (signed payloads = strings + small-int `key_version`). Pinned as a regression guard (`jcs_known_number_divergence_pinned`); recommended constraint recorded in ADR-0018 Findings, which is its **only** home (decided: not promoted to the frozen spec). Suite green: 7 unit + 5 interop.
+- _2026-06-09_ — Step 1 (Go side) + steps 2–3 (vs Go) done. Go emitter writes `go-vectors.json`; Rust `tests/interop.rs` is green (4 tests). **⭐ Headline finding: the JCS gate cleared against Go** — `serde_jcs` reproduces `gowebpki/jcs` byte-for-byte across the whole battery (key-ordering, em-dash/accented UTF-8, int/neg/float/large-int, nesting, absent key_version). Token generation is byte-identical to Go; a Go-signed Ed25519 auth-proof verifies in Rust; tampered payload rejected. `authproof::verify` is signature-only (freshness/kv deferred to phase 3). **Remaining for full step-1 confidence: (a) TS emitter** — confirm `serde_jcs` == the production signer (`canonicalize` npm), not just Go; **(b) CBOR (step 4)** — its own pass (fxamacker↔ciborium map ordering); **(c) JCS number stress cases** (1e21, -0). None blocking; all logged above.
