@@ -52,9 +52,9 @@ reasons, so compare canonical bytes directly.
 ## Change (spike sub-steps)
 
 ### 0. Scaffold
-- [ ] Create `server-rs/` crate (the spike grows into the backend; confirm location).
-- [ ] Add deps: `base64`, `hmac`, `sha2`, `ed25519-dalek`, `serde`, `serde_json`, `serde_jcs`, `ciborium`. (No Rocket yet.)
-- [ ] `server-rs/tests/vectors/` for golden fixtures; `.gitignore` nothing (vectors are committed regression guards).
+- [x] Create `server-rs/` crate (standalone lib, edition 2021; grows into the backend).
+- [x] Add deps: `base64`, `hmac`, `sha2`, `ed25519-dalek`, `serde`, `serde_json`, `serde_jcs`, `ciborium`. (No Rocket yet.) **Full tree resolves together** — confirmed.
+- [x] `server-rs/tests/vectors/` for golden fixtures (committed regression guards); `/target` gitignored.
 
 ### 1. Golden-vector generation (the oracle)
 - [ ] Go emitter: a `go test`-guarded helper (or `go run` tool) in `server/` that writes `vectors.json` — tokens for known `(secret,uid,did,kv)`, an auth-proof `{pubkey, payload, signature, jcs_canonical_bytes(hex)}` signed with a fixed-seed key, and a CBOR archive blob (hex) + its decoded values. Fixed seeds only — no `time.Now()` in committed vectors (use a fixed timestamp).
@@ -62,8 +62,9 @@ reasons, so compare canonical bytes directly.
 - [ ] Payload battery for JCS must include the adversarial cases: unicode/escapes, integer vs float, key-ordering, nested objects, empty/absent `key_version`.
 
 ### 2. `token` module
-- [ ] `generate(secret, uid, did, kv) -> String`; `parse(secret, token) -> Result<(uid,did,kv)>`.
-- [ ] Assert byte-identical to Go token vectors; round-trip; reject 3-segment + tampered-sig + bad-kv.
+- [x] `generate(secret, uid, did, kv) -> String`; `parse(secret, token) -> Result<(uid,did,kv)>`. ([token.rs](../server-rs/src/token.rs))
+- [x] Round-trip + rejection tests pass (3-segment, tampered-sig, bad-kv, wrong-secret, garbage encoding). _Rust-internal._
+- [ ] Assert **byte-identical to Go token vectors** — blocked on step 1 emitter.
 
 ### 3. `authproof` module
 - [ ] `canonicalize(payload) -> Vec<u8>` via `serde_jcs`; assert **equal to Go and TS** canonical-byte vectors across the full battery.
@@ -98,3 +99,4 @@ reasons, so compare canonical bytes directly.
 Append one entry per step with date + outcome. Durable memory for the experiment.
 
 - _2026-06-08_ — Task created. Spike not yet started. Next: step 0 scaffold.
+- _2026-06-08_ — Step 0 done: `server-rs/` standalone lib crate (edition 2021), all deps resolve together (`serde_jcs 0.1` + `ed25519-dalek 2` + `ciborium 0.2` coexist — a real de-risk), `cargo build` warning-clean. `token` module implemented and its Rust-internal tests pass (7 green): round-trip, kv-clamp-to-1, wrong-secret, 3-segment reject, non-numeric-kv reject, tampered-payload reject, garbage-encoding reject. Mirrors `server/auth.go` incl. signing over the verbatim kv segment. **Next: step 1** — Go vector emitter (fixed seeds/timestamp), then assert token byte-identity + start `authproof` (the JCS battery is the gate).
