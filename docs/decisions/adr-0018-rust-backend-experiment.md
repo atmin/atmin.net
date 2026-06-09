@@ -1,7 +1,7 @@
 # ADR-0018 — Rust backend port (experiment)
 
 **Date:** 2026-06-08
-**Status:** Draft — experiment on branch `rust-port-experiment`. Not a commitment to replace the Go server.
+**Status:** Draft — experiment on branch `rust-port-experiment`. Not a commitment to replace the Go server. Phase 1 (interop spike) complete — see Findings.
 **Relates to:** [vision.md](../vision.md) (stateless server), [ADR-0001](./adr-0001-sync-first-s3-mailbox.md) (stateless S3 mailbox), [ADR-0009](./adr-0009-native-wrapper.md) (spike-on-a-branch precedent)
 
 ---
@@ -160,6 +160,16 @@ all of them.
 ---
 
 ## Findings (phase 1)
+
+**Outcome — the interop risk that gated this experiment is retired.** All three
+wire formats interoperate with the Go server: device tokens are byte-identical and
+parse/verify Go tokens; a Go-signed Ed25519 auth proof verifies in Rust, with JCS
+canonical bytes matching *both* `gowebpki/jcs` and the TS production signer across a
+broad battery (full UTF-8, control escapes, slash, exponents); and `ciborium` decodes
+and round-trips Go/`fxamacker` CBOR archives. Exactly one divergence surfaced — and
+it is contained and unreachable by the protocol. The two findings below record it and
+the CBOR encoding properties a Rust reader must respect. Verified by the 7 unit + 10
+interop tests in `server-rs`. Phase 2 (type skeleton) is unblocked.
 
 - **JCS number canonicalization diverges beyond 2⁵³.** `serde_jcs` preserves JSON
   integers larger than 2⁵³ exactly (`10000000000000001`), whereas `gowebpki/jcs` —

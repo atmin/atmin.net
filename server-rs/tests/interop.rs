@@ -4,6 +4,10 @@
 //! `server/interop_vectors_test.go` and `web/src/lib/jcs-interop-vectors.gen.test.ts`,
 //! both `GEN_VECTORS=1` — and embedded here at compile time. See
 //! `tasks/rust-backend-spike.md` (ADR-0018, phase 1).
+//!
+//! These vectors are an *independent oracle* — only ever regenerate them from the
+//! Go/TS emitters, never from this crate, or the conformance check degrades into a
+//! circular self-snapshot (see `tests/vectors/README.md`).
 
 use atmin_server::{authproof, cbor, token};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
