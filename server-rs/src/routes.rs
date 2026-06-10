@@ -9,6 +9,7 @@ use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::events::{update_last_active, EventHub};
 use crate::guard::AuthedUser;
+use crate::keyed_mutex::KeyedMutex;
 use crate::media_quota::{
     InProcessMediaQuota, Reservation, SharedQuota, MAX_MEDIA_BYTES, USER_MEDIA_BLOB_CAP,
     USER_MEDIA_QUOTA_BYTES,
@@ -45,6 +46,16 @@ const HANDLE_COOLDOWN_DAYS: i64 = 30;
 /// Default page size for `GET /v1/store/list` (mirrors Go's `limit := 50`).
 const STORE_LIST_LIMIT: usize = 50;
 
+/// How long `register` waits for the per-handle claim lock before giving up with
+/// `registration_unavailable` (mirrors Go's 500ms).
+const HANDLE_CLAIM_TIMEOUT: StdDuration = StdDuration::from_millis(500);
+
+/// Per-handle claim lock (keyed by handle), serializing `register`'s GET-then-PUT
+/// so two concurrent registrations of the same handle can't both see it free. A
+/// newtype because Rocket manages state by type and a second `KeyedMutex` (the
+/// rotation lock) is coming.
+struct HandleClaimMutex(KeyedMutex);
+
 /// Build the Rocket app over a given store + config. Tests pass a `MemStore`;
 /// production will pass an S3-backed store.
 pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
@@ -58,6 +69,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
         .manage(DeviceCache::new())
         .manage(ProfileCache::new())
         .manage(EventHub::new())
+        .manage(HandleClaimMutex(KeyedMutex::new()))
         .mount(
             "/",
             routes![
@@ -325,6 +337,7 @@ async fn register(
     body: &str,
     store: &State<SharedStore>,
     config: &State<ServerConfig>,
+    handle_mu: &State<HandleClaimMutex>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     // Manual parse so malformed *and* missing-field bodies both yield 400 (matching Go).
     let req: RegisterRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
@@ -350,11 +363,17 @@ async fn register(
         return Err(ApiError::BadRequest);
     }
 
-    // TODO(phase 5): wrap the GET-then-PUT below in the per-handle claim mutex
-    // (ADR-0013). Without it, two concurrent registrations of the SAME handle can
-    // both observe 404 and both PUT (last-writer-wins). Deferred with the other
-    // in-process concurrency primitives (keyed mutexes, SSE hub); `registration_
-    // unavailable` (the mutex-timeout outcome) therefore can't occur yet.
+    // Claim the handle under the per-handle lock (ADR-0013). Held to the end of
+    // the handler (the RAII guard drops on return — Go's `defer release()`), so the
+    // GET-then-PUT and the projection/profile/device writes are all serialized
+    // against a concurrent registration of the same handle. Timeout → 503
+    // registration_unavailable.
+    let _claim = handle_mu
+        .0
+        .acquire(handle.as_str(), HANDLE_CLAIM_TIMEOUT)
+        .await
+        .map_err(|_| ApiError::RegistrationUnavailable)?;
+
     let handle_key = key_handle(handle.as_str());
     match store.get_object(&handle_key).await {
         Err(StoreError::NotFound) => {} // free → proceed
@@ -1460,6 +1479,29 @@ mod tests {
             serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
         assert_eq!(body["error"], "handle_in_cooldown");
         assert_eq!(body["available_at"], "2099-01-31T00:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn register_handle_claim_contention_is_503() {
+        let client = client_with(MemStore::new()).await;
+        // Hold the claim lock for "frank" externally; the handler's 500ms acquire
+        // then times out → registration_unavailable.
+        let mu = client
+            .rocket()
+            .state::<HandleClaimMutex>()
+            .unwrap()
+            .0
+            .clone();
+        let _held = mu
+            .acquire("frank", StdDuration::from_secs(5))
+            .await
+            .unwrap();
+
+        let resp = register(&client, register_body("frank")).await;
+        assert_eq!(resp.status(), Status::ServiceUnavailable);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "registration_unavailable");
     }
 
     #[tokio::test]
