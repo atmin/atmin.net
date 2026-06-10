@@ -7,6 +7,7 @@
 //! See `tasks/rust-backend-spike.md`.
 
 pub mod authproof;
+pub mod cache;
 pub mod cbor;
 pub mod config;
 pub mod error;

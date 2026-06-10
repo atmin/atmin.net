@@ -3,6 +3,7 @@
 //! S3-backed store, `#[launch]` main) lands in phase 4.
 
 use crate::authproof::{verify_proof, AuthProof};
+use crate::cache::{DeviceCache, ProfileCache};
 use crate::cbor;
 use crate::config::ServerConfig;
 use crate::error::ApiError;
@@ -49,6 +50,8 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
         .manage(store)
         .manage(config)
         .manage(quota)
+        .manage(DeviceCache::new())
+        .manage(ProfileCache::new())
         .mount(
             "/",
             routes![
@@ -957,6 +960,85 @@ mod tests {
             ])
         );
         assert_eq!(body["next_cursor"], "");
+    }
+
+    // --- guard TTL caches (phase 5b): prove they short-circuit S3 ---
+
+    #[tokio::test]
+    async fn device_cache_skips_revocation_within_ttl() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let uri = format!("/v1/store/list?prefix=inbox/{UID}/live/");
+
+        // First authed request succeeds and caches the device's existence.
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // Revoke the device by deleting its file. Without the cache the next
+        // request would 403; within the 30s TTL the HeadObject is skipped, so it
+        // still succeeds — exactly Go's window (the delete handler invalidates,
+        // wired in 5d).
+        client
+            .rocket()
+            .state::<SharedStore>()
+            .unwrap()
+            .delete_object(&key_device(UID, DID))
+            .await
+            .unwrap();
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn profile_cache_skips_kv_check_within_ttl() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await; // token + profile at kv=1
+        let client = client_with(store).await;
+        let uri = format!("/v1/store/list?prefix=inbox/{UID}/live/");
+
+        // First request caches current kv=1.
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // Bump the stored profile to kv=2. Without the cache the kv=1 token would
+        // now be 401 key_version_stale; within the 5s TTL the cached kv=1 still
+        // matches, so it succeeds until invalidation/expiry (rotate-keys
+        // invalidates, wired in 5d).
+        let profile = Profile {
+            user_id: UID.into(),
+            key_version: 2,
+            ..Default::default()
+        };
+        client
+            .rocket()
+            .state::<SharedStore>()
+            .unwrap()
+            .put_object(
+                &key_profile(UID),
+                &serde_json::to_vec(&profile).unwrap(),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
     }
 
     // --- store/object (authed single-key read) ---

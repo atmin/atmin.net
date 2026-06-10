@@ -9,9 +9,13 @@
 //!   3. device-revocation: the device file must still exist;
 //!   4. `key_version`: the token's kv must equal the profile's current kv (ADR-0012).
 //!
-//! The in-process TTL caches Go uses (`deviceCache`/`profileCache`) are a perf
-//! optimization, deferred to phase 5 — here every request hits the store.
+//! Two in-process TTL caches (`DeviceCache`/`ProfileCache`, mirroring Go's
+//! `deviceCache`/`profileCache`) keep the hot path off S3: a recently-seen device
+//! skips the `HeadObject`, a recently-read profile skips the kv `GET`. Both
+//! self-heal within their TTL and are invalidated explicitly by the mutating
+//! handlers (device delete/revoke, rotate-keys).
 
+use crate::cache::{DeviceCache, ProfileCache};
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::model::{DeviceId, KeyVersion, UserId};
@@ -44,6 +48,12 @@ impl<'r> FromRequest<'r> for AuthedUser {
         let Some(store) = req.rocket().state::<SharedStore>() else {
             return deny(ApiError::Internal("store missing".into()));
         };
+        let Some(device_cache) = req.rocket().state::<DeviceCache>() else {
+            return deny(ApiError::Internal("device cache missing".into()));
+        };
+        let Some(profile_cache) = req.rocket().state::<ProfileCache>() else {
+            return deny(ApiError::Internal("profile cache missing".into()));
+        };
 
         // Token: `Authorization: Bearer …`, falling back to `?token=`.
         let token = req
@@ -64,31 +74,40 @@ impl<'r> FromRequest<'r> for AuthedUser {
             return deny(ApiError::Unauthorized);
         };
 
-        // Device revocation: the device file must still exist.
-        match store
-            .head_object(&key_device(user_id.as_str(), device_id.as_str()))
-            .await
-        {
-            Ok(()) => {}
-            Err(StoreError::NotFound) => return deny(ApiError::DeviceRevoked),
-            Err(_) => return deny(ApiError::Internal("device check failed".into())),
+        // Device revocation: the device file must still exist. Skip the HeadObject
+        // when the device was seen within the cache TTL.
+        let device_key = key_device(user_id.as_str(), device_id.as_str());
+        if !device_cache.valid(&device_key) {
+            match store.head_object(&device_key).await {
+                Ok(()) => device_cache.set(&device_key),
+                Err(StoreError::NotFound) => return deny(ApiError::DeviceRevoked),
+                Err(_) => return deny(ApiError::Internal("device check failed".into())),
+            }
         }
 
         // key_version check (ADR-0012): a token bound to a superseded kv means
-        // another device rotated; the client must re-login at the current kv.
-        let profile_bytes = match store.get_object(&key_profile(user_id.as_str())).await {
-            Ok(b) => b,
-            Err(StoreError::NotFound) => return deny(ApiError::Unauthorized),
-            Err(_) => return deny(ApiError::Internal("profile load failed".into())),
-        };
-        let Ok(profile) = serde_json::from_slice::<Profile>(&profile_bytes) else {
-            return deny(ApiError::Internal("profile parse failed".into()));
-        };
-        // Defensive: every profile now carries key_version >= 1; treat 0 as 1.
-        let current = if profile.key_version == 0 {
-            1
-        } else {
-            profile.key_version
+        // another device rotated; the client must re-login at the current kv. The
+        // profile cache short-circuits the S3 GET on a fresh hit.
+        let current = match profile_cache.get(user_id.as_str()) {
+            Some(kv) => kv,
+            None => {
+                let profile_bytes = match store.get_object(&key_profile(user_id.as_str())).await {
+                    Ok(b) => b,
+                    Err(StoreError::NotFound) => return deny(ApiError::Unauthorized),
+                    Err(_) => return deny(ApiError::Internal("profile load failed".into())),
+                };
+                let Ok(profile) = serde_json::from_slice::<Profile>(&profile_bytes) else {
+                    return deny(ApiError::Internal("profile parse failed".into()));
+                };
+                // Defensive: every profile now carries key_version >= 1; treat 0 as 1.
+                let kv = if profile.key_version == 0 {
+                    1
+                } else {
+                    profile.key_version
+                };
+                profile_cache.set(user_id.as_str(), kv);
+                kv
+            }
         };
         if token_kv.get() != current {
             return deny(ApiError::KeyVersionStale {
