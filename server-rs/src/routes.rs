@@ -5,13 +5,16 @@
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::guard::AuthedUser;
-use crate::paths::{authorize_prefix, key_handle};
+use crate::paths::{authorize_key, authorize_prefix, key_handle};
 use crate::profile::PublicHandleData;
 use crate::store::SharedStore;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use rocket::http::ContentType;
+use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::Serialize;
-use rocket::{get, routes, Build, Rocket, State};
+use rocket::{get, routes, Build, Request, Response, Rocket, State};
+use std::io::Cursor;
 
 /// Post-deletion handle reservation window (ADR-0013).
 const HANDLE_COOLDOWN_DAYS: i64 = 30;
@@ -25,7 +28,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
     rocket::build()
         .manage(store)
         .manage(config)
-        .mount("/", routes![healthz, resolve, store_list])
+        .mount("/", routes![healthz, resolve, store_list, store_object])
 }
 
 #[get("/healthz")]
@@ -97,6 +100,46 @@ async fn store_list(
         keys: page.keys,
         next_cursor: page.next_cursor.unwrap_or_default(),
     }))
+}
+
+/// Raw-bytes response for a stored object (octet-stream). Media blobs carry a
+/// long immutable `Cache-Control` — the bytes are GCM ciphertext, so even shared
+/// caching of an `Authorization`-bearing request is safe (RFC 9111 §3.5).
+struct ObjectResponse {
+    data: Vec<u8>,
+    cacheable: bool,
+}
+
+impl<'r> Responder<'r, 'static> for ObjectResponse {
+    fn respond_to(self, _: &'r Request<'_>) -> rocket::response::Result<'static> {
+        let mut builder = Response::build();
+        builder.header(ContentType::Binary);
+        if self.cacheable {
+            builder.raw_header("Cache-Control", "public, immutable, max-age=31536000");
+        }
+        builder.sized_body(self.data.len(), Cursor::new(self.data));
+        builder.ok()
+    }
+}
+
+/// `GET /v1/store/object` — authed fetch of a single object the caller may read.
+/// Mirrors `handleStoreObject`.
+#[get("/v1/store/object?<key>")]
+async fn store_object(
+    auth: Result<AuthedUser, ApiError>,
+    key: Option<&str>,
+    store: &State<SharedStore>,
+) -> Result<ObjectResponse, ApiError> {
+    let user = auth?;
+    let key = key.filter(|k| !k.is_empty()).ok_or(ApiError::BadRequest)?;
+    if !authorize_key(user.user_id.as_str(), key) {
+        return Err(ApiError::Forbidden);
+    }
+    let data = store.get_object(key).await?; // NotFound → 404 via From<StoreError>
+    Ok(ObjectResponse {
+        data,
+        cacheable: key.starts_with("media/"),
+    })
 }
 
 #[cfg(test)]
@@ -345,5 +388,98 @@ mod tests {
             ])
         );
         assert_eq!(body["next_cursor"], "");
+    }
+
+    // --- store/object (authed single-key read) ---
+
+    #[tokio::test]
+    async fn store_object_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let uri = format!("/v1/store/object?key=inbox/{UID}/live/m1");
+        let resp = client.get(uri.as_str()).dispatch().await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn store_object_returns_owned_bytes() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        store
+            .put_object(
+                &format!("inbox/{UID}/live/m1"),
+                b"ciphertext",
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+
+        let client = client_with(store).await;
+        let uri = format!("/v1/store/object?key=inbox/{UID}/live/m1");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(resp.content_type(), Some(ContentType::Binary));
+        // Non-media: no caching directive.
+        assert_eq!(resp.headers().get_one("Cache-Control"), None);
+        assert_eq!(resp.into_bytes().await.unwrap(), b"ciphertext".to_vec());
+    }
+
+    #[tokio::test]
+    async fn store_object_media_is_readable_by_any_user_and_cacheable() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await; // authed as UID
+                                                   // A media blob under a *different* user — capability-protected, any
+                                                   // authenticated caller may GET it.
+        store
+            .put_object(
+                "media/01BX5ZZKBKACTAV9WEVGEMMVRZ/01MEDIA",
+                b"blob",
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+
+        let client = client_with(store).await;
+        let resp = client
+            .get("/v1/store/object?key=media/01BX5ZZKBKACTAV9WEVGEMMVRZ/01MEDIA")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(
+            resp.headers().get_one("Cache-Control"),
+            Some("public, immutable, max-age=31536000")
+        );
+        assert_eq!(resp.into_bytes().await.unwrap(), b"blob".to_vec());
+    }
+
+    #[tokio::test]
+    async fn store_object_other_users_data_is_403() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .get("/v1/store/object?key=inbox/01BX5ZZKBKACTAV9WEVGEMMVRZ/live/m")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn store_object_missing_is_404() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let uri = format!("/v1/store/object?key=inbox/{UID}/live/nope");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::NotFound);
     }
 }
