@@ -200,9 +200,17 @@ interop tests in `server-rs`. Phase 2 (type skeleton) is unblocked.
   archives correctly (entries, text fields, `msg_id` order) and round-trips them
   semantically; byte-identity is neither expected nor required. The Go `map[any]any`
   vs `map[string]any` split is a Go-internal artifact with no Rust analogue.
-  - *Impact: none.* A Rust reader must simply expect floats for numeric fields and not
-    assume canonical encoding — both already true of `ciborium`. Verified by
+  - *Reader impact: none.* A Rust reader must simply expect floats for numeric fields and
+    not assume canonical encoding — both already true of `ciborium`. Verified by
     `cbor_decodes_go_archive` / `cbor_roundtrip_stable`.
+  - *Writer side (phase 3, `store/compact`):* the Rust compactor decodes live JSON into
+    `ciborium::Value`, so a JSON **integer** is re-encoded as a CBOR **integer**, whereas
+    Go's `json → float64 → cbor` path writes a **double**. Also benign, and for the same
+    reason: a client already encounters both representations of the same field today (live
+    objects are JSON ints; Go archives are doubles), so it cannot rely on the CBOR major
+    type — and there is no legacy archive data to stay byte-compatible with. Net effect of
+    the port: numbers survive compaction unchanged (int → int) rather than being coerced to
+    float — arguably the cleaner behaviour.
 
 - **`user_id`/`device_id` are spec'd as ULIDs but unvalidated on the login path.**
   Registration generates ULIDs and the spec (mvp-v0.1 "IDs & naming") declares both as

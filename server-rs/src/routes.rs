@@ -3,6 +3,7 @@
 //! S3-backed store, `#[launch]` main) lands in phase 4.
 
 use crate::authproof::{verify_proof, AuthProof};
+use crate::cbor;
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::guard::AuthedUser;
@@ -15,6 +16,7 @@ use crate::token;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
+use ciborium::value::Value;
 use rocket::http::ContentType;
 use rocket::response::Responder;
 use rocket::serde::json::Json;
@@ -40,7 +42,8 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
             register,
             add_device,
             store_list,
-            store_object
+            store_object,
+            store_compact
         ],
     )
 }
@@ -384,6 +387,143 @@ async fn add_device(
     Ok(Json(AddDeviceResponse {
         device_id: device_id.as_str().to_string(),
         token,
+    }))
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct CompactRequest {
+    prefix: String,
+    up_to: String,
+}
+
+#[derive(Serialize)]
+struct CompactResponse {
+    archived: usize,
+    archive_key: String,
+}
+
+/// `POST /v1/store/compact` — merge live objects (≤ `prefix + up_to`) into a daily
+/// CBOR archive, dedup by `msg_id`, then delete the live objects + merged-in
+/// same-day archives. Mirrors `handleStoreCompact`.
+///
+/// Note: live objects are JSON; decoded here to `ciborium::Value`, so JSON
+/// integers stay CBOR integers (Go's path goes via `float64`, producing CBOR
+/// doubles — the phase-1 finding). Benign: clients already tolerate both, since
+/// live objects are JSON ints and Go archives are doubles; no legacy data exists.
+#[post("/v1/store/compact", data = "<body>")]
+async fn store_compact(
+    auth: Result<AuthedUser, ApiError>,
+    body: &str,
+    store: &State<SharedStore>,
+) -> Result<Json<CompactResponse>, ApiError> {
+    let user = auth?;
+    let req: CompactRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+    if req.prefix.is_empty() || req.up_to.is_empty() {
+        return Err(ApiError::BadRequest);
+    }
+    if !authorize_prefix(user.user_id.as_str(), &req.prefix) {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Collect live keys ≤ boundary (keys are lexicographically sorted, so once a
+    // page ends past the boundary we can stop).
+    let boundary = format!("{}{}", req.prefix, req.up_to);
+    let mut to_compact: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = store
+            .list_objects(&req.prefix, 100, cursor.as_deref())
+            .await?;
+        for k in &page.keys {
+            if k.as_str() <= boundary.as_str() {
+                to_compact.push(k.clone());
+            }
+        }
+        let last_past = page
+            .keys
+            .last()
+            .is_some_and(|k| k.as_str() > boundary.as_str());
+        match page.next_cursor {
+            Some(c) if !last_past => cursor = Some(c),
+            _ => break,
+        }
+    }
+
+    if to_compact.is_empty() {
+        return Ok(Json(CompactResponse {
+            archived: 0,
+            archive_key: String::new(),
+        }));
+    }
+
+    // Read live objects (JSON → Value), skipping any deleted between list and get.
+    let mut new_objects: Vec<Value> = Vec::new();
+    for key in &to_compact {
+        match store.get_object(key).await {
+            Ok(data) => new_objects.push(
+                serde_json::from_slice(&data)
+                    .map_err(|_| ApiError::Internal("decode failed".into()))?,
+            ),
+            Err(StoreError::NotFound) => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // Same-day archive prefix is the sibling of live/: …/live/ → …/archive/.
+    let today = Utc::now().format("%Y-%m-%d").to_string();
+    let archive_base = format!(
+        "{}archive/",
+        req.prefix.strip_suffix("live/").unwrap_or(&req.prefix)
+    );
+    let archive_prefix = format!("{archive_base}{today}");
+
+    // List, then read + decode, the existing same-day archives to merge with.
+    let mut existing_archive_keys: Vec<String> = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let page = store
+            .list_objects(&archive_prefix, 100, cursor.as_deref())
+            .await?;
+        existing_archive_keys.extend(page.keys);
+        match page.next_cursor {
+            Some(c) => cursor = Some(c),
+            None => break,
+        }
+    }
+    let mut existing_objects: Vec<Value> = Vec::new();
+    for key in &existing_archive_keys {
+        match store.get_object(key).await {
+            Ok(data) => existing_objects.extend(
+                cbor::decode_archive(&data)
+                    .map_err(|_| ApiError::Internal("CBOR decode failed".into()))?,
+            ),
+            Err(StoreError::NotFound) => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    // Merge (existing first, preserving order), dedup by msg_id, encode.
+    let archived = new_objects.len();
+    let mut merged = existing_objects;
+    merged.extend(new_objects);
+    let merged = cbor::deduplicate_by_msg_id(merged);
+    let archive = cbor::encode_archive(&merged)
+        .map_err(|_| ApiError::Internal("CBOR encode failed".into()))?;
+
+    // No object is deleted before the new archive is durably written.
+    let archive_key = format!("{archive_base}{today}-{}", Ulid::new());
+    store
+        .put_object(&archive_key, &archive, "application/cbor")
+        .await?;
+
+    let mut to_delete = to_compact;
+    to_delete.extend(existing_archive_keys);
+    store.delete_objects(&to_delete).await?;
+
+    Ok(Json(CompactResponse {
+        archived,
+        archive_key,
     }))
 }
 
@@ -1000,5 +1140,122 @@ mod tests {
             serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
         assert_eq!(rb["error"], "key_version_stale");
         assert_eq!(rb["current"], 2);
+    }
+
+    // --- store/compact (authed; first real use of the cbor module) ---
+
+    #[tokio::test]
+    async fn compact_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let body = serde_json::json!({ "prefix": format!("inbox/{UID}/live/"), "up_to": "m9" })
+            .to_string();
+        let resp = client
+            .post("/v1/store/compact")
+            .header(ContentType::JSON)
+            .body(body)
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn compact_other_users_prefix_is_403() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let body = serde_json::json!({
+            "prefix": "inbox/01BX5ZZKBKACTAV9WEVGEMMVRZ/live/", "up_to": "m9"
+        })
+        .to_string();
+        let resp = client
+            .post("/v1/store/compact")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(body)
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn compact_nothing_returns_zero() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let body = serde_json::json!({ "prefix": format!("inbox/{UID}/live/"), "up_to": "m9" })
+            .to_string();
+        let resp = client
+            .post("/v1/store/compact")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(body)
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["archived"], 0);
+        assert_eq!(rb["archive_key"], "");
+    }
+
+    #[tokio::test]
+    async fn compact_archives_live_objects_and_deletes_them() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let live = format!("inbox/{UID}/live/");
+        store
+            .put_object(
+                &format!("{live}m1"),
+                br#"{"msg_id":"m1","v":1}"#,
+                "application/json",
+            )
+            .await
+            .unwrap();
+        store
+            .put_object(
+                &format!("{live}m2"),
+                br#"{"msg_id":"m2","v":1}"#,
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let client = client_with(store).await;
+
+        let body = serde_json::json!({ "prefix": live.clone(), "up_to": "m9" }).to_string();
+        let resp = client
+            .post("/v1/store/compact")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(body)
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["archived"], 2);
+        let archive_key = rb["archive_key"].as_str().unwrap().to_string();
+        assert!(archive_key.starts_with(&format!("inbox/{UID}/archive/")));
+
+        // Live objects are gone.
+        let list_uri = format!("/v1/store/list?prefix={live}");
+        let resp = client
+            .get(list_uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        let lb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(lb["keys"], serde_json::json!([]));
+
+        // The archive holds both messages — fetch it and decode the CBOR.
+        let obj_uri = format!("/v1/store/object?key={archive_key}");
+        let resp = client
+            .get(obj_uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        let entries = crate::cbor::decode_archive(&resp.into_bytes().await.unwrap()).unwrap();
+        assert_eq!(entries.len(), 2);
     }
 }

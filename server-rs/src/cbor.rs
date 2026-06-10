@@ -50,3 +50,51 @@ pub fn get_text<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
         _ => None,
     }
 }
+
+/// Deduplicate archive entries by `msg_id`, keeping the first occurrence; entries
+/// without a `msg_id` (e.g. key backups) are always kept. Mirrors
+/// `deduplicateByMsgID`. Order is preserved.
+pub fn deduplicate_by_msg_id(objects: Vec<Value>) -> Vec<Value> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::with_capacity(objects.len());
+    for obj in objects {
+        if let Some(id) = get_text(&obj, "msg_id") {
+            if seen.contains(id) {
+                continue;
+            }
+            seen.insert(id.to_string());
+        }
+        result.push(obj);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn obj(msg_id: Option<&str>) -> Value {
+        let mut pairs = vec![(Value::Text("v".into()), Value::Integer(1.into()))];
+        if let Some(id) = msg_id {
+            pairs.push((Value::Text("msg_id".into()), Value::Text(id.into())));
+        }
+        Value::Map(pairs)
+    }
+
+    #[test]
+    fn dedup_keeps_first_by_msg_id_and_all_without() {
+        let input = vec![
+            obj(Some("a")),
+            obj(Some("b")),
+            obj(Some("a")), // duplicate of the first → dropped
+            obj(None),      // no msg_id → kept
+            obj(None),      // no msg_id → kept
+        ];
+        let out = deduplicate_by_msg_id(input);
+        assert_eq!(out.len(), 4);
+        assert_eq!(get_text(&out[0], "msg_id"), Some("a"));
+        assert_eq!(get_text(&out[1], "msg_id"), Some("b"));
+        assert_eq!(get_text(&out[2], "msg_id"), None);
+        assert_eq!(get_text(&out[3], "msg_id"), None);
+    }
+}
