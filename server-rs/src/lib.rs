@@ -8,5 +8,6 @@
 
 pub mod authproof;
 pub mod cbor;
+pub mod error;
 pub mod model;
 pub mod token;
