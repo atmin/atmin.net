@@ -74,10 +74,10 @@ server-rs-test:
 	cd server-rs && cargo test
 
 # fmt --check lives in lint so the pre-commit hook (lint + test) catches unformatted
-# Rust; clippy -D warnings treats every lint as an error. --lib --tests covers source
-# and tests but skips the throwaway examples/ playground.
+# Rust; clippy -D warnings treats every lint as an error. --lib --bins --tests covers
+# source, the dev binary, and tests but skips the throwaway examples/ playground.
 server-rs-lint:
-	cd server-rs && cargo fmt --check && cargo clippy --lib --tests -- -D warnings
+	cd server-rs && cargo fmt --check && cargo clippy --lib --bins --tests -- -D warnings
 
 server-rs-fmt:
 	cd server-rs && cargo fmt
