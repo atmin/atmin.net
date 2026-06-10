@@ -21,7 +21,7 @@ use rocket::http::ContentType;
 use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
-use rocket::{get, post, routes, Build, Request, Response, Rocket, State};
+use rocket::{get, post, put, routes, Build, Request, Response, Rocket, State};
 use std::io::Cursor;
 use ulid::Ulid;
 
@@ -43,7 +43,8 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
             add_device,
             store_list,
             store_object,
-            store_compact
+            store_compact,
+            update_profile
         ],
     )
 }
@@ -525,6 +526,71 @@ async fn store_compact(
         archived,
         archive_key,
     }))
+}
+
+/// Build the public handle projection (`handles/{handle}.json`) from a profile.
+/// Mirrors `putHandleProjection`'s field set.
+fn handle_projection(p: &Profile) -> PublicHandleData {
+    PublicHandleData {
+        user_id: p.user_id.clone(),
+        sharing_public_key: p.sharing_public_key.clone(),
+        salt: p.salt.clone(),
+        kdf: p.kdf.clone(),
+        key_version: p.key_version,
+        display_name: p.display_name.clone(),
+        avatar_url: p.avatar_url.clone(),
+        released_at: String::new(),
+    }
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct ProfileUpdateRequest {
+    display_name: Option<String>,
+    avatar_url: Option<String>,
+}
+
+/// `PUT /v1/profile` — authed update of mutable profile fields, then re-project
+/// the public fields to the handle file. Mirrors `handleProfile`. A field absent
+/// or `null` means "leave unchanged"; present (even `""`) means "set". At least
+/// one field is required.
+#[put("/v1/profile", data = "<body>")]
+async fn update_profile(
+    auth: Result<AuthedUser, ApiError>,
+    body: &str,
+    store: &State<SharedStore>,
+) -> Result<(), ApiError> {
+    let user = auth?;
+    let req: ProfileUpdateRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+    if req.display_name.is_none() && req.avatar_url.is_none() {
+        return Err(ApiError::BadRequest);
+    }
+
+    // Read-merge-write profile.json (missing → 404 via From<StoreError>).
+    let key = key_profile(user.user_id.as_str());
+    let profile_bytes = store.get_object(&key).await?;
+    let mut profile: Profile = serde_json::from_slice(&profile_bytes)
+        .map_err(|_| ApiError::Internal("Failed to parse profile".into()))?;
+    if let Some(dn) = req.display_name {
+        profile.display_name = dn;
+    }
+    if let Some(av) = req.avatar_url {
+        profile.avatar_url = av;
+    }
+    write_json(store, &key, &profile).await?;
+
+    // Re-project public fields. Best-effort, like Go — a projection failure does
+    // not fail the update.
+    if !profile.handle.is_empty() {
+        let _ = write_json(
+            store,
+            &key_handle(&profile.handle),
+            &handle_projection(&profile),
+        )
+        .await;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1257,5 +1323,61 @@ mod tests {
         assert_eq!(resp.status(), Status::Ok);
         let entries = crate::cbor::decode_archive(&resp.into_bytes().await.unwrap()).unwrap();
         assert_eq!(entries.len(), 2);
+    }
+
+    // --- PUT /v1/profile (authed update + re-project) ---
+
+    async fn register_token(client: &Client, handle: &str) -> String {
+        let resp = register(client, register_body(handle)).await;
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        rb["token"].as_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn update_profile_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client
+            .put("/v1/profile")
+            .header(ContentType::JSON)
+            .body(serde_json::json!({ "display_name": "x" }).to_string())
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn update_profile_no_fields_is_400() {
+        let client = client_with(MemStore::new()).await;
+        let token = register_token(&client, "bob").await;
+        let resp = client
+            .put("/v1/profile")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body("{}")
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::BadRequest);
+    }
+
+    #[tokio::test]
+    async fn update_profile_sets_display_name_and_reprojects() {
+        let client = client_with(MemStore::new()).await;
+        let token = register_token(&client, "alice").await;
+
+        let resp = client
+            .put("/v1/profile")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(serde_json::json!({ "display_name": "Alice A." }).to_string())
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // resolve reflects the new display_name in the re-projected handle file.
+        let resp = client.get("/v1/resolve/alice").dispatch().await;
+        let pb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(pb["display_name"], "Alice A.");
     }
 }
