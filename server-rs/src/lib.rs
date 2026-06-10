@@ -10,6 +10,8 @@ pub mod authproof;
 pub mod cbor;
 pub mod error;
 pub mod model;
+pub mod profile;
+pub mod routes;
 pub mod store;
 pub mod store_mem;
 pub mod token;

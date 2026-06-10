@@ -5,8 +5,9 @@ edition = "2021"
 description = "Rust port experiment of the atmin backend (ADR-0018, phase 1 interop spike)."
 
 [dependencies]
-rocket = "0.5"
+rocket = { version = "0.5", features = ["json"] }
 async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 base64 = "0.22"
 hmac = "0.12"
 sha2 = "0.10"
