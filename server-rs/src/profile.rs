@@ -1,6 +1,35 @@
 //! Profile / handle data types. Mirrors `server/profile.go`.
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde::{Deserialize, Serialize};
+
+// Server-enforced Argon2id KDF floor/ceiling (ADR-0016). Floor stops weak
+// client params; ceiling is a client self-DoS guard.
+const KDF_FLOOR_MEMORY_KIB: u32 = 65_536; // 64 MiB
+const KDF_MAX_MEMORY_KIB: u32 = 1_048_576; // 1 GiB
+const KDF_FLOOR_ITERATIONS: u32 = 3;
+const KDF_MAX_ITERATIONS: u32 = 16;
+const KDF_MAX_PARALLELISM: u32 = 8;
+
+/// Whether `salt` + `kdf` are an acceptable credential pair (mirrors
+/// `validKDFParams`): `argon2id`, params within the ADR-0016 floor/ceiling, and
+/// a salt that base64url-decodes to exactly 16 bytes.
+pub fn valid_kdf_params(salt: &str, kdf: &KdfParams) -> bool {
+    if kdf.kind != "argon2id" {
+        return false;
+    }
+    if !(KDF_FLOOR_MEMORY_KIB..=KDF_MAX_MEMORY_KIB).contains(&kdf.m) {
+        return false;
+    }
+    if !(KDF_FLOOR_ITERATIONS..=KDF_MAX_ITERATIONS).contains(&kdf.t) {
+        return false;
+    }
+    if !(1..=KDF_MAX_PARALLELISM).contains(&kdf.p) {
+        return false;
+    }
+    matches!(URL_SAFE_NO_PAD.decode(salt), Ok(b) if b.len() == 16)
+}
 
 /// Argon2id stretching parameters (ADR-0011), stored on the profile and surfaced
 /// via resolve so a returning device can re-derive keys from its password.

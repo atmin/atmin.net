@@ -29,9 +29,13 @@ pub enum ApiError {
     HandleInvalid,
     HandleReserved,
     HandleTaken,
-    HandleInCooldown,
-    /// 410 during a deleted handle's 30-day cooldown (ADR-0013); carries the
-    /// timestamps the client renders ("available on …").
+    /// 409 when *registering* a handle still in its 30-day cooldown (ADR-0013);
+    /// carries the timestamps the client renders.
+    HandleInCooldown {
+        released_at: String,
+        available_at: String,
+    },
+    /// 410 when *resolving* a deleted handle in cooldown (ADR-0013); same timestamps.
     HandleReleased {
         released_at: String,
         available_at: String,
@@ -51,7 +55,7 @@ impl ApiError {
             Unauthorized | KeyVersionStale { .. } => Status::Unauthorized,
             DeviceRevoked | BadContinuity | Forbidden => Status::Forbidden,
             NotFound => Status::NotFound,
-            HandleTaken | HandleInCooldown => Status::Conflict,
+            HandleTaken | HandleInCooldown { .. } => Status::Conflict,
             HandleReleased { .. } => Status::Gone,
             RegistrationUnavailable => Status::ServiceUnavailable,
             QuotaExceeded | TooLarge => Status::PayloadTooLarge,
@@ -72,7 +76,7 @@ impl ApiError {
             HandleInvalid => "handle_invalid",
             HandleReserved => "handle_reserved",
             HandleTaken => "handle_taken",
-            HandleInCooldown => "handle_in_cooldown",
+            HandleInCooldown { .. } => "handle_in_cooldown",
             HandleReleased { .. } => "released",
             RegistrationUnavailable => "registration_unavailable",
             QuotaExceeded => "quota_exceeded",
@@ -94,7 +98,7 @@ impl ApiError {
             HandleInvalid => "Handle does not match the required format",
             HandleReserved => "Handle is reserved",
             HandleTaken => "Handle is already registered",
-            HandleInCooldown => "Handle is in 30-day cooldown after deletion",
+            HandleInCooldown { .. } => "Handle is in 30-day cooldown after deletion",
             HandleReleased { .. } => "Handle was deleted; in cooldown",
             RegistrationUnavailable => "Registration is temporarily unavailable for this handle",
             QuotaExceeded => "Storage quota exceeded",
@@ -111,6 +115,10 @@ impl ApiError {
                 body["current"] = serde_json::json!(current.get());
             }
             ApiError::HandleReleased {
+                released_at,
+                available_at,
+            }
+            | ApiError::HandleInCooldown {
                 released_at,
                 available_at,
             } => {
@@ -178,7 +186,14 @@ mod tests {
             (ApiError::HandleInvalid, 400, "handle_invalid"),
             (ApiError::HandleReserved, 400, "handle_reserved"),
             (ApiError::HandleTaken, 409, "handle_taken"),
-            (ApiError::HandleInCooldown, 409, "handle_in_cooldown"),
+            (
+                ApiError::HandleInCooldown {
+                    released_at: "2099-01-01T00:00:00Z".into(),
+                    available_at: "2099-01-31T00:00:00Z".into(),
+                },
+                409,
+                "handle_in_cooldown",
+            ),
             (
                 ApiError::HandleReleased {
                     released_at: "2099-01-01T00:00:00Z".into(),

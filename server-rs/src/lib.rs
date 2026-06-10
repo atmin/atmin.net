@@ -14,6 +14,7 @@ pub mod guard;
 pub mod model;
 pub mod paths;
 pub mod profile;
+pub mod reserved;
 pub mod routes;
 pub mod store;
 pub mod store_mem;

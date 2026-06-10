@@ -5,16 +5,20 @@
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::guard::AuthedUser;
-use crate::paths::{authorize_key, authorize_prefix, key_handle};
-use crate::profile::PublicHandleData;
-use crate::store::SharedStore;
+use crate::model::{Handle, KeyVersion};
+use crate::paths::{authorize_key, authorize_prefix, key_device, key_handle, key_profile};
+use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
+use crate::reserved;
+use crate::store::{SharedStore, StoreError};
+use crate::token;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rocket::http::ContentType;
 use rocket::response::Responder;
 use rocket::serde::json::Json;
-use rocket::serde::Serialize;
-use rocket::{get, routes, Build, Request, Response, Rocket, State};
+use rocket::serde::{Deserialize, Serialize};
+use rocket::{get, post, routes, Build, Request, Response, Rocket, State};
 use std::io::Cursor;
+use ulid::Ulid;
 
 /// Post-deletion handle reservation window (ADR-0013).
 const HANDLE_COOLDOWN_DAYS: i64 = 30;
@@ -25,10 +29,10 @@ const STORE_LIST_LIMIT: usize = 50;
 /// Build the Rocket app over a given store + config. Tests pass a `MemStore`;
 /// production will pass an S3-backed store.
 pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
-    rocket::build()
-        .manage(store)
-        .manage(config)
-        .mount("/", routes![healthz, resolve, store_list, store_object])
+    rocket::build().manage(store).manage(config).mount(
+        "/",
+        routes![healthz, resolve, register, store_list, store_object],
+    )
 }
 
 #[get("/healthz")]
@@ -142,6 +146,154 @@ async fn store_object(
     })
 }
 
+/// Serialize `value` as JSON and store it. Serialization failure → 500.
+async fn write_json<T: Serialize>(
+    store: &SharedStore,
+    key: &str,
+    value: &T,
+) -> Result<(), ApiError> {
+    let bytes =
+        serde_json::to_vec(value).map_err(|_| ApiError::Internal("serialize failed".into()))?;
+    store.put_object(key, &bytes, "application/json").await?;
+    Ok(())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RegisterRequest {
+    handle: String,
+    device_label: String,
+    auth_public_key: String,
+    sharing_public_key: String,
+    salt: String,
+    kdf: Option<KdfParams>,
+}
+
+#[derive(Serialize)]
+struct RegisterResponse {
+    user_id: String,
+    device_id: String,
+    token: String,
+    handle: String,
+}
+
+/// `POST /v1/register` — create an account: claim a handle, mint ids + token,
+/// write the handle projection + profile + device. Public. Mirrors `handleRegister`.
+#[post("/v1/register", data = "<body>")]
+async fn register(
+    body: &str,
+    store: &State<SharedStore>,
+    config: &State<ServerConfig>,
+) -> Result<Json<RegisterResponse>, ApiError> {
+    // Manual parse so malformed *and* missing-field bodies both yield 400 (matching Go).
+    let req: RegisterRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+    if req.handle.is_empty()
+        || req.device_label.is_empty()
+        || req.auth_public_key.is_empty()
+        || req.sharing_public_key.is_empty()
+    {
+        return Err(ApiError::BadRequest);
+    }
+
+    // Handle: charset/length (→ handle_invalid), then reserved-list (→ handle_reserved).
+    let handle = Handle::new(&req.handle).map_err(|_| ApiError::HandleInvalid)?;
+    if reserved::is_reserved(handle.as_str()) {
+        return Err(ApiError::HandleReserved);
+    }
+
+    // Credential params mandatory (ADR-0016 floor): salt + Argon2id kdf.
+    let Some(kdf) = req.kdf.as_ref() else {
+        return Err(ApiError::BadRequest);
+    };
+    if req.salt.is_empty() || !valid_kdf_params(&req.salt, kdf) {
+        return Err(ApiError::BadRequest);
+    }
+
+    // TODO(phase 5): wrap the GET-then-PUT below in the per-handle claim mutex
+    // (ADR-0013). Without it, two concurrent registrations of the SAME handle can
+    // both observe 404 and both PUT (last-writer-wins). Deferred with the other
+    // in-process concurrency primitives (keyed mutexes, SSE hub); `registration_
+    // unavailable` (the mutex-timeout outcome) therefore can't occur yet.
+    let handle_key = key_handle(handle.as_str());
+    match store.get_object(&handle_key).await {
+        Err(StoreError::NotFound) => {} // free → proceed
+        Err(e) => return Err(e.into()),
+        Ok(existing) => {
+            let h: PublicHandleData = serde_json::from_slice(&existing)
+                .map_err(|_| ApiError::Internal("Failed to parse handle projection".into()))?;
+            if h.released_at.is_empty() {
+                return Err(ApiError::HandleTaken);
+            }
+            // Tombstone — branch on cooldown.
+            let Ok(released) = DateTime::parse_from_rfc3339(&h.released_at) else {
+                // Corrupt tombstone — treat as taken; an operator can investigate.
+                return Err(ApiError::HandleTaken);
+            };
+            let available = released.with_timezone(&Utc) + Duration::days(HANDLE_COOLDOWN_DAYS);
+            if Utc::now() < available {
+                return Err(ApiError::HandleInCooldown {
+                    released_at: h.released_at,
+                    available_at: available.to_rfc3339_opts(SecondsFormat::Secs, true),
+                });
+            }
+            // Stale tombstone — delete in-band so the PUT below replaces it cleanly.
+            store.delete_object(&handle_key).await?;
+        }
+    }
+
+    let user_id = Ulid::new().to_string();
+    let device_id = Ulid::new().to_string();
+    let token = token::generate(&config.server_secret, &user_id, &device_id, KeyVersion::ONE);
+    let created_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+
+    // Write order: handle projection FIRST (claims the name), then profile, then
+    // device — best-effort rollback if a later write fails. The user_id is never
+    // returned on failure, so an abandoned one is invisible.
+    let projection = PublicHandleData {
+        user_id: user_id.clone(),
+        sharing_public_key: req.sharing_public_key.clone(),
+        salt: req.salt.clone(),
+        kdf: req.kdf.clone(),
+        key_version: 1,
+        ..Default::default()
+    };
+    write_json(store, &handle_key, &projection).await?;
+
+    let profile = Profile {
+        user_id: user_id.clone(),
+        handle: req.handle.clone(),
+        auth_public_key: req.auth_public_key.clone(),
+        sharing_public_key: req.sharing_public_key.clone(),
+        salt: req.salt.clone(),
+        kdf: req.kdf.clone(),
+        key_version: 1,
+        created_at: created_at.clone(),
+        ..Default::default()
+    };
+    if let Err(e) = write_json(store, &key_profile(&user_id), &profile).await {
+        let _ = store.delete_object(&handle_key).await;
+        return Err(e);
+    }
+
+    let device = serde_json::json!({
+        "device_id": device_id,
+        "device_label": req.device_label,
+        "created_at": created_at,
+    });
+    if let Err(e) = write_json(store, &key_device(&user_id, &device_id), &device).await {
+        let _ = store.delete_object(&handle_key).await;
+        let _ = store.delete_object(&key_profile(&user_id)).await;
+        return Err(e);
+    }
+
+    Ok(Json(RegisterResponse {
+        user_id,
+        device_id,
+        token,
+        handle: req.handle,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,6 +303,8 @@ mod tests {
     use crate::store::Store;
     use crate::store_mem::MemStore;
     use crate::token;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
     use rocket::http::{Header, Status};
     use rocket::local::asynchronous::Client;
     use std::sync::Arc;
@@ -481,5 +635,131 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::NotFound);
+    }
+
+    // --- register (public) ---
+
+    fn register_body(handle: &str) -> String {
+        let salt = URL_SAFE_NO_PAD.encode([0u8; 16]); // 16-byte salt, base64url
+        serde_json::json!({
+            "handle": handle,
+            "device_label": "laptop",
+            "auth_public_key": "QXV0aA",
+            "sharing_public_key": "U2hhcmU",
+            "salt": salt,
+            "kdf": { "type": "argon2id", "m": 65536, "t": 3, "p": 1 },
+        })
+        .to_string()
+    }
+
+    async fn register(
+        client: &Client,
+        body: String,
+    ) -> rocket::local::asynchronous::LocalResponse<'_> {
+        client
+            .post("/v1/register")
+            .header(ContentType::JSON)
+            .body(body)
+            .dispatch()
+            .await
+    }
+
+    #[tokio::test]
+    async fn register_happy_path_then_token_works() {
+        let client = client_with(MemStore::new()).await;
+        let resp = register(&client, register_body("alice")).await;
+        assert_eq!(resp.status(), Status::Ok);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        let user_id = body["user_id"].as_str().unwrap().to_string();
+        let token = body["token"].as_str().unwrap().to_string();
+        assert_eq!(body["handle"], "alice");
+        assert_eq!(user_id.len(), 26); // ULID
+
+        // The handle projection is now resolvable...
+        let resp = client.get("/v1/resolve/alice").dispatch().await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // ...and the returned token authenticates (proves profile + device were written).
+        let uri = format!("/v1/store/list?prefix=inbox/{user_id}/live/");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn register_rejects_invalid_handle() {
+        let client = client_with(MemStore::new()).await;
+        let resp = register(&client, register_body("Ab")).await; // uppercase + too short
+        assert_eq!(resp.status(), Status::BadRequest);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "handle_invalid");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_reserved_handle() {
+        let client = client_with(MemStore::new()).await;
+        let resp = register(&client, register_body("admin")).await;
+        assert_eq!(resp.status(), Status::BadRequest);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "handle_reserved");
+    }
+
+    #[tokio::test]
+    async fn register_taken_handle_is_409() {
+        let client = client_with(MemStore::new()).await;
+        assert_eq!(
+            register(&client, register_body("bob")).await.status(),
+            Status::Ok
+        );
+        let resp = register(&client, register_body("bob")).await;
+        assert_eq!(resp.status(), Status::Conflict);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "handle_taken");
+    }
+
+    #[tokio::test]
+    async fn register_handle_in_cooldown_is_409() {
+        let store = MemStore::new();
+        let tombstone = PublicHandleData {
+            released_at: "2099-01-01T00:00:00Z".into(),
+            ..Default::default()
+        };
+        put_json(&store, &key_handle("eve"), &tombstone).await;
+        let client = client_with(store).await;
+        let resp = register(&client, register_body("eve")).await;
+        assert_eq!(resp.status(), Status::Conflict);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "handle_in_cooldown");
+        assert_eq!(body["available_at"], "2099-01-31T00:00:00Z");
+    }
+
+    #[tokio::test]
+    async fn register_rejects_weak_kdf() {
+        let client = client_with(MemStore::new()).await;
+        let salt = URL_SAFE_NO_PAD.encode([0u8; 16]);
+        let body = serde_json::json!({
+            "handle": "carol", "device_label": "l",
+            "auth_public_key": "a", "sharing_public_key": "s",
+            "salt": salt,
+            "kdf": { "type": "argon2id", "m": 1024, "t": 3, "p": 1 }, // m below the 64 MiB floor
+        })
+        .to_string();
+        let resp = register(&client, body).await;
+        assert_eq!(resp.status(), Status::BadRequest);
+    }
+
+    #[tokio::test]
+    async fn register_missing_fields_is_400() {
+        let client = client_with(MemStore::new()).await;
+        let resp = register(&client, serde_json::json!({ "handle": "dave" }).to_string()).await;
+        assert_eq!(resp.status(), Status::BadRequest);
     }
 }
