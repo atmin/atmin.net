@@ -8,8 +8,11 @@
 
 pub mod authproof;
 pub mod cbor;
+pub mod config;
 pub mod error;
+pub mod guard;
 pub mod model;
+pub mod paths;
 pub mod profile;
 pub mod routes;
 pub mod store;

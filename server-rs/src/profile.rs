@@ -37,3 +37,26 @@ pub struct PublicHandleData {
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub released_at: String,
 }
+
+/// A user's full profile (`users/{uid}/profile.json`) — the server-owned source
+/// of truth. Mirrors `server/profile.go`. The container `#[serde(default)]`
+/// matches Go's `json.Unmarshal` tolerance: absent fields become the zero value
+/// rather than a parse error.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct Profile {
+    pub user_id: String,
+    pub handle: String,
+    pub auth_public_key: String,
+    pub sharing_public_key: String,
+    pub salt: String,
+    pub kdf: Option<KdfParams>,
+    pub key_version: u32,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub display_name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub avatar_url: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub last_active: String,
+    pub created_at: String,
+}

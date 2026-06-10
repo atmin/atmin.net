@@ -12,7 +12,11 @@
 //! to S3 latency.
 
 use async_trait::async_trait;
+use std::sync::Arc;
 use std::time::Duration;
+
+/// The storage backend, shared across guards and handlers as Rocket-managed state.
+pub type SharedStore = Arc<dyn Store>;
 
 /// Error from a storage operation.
 #[derive(Debug)]
