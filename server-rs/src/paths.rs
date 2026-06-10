@@ -25,6 +25,12 @@ pub fn key_inbox_live(user_id: &str, msg_id: &str) -> String {
     format!("inbox/{user_id}/live/{msg_id}")
 }
 
+/// A rotation idempotency record — `users/{user_id}/rotation-records/{request_id}.json`.
+/// Mirrors `keyRotationRecord`; swept after a 24h TTL by the cleanup job.
+pub fn key_rotation_record(user_id: &str, request_id: &str) -> String {
+    format!("users/{user_id}/rotation-records/{request_id}.json")
+}
+
 const USERS_ROOT: &str = "users/";
 const DATA_PREFIXES: [&str; 3] = ["inbox/", "keys/", "media/"];
 

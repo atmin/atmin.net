@@ -13,6 +13,7 @@ pub mod config;
 pub mod error;
 pub mod events;
 pub mod guard;
+pub mod idempotency;
 pub mod keyed_mutex;
 pub mod media_quota;
 pub mod model;

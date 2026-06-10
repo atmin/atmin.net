@@ -37,57 +37,87 @@ fn deny(e: ApiError) -> Outcome<AuthedUser, ApiError> {
     Outcome::Error((e.status(), e))
 }
 
+/// `AuthedUser` with the `key_version` check skipped — Go's `authNoKV`. Used only
+/// by `POST /v1/rotate-keys`, which must stay reachable with the *just-superseded*
+/// token: a retried rotation has to replay the recorded outcome, and the handler
+/// runs its own `key_version` precondition. Every other endpoint enforces kv.
+#[derive(Debug, Clone)]
+pub struct AuthedUserNoKv(pub AuthedUser);
+
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for AuthedUser {
     type Error = ApiError;
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<AuthedUser, ApiError> {
-        let Some(config) = req.rocket().state::<ServerConfig>() else {
-            return deny(ApiError::Internal("server config missing".into()));
-        };
-        let Some(store) = req.rocket().state::<SharedStore>() else {
-            return deny(ApiError::Internal("store missing".into()));
-        };
-        let Some(device_cache) = req.rocket().state::<DeviceCache>() else {
-            return deny(ApiError::Internal("device cache missing".into()));
-        };
-        let Some(profile_cache) = req.rocket().state::<ProfileCache>() else {
-            return deny(ApiError::Internal("profile cache missing".into()));
-        };
+        authenticate(req, true).await
+    }
+}
 
-        // Token: `Authorization: Bearer …`, falling back to `?token=`.
-        let token = req
-            .headers()
-            .get_one("Authorization")
-            .and_then(|h| h.strip_prefix("Bearer "))
-            .map(str::to_string)
-            .or_else(|| req.query_value::<String>("token").and_then(Result::ok));
-        let Some(token) = token else {
-            return deny(ApiError::Unauthorized);
-        };
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for AuthedUserNoKv {
+    type Error = ApiError;
 
-        let Ok((uid, did, token_kv)) = token::parse(&config.server_secret, &token) else {
-            return deny(ApiError::Unauthorized);
-        };
-        // A valid HMAC over a non-ULID id can't happen, but reject cleanly if so.
-        let (Ok(user_id), Ok(device_id)) = (UserId::new(uid), DeviceId::new(did)) else {
-            return deny(ApiError::Unauthorized);
-        };
-
-        // Device revocation: the device file must still exist. Skip the HeadObject
-        // when the device was seen within the cache TTL.
-        let device_key = key_device(user_id.as_str(), device_id.as_str());
-        if !device_cache.valid(&device_key) {
-            match store.head_object(&device_key).await {
-                Ok(()) => device_cache.set(&device_key),
-                Err(StoreError::NotFound) => return deny(ApiError::DeviceRevoked),
-                Err(_) => return deny(ApiError::Internal("device check failed".into())),
-            }
+    async fn from_request(req: &'r Request<'_>) -> Outcome<AuthedUserNoKv, ApiError> {
+        match authenticate(req, false).await {
+            Outcome::Success(u) => Outcome::Success(AuthedUserNoKv(u)),
+            Outcome::Error(e) => Outcome::Error(e),
+            Outcome::Forward(f) => Outcome::Forward(f),
         }
+    }
+}
 
-        // key_version check (ADR-0012): a token bound to a superseded kv means
-        // another device rotated; the client must re-login at the current kv. The
-        // profile cache short-circuits the S3 GET on a fresh hit.
+/// Shared authentication core. `enforce_kv` toggles the `key_version` check (step
+/// 4); with it off the reported `key_version` is the token's own, and the profile
+/// is not read for kv.
+async fn authenticate(req: &Request<'_>, enforce_kv: bool) -> Outcome<AuthedUser, ApiError> {
+    let Some(config) = req.rocket().state::<ServerConfig>() else {
+        return deny(ApiError::Internal("server config missing".into()));
+    };
+    let Some(store) = req.rocket().state::<SharedStore>() else {
+        return deny(ApiError::Internal("store missing".into()));
+    };
+    let Some(device_cache) = req.rocket().state::<DeviceCache>() else {
+        return deny(ApiError::Internal("device cache missing".into()));
+    };
+    let Some(profile_cache) = req.rocket().state::<ProfileCache>() else {
+        return deny(ApiError::Internal("profile cache missing".into()));
+    };
+
+    // Token: `Authorization: Bearer …`, falling back to `?token=`.
+    let token = req
+        .headers()
+        .get_one("Authorization")
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .map(str::to_string)
+        .or_else(|| req.query_value::<String>("token").and_then(Result::ok));
+    let Some(token) = token else {
+        return deny(ApiError::Unauthorized);
+    };
+
+    let Ok((uid, did, token_kv)) = token::parse(&config.server_secret, &token) else {
+        return deny(ApiError::Unauthorized);
+    };
+    // A valid HMAC over a non-ULID id can't happen, but reject cleanly if so.
+    let (Ok(user_id), Ok(device_id)) = (UserId::new(uid), DeviceId::new(did)) else {
+        return deny(ApiError::Unauthorized);
+    };
+
+    // Device revocation: the device file must still exist. Skip the HeadObject
+    // when the device was seen within the cache TTL.
+    let device_key = key_device(user_id.as_str(), device_id.as_str());
+    if !device_cache.valid(&device_key) {
+        match store.head_object(&device_key).await {
+            Ok(()) => device_cache.set(&device_key),
+            Err(StoreError::NotFound) => return deny(ApiError::DeviceRevoked),
+            Err(_) => return deny(ApiError::Internal("device check failed".into())),
+        }
+    }
+
+    // key_version check (ADR-0012): a token bound to a superseded kv means
+    // another device rotated; the client must re-login at the current kv. The
+    // profile cache short-circuits the S3 GET on a fresh hit. Skipped entirely
+    // for `authNoKV` (rotate-keys) — see `AuthedUserNoKv`.
+    if enforce_kv {
         let current = match profile_cache.get(user_id.as_str()) {
             Some(kv) => kv,
             None => {
@@ -114,11 +144,11 @@ impl<'r> FromRequest<'r> for AuthedUser {
                 current: KeyVersion::new(current).unwrap_or(KeyVersion::ONE),
             });
         }
-
-        Outcome::Success(AuthedUser {
-            user_id,
-            device_id,
-            key_version: token_kv,
-        })
     }
+
+    Outcome::Success(AuthedUser {
+        user_id,
+        device_id,
+        key_version: token_kv,
+    })
 }

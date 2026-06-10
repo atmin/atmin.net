@@ -2,13 +2,14 @@
 //! phase 3; `build` mounts whatever handlers exist so far. Production wiring (an
 //! S3-backed store, `#[launch]` main) lands in phase 4.
 
-use crate::authproof::{verify_proof, AuthProof};
+use crate::authproof::{verify, verify_proof, AuthProof};
 use crate::cache::{DeviceCache, ProfileCache};
 use crate::cbor;
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::events::{update_last_active, EventHub};
-use crate::guard::AuthedUser;
+use crate::guard::{AuthedUser, AuthedUserNoKv};
+use crate::idempotency::{load_rotation_record, save_rotation_record, RotationRecord};
 use crate::keyed_mutex::KeyedMutex;
 use crate::media_quota::{
     InProcessMediaQuota, Reservation, SharedQuota, MAX_MEDIA_BYTES, USER_MEDIA_BLOB_CAP,
@@ -17,7 +18,7 @@ use crate::media_quota::{
 use crate::model::{DeviceId, Handle, KeyVersion, UserId};
 use crate::paths::{
     authorize_key, authorize_key_write, authorize_prefix, key_device, key_handle, key_inbox_live,
-    key_profile,
+    key_profile, key_rotation_record,
 };
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
@@ -27,7 +28,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use ciborium::value::Value;
-use rocket::http::ContentType;
+use rocket::http::{ContentType, Status};
 use rocket::response::stream::{Event, EventStream};
 use rocket::response::Responder;
 use rocket::serde::json::Json;
@@ -56,6 +57,15 @@ const HANDLE_CLAIM_TIMEOUT: StdDuration = StdDuration::from_millis(500);
 /// rotation lock) is coming.
 struct HandleClaimMutex(KeyedMutex);
 
+/// How long `rotate-keys` waits for the per-uid lock before giving up (mirrors
+/// Go's 500ms). Two genuinely-concurrent rotations from one user are degenerate.
+const ROTATION_TIMEOUT: StdDuration = StdDuration::from_millis(500);
+
+/// Per-uid rotation lock, serializing the GET-VERIFY-WRITE on `profile.json`
+/// (ADR-0012). Distinct newtype from [`HandleClaimMutex`] so a handler can't grab
+/// the wrong lock.
+struct RotationMutex(KeyedMutex);
+
 /// Build the Rocket app over a given store + config. Tests pass a `MemStore`;
 /// production will pass an S3-backed store.
 pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
@@ -70,6 +80,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
         .manage(ProfileCache::new())
         .manage(EventHub::new())
         .manage(HandleClaimMutex(KeyedMutex::new()))
+        .manage(RotationMutex(KeyedMutex::new()))
         .mount(
             "/",
             routes![
@@ -85,6 +96,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
                 store_compact,
                 update_profile,
                 send,
+                rotate_keys,
                 events
             ],
         )
@@ -798,6 +810,271 @@ async fn send(
     Ok(())
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RotateKeysRequest {
+    request_id: String,
+    key_version: u32,
+    auth_public_key: String,
+    sharing_public_key: String,
+    salt: String,
+    kdf: Option<KdfParams>,
+    continuity_signature: String,
+}
+
+/// The protocol-level result of a rotation — a distinct type from `ApiError`
+/// because two of its cases carry a non-standard status: `key_version_stale` is a
+/// **409** here (a precondition failure), not the guard's 401, and every case is
+/// persisted then replayed verbatim on a retried `request_id` (idempotency).
+enum RotateOutcome {
+    Success {
+        token: String,
+        key_version: u32,
+    },
+    /// Status 409; `current` is the account's kv, or `-1` when we lost the lock
+    /// race and can't yet quote one.
+    KeyVersionStale {
+        current: i64,
+    },
+    /// 403 — the continuity signature didn't verify under the old auth key.
+    BadContinuity,
+}
+
+impl RotateOutcome {
+    /// The persisted form for idempotent replay.
+    fn to_record(&self) -> RotationRecord {
+        match self {
+            RotateOutcome::Success { token, key_version } => RotationRecord {
+                status: 200,
+                token: Some(token.clone()),
+                key_version: Some(*key_version),
+                error: None,
+                current: None,
+            },
+            RotateOutcome::KeyVersionStale { current } => RotationRecord {
+                status: 409,
+                token: None,
+                key_version: None,
+                error: Some(
+                    ApiError::KeyVersionStale {
+                        current: KeyVersion::ONE,
+                    }
+                    .code()
+                    .into(),
+                ),
+                current: Some(*current),
+            },
+            RotateOutcome::BadContinuity => RotationRecord {
+                status: 403,
+                token: None,
+                key_version: None,
+                error: Some(ApiError::BadContinuity.code().into()),
+                current: None,
+            },
+        }
+    }
+
+    /// Reconstruct the outcome to replay from a stored record.
+    fn from_record(rec: &RotationRecord) -> RotateOutcome {
+        if (200..300).contains(&rec.status) {
+            RotateOutcome::Success {
+                token: rec.token.clone().unwrap_or_default(),
+                key_version: rec.key_version.unwrap_or(1),
+            }
+        } else if rec.error.as_deref() == Some(ApiError::BadContinuity.code()) {
+            RotateOutcome::BadContinuity
+        } else {
+            RotateOutcome::KeyVersionStale {
+                current: rec.current.unwrap_or(-1),
+            }
+        }
+    }
+}
+
+impl<'r> Responder<'r, 'static> for RotateOutcome {
+    fn respond_to(self, _: &'r Request<'_>) -> rocket::response::Result<'static> {
+        let (status, body) = match self {
+            RotateOutcome::Success { token, key_version } => (
+                Status::Ok,
+                serde_json::json!({ "token": token, "key_version": key_version }),
+            ),
+            RotateOutcome::KeyVersionStale { current } => {
+                let e = ApiError::KeyVersionStale {
+                    current: KeyVersion::ONE,
+                };
+                (
+                    Status::Conflict,
+                    serde_json::json!({ "error": e.code(), "message": e.message(), "current": current }),
+                )
+            }
+            RotateOutcome::BadContinuity => (
+                Status::Forbidden,
+                serde_json::json!({
+                    "error": ApiError::BadContinuity.code(),
+                    "message": ApiError::BadContinuity.message(),
+                }),
+            ),
+        };
+        let s = body.to_string();
+        Response::build()
+            .status(status)
+            .header(ContentType::JSON)
+            .sized_body(s.len(), Cursor::new(s))
+            .ok()
+    }
+}
+
+/// A canonical hex UUID (8-4-4-4-12). Dep-free, mirrors Go's `requestIDRegex`.
+fn is_valid_request_id(s: &str) -> bool {
+    let groups = [8usize, 4, 4, 4, 12];
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == groups.len()
+        && parts
+            .iter()
+            .zip(groups)
+            .all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Whether `b64` base64url-decodes to exactly `want_len` bytes (mirrors
+/// `validPublicKey`): 32 for the Ed25519 auth key, 65 for the P-256 sharing key.
+fn valid_public_key(b64: &str, want_len: usize) -> bool {
+    matches!(URL_SAFE_NO_PAD.decode(b64), Ok(b) if b.len() == want_len)
+}
+
+/// `POST /v1/rotate-keys` — advance the account credential to `key_version` =
+/// current+1, proven by a continuity signature from the *old* auth key. Mirrors
+/// `handleRotateKeys`. Uses `AuthedUserNoKv` so the just-superseded token still
+/// authenticates; serialized per-uid by the rotation lock; idempotent on
+/// `request_id`.
+#[post("/v1/rotate-keys", data = "<body>")]
+async fn rotate_keys(
+    auth: Result<AuthedUserNoKv, ApiError>,
+    body: &str,
+    store: &State<SharedStore>,
+    config: &State<ServerConfig>,
+    profile_cache: &State<ProfileCache>,
+    rotation_mu: &State<RotationMutex>,
+) -> Result<RotateOutcome, ApiError> {
+    let AuthedUserNoKv(user) = auth?;
+
+    let req: RotateKeysRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+    if !is_valid_request_id(&req.request_id) {
+        return Err(ApiError::BadRequest);
+    }
+    // Validate the new credential params up front, before touching the lock/store.
+    let Some(kdf) = req.kdf.as_ref() else {
+        return Err(ApiError::BadRequest);
+    };
+    if req.salt.is_empty() || !valid_kdf_params(&req.salt, kdf) {
+        return Err(ApiError::BadRequest);
+    }
+    if !valid_public_key(&req.auth_public_key, 32) || !valid_public_key(&req.sharing_public_key, 65)
+    {
+        return Err(ApiError::BadRequest);
+    }
+    if req.continuity_signature.is_empty() {
+        return Err(ApiError::BadRequest);
+    }
+
+    let uid = user.user_id.as_str();
+    let record_key = key_rotation_record(uid, &req.request_id);
+
+    // 1. Serialize per uid. Losing the race → 409 current=-1, no record written.
+    let _lock = match rotation_mu.0.acquire(uid, ROTATION_TIMEOUT).await {
+        Ok(g) => g,
+        Err(_) => return Ok(RotateOutcome::KeyVersionStale { current: -1 }),
+    };
+
+    // 2. Idempotent replay (a load failure is treated as a miss, like Go).
+    if let Ok(Some(rec)) = load_rotation_record(store, &record_key).await {
+        return Ok(RotateOutcome::from_record(&rec));
+    }
+
+    // 3. Current profile.
+    let profile_bytes = store
+        .get_object(&key_profile(uid))
+        .await
+        .map_err(|_| ApiError::Internal("Failed to read profile".into()))?;
+    let mut profile: Profile = serde_json::from_slice(&profile_bytes)
+        .map_err(|_| ApiError::Internal("Failed to read profile".into()))?;
+    let current_kv = if profile.key_version == 0 {
+        1
+    } else {
+        profile.key_version
+    };
+
+    // 4. key_version precondition: must advance by exactly one.
+    if req.key_version != current_kv + 1 {
+        let outcome = RotateOutcome::KeyVersionStale {
+            current: i64::from(current_kv),
+        };
+        let _ = save_rotation_record(store, &record_key, &outcome.to_record()).await;
+        return Ok(outcome);
+    }
+
+    // 5. Continuity signature over JCS(signed fields), verified with the OLD key.
+    let old_pub = URL_SAFE_NO_PAD
+        .decode(&profile.auth_public_key)
+        .ok()
+        .filter(|b| b.len() == 32)
+        .ok_or_else(|| ApiError::Internal("Stored auth_public_key is malformed".into()))?;
+    let signed = serde_json::json!({
+        "request_id": req.request_id,
+        "key_version": req.key_version,
+        "auth_public_key": req.auth_public_key,
+        "sharing_public_key": req.sharing_public_key,
+        "salt": req.salt,
+        "kdf": req.kdf,
+    });
+    let signed_bytes = serde_json::to_vec(&signed)
+        .map_err(|_| ApiError::Internal("canonicalize failed".into()))?;
+    let sig_ok = URL_SAFE_NO_PAD
+        .decode(&req.continuity_signature)
+        .ok()
+        .is_some_and(|sig| verify(&old_pub, &signed_bytes, &sig).is_ok());
+    if !sig_ok {
+        let outcome = RotateOutcome::BadContinuity;
+        let _ = save_rotation_record(store, &record_key, &outcome.to_record()).await;
+        return Ok(outcome);
+    }
+
+    // 6. Write the new profile (unconditional; the lock makes it atomic for uid).
+    profile.auth_public_key = req.auth_public_key.clone();
+    profile.sharing_public_key = req.sharing_public_key.clone();
+    profile.salt = req.salt.clone();
+    profile.kdf = req.kdf.clone();
+    profile.key_version = req.key_version;
+    write_json(store, &key_profile(uid), &profile)
+        .await
+        .map_err(|_| ApiError::Internal("Failed to write profile".into()))?;
+
+    // 7. Refresh the resolve projection (best-effort — the profile is authoritative).
+    if !profile.handle.is_empty() {
+        let _ = write_json(
+            store,
+            &key_handle(&profile.handle),
+            &handle_projection(&profile),
+        )
+        .await;
+    }
+
+    // 8. Mint a token bound to the new key_version.
+    let kv = KeyVersion::new(req.key_version).unwrap_or(KeyVersion::ONE);
+    let token = token::generate(&config.server_secret, uid, user.device_id.as_str(), kv);
+
+    // 9. Record success for idempotent replay (best-effort: rotation already applied).
+    let outcome = RotateOutcome::Success {
+        token,
+        key_version: req.key_version,
+    };
+    let _ = save_rotation_record(store, &record_key, &outcome.to_record()).await;
+
+    // 10. Invalidate the cached kv so the next authed request sees the new one.
+    profile_cache.invalidate(uid);
+
+    Ok(outcome)
+}
+
 /// `GET /v1/events` — Server-Sent Events stream of real-time notifications for the
 /// authenticated user. The token arrives via `?token=` (EventSource can't set an
 /// `Authorization` header); the guard already accepts it there. Mirrors
@@ -1270,6 +1547,232 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::BadRequest);
+    }
+
+    // --- rotate-keys (authNoKV guard; continuity-signed; idempotent) ---
+
+    const REQ_ID: &str = "11111111-1111-1111-1111-111111111111";
+
+    /// The new credential a rotation moves to (valid lengths; content beyond length
+    /// is unchecked). Returns (auth_b64, sharing_b64, salt_b64, kdf).
+    fn new_keys() -> (String, String, String, serde_json::Value) {
+        (
+            URL_SAFE_NO_PAD.encode([1u8; 32]),
+            URL_SAFE_NO_PAD.encode([4u8; 65]),
+            URL_SAFE_NO_PAD.encode([0u8; 16]),
+            serde_json::json!({ "type": "argon2id", "m": 65536, "t": 3, "p": 1 }),
+        )
+    }
+
+    /// Seed an account at kv=1 whose auth key is `sk`'s public key (so a continuity
+    /// signature by `sk` verifies). Returns a kv=1 token.
+    async fn seed_for_rotation(store: &MemStore, sk: &ed25519_dalek::SigningKey) -> String {
+        let profile = Profile {
+            user_id: UID.into(),
+            handle: "alice".into(),
+            auth_public_key: URL_SAFE_NO_PAD.encode(sk.verifying_key().to_bytes()),
+            sharing_public_key: "old".into(),
+            key_version: 1,
+            ..Default::default()
+        };
+        put_json(store, &key_profile(UID), &profile).await;
+        store
+            .put_object(&key_device(UID, DID), b"{}", "application/json")
+            .await
+            .unwrap();
+        token::generate(TEST_SECRET, UID, DID, KeyVersion::ONE)
+    }
+
+    /// Build a rotation body, signing the canonical signed-fields with `sk`.
+    fn rotation_body(
+        request_id: &str,
+        key_version: u32,
+        sk: &ed25519_dalek::SigningKey,
+        auth: &str,
+        sharing: &str,
+        salt: &str,
+        kdf: &serde_json::Value,
+    ) -> String {
+        use ed25519_dalek::Signer;
+        let signed = serde_json::json!({
+            "request_id": request_id, "key_version": key_version,
+            "auth_public_key": auth, "sharing_public_key": sharing,
+            "salt": salt, "kdf": kdf,
+        });
+        let canonical = crate::authproof::canonicalize(signed.to_string().as_bytes()).unwrap();
+        let sig = sk.sign(&canonical);
+        serde_json::json!({
+            "request_id": request_id, "key_version": key_version,
+            "auth_public_key": auth, "sharing_public_key": sharing,
+            "salt": salt, "kdf": kdf,
+            "continuity_signature": URL_SAFE_NO_PAD.encode(sig.to_bytes()),
+        })
+        .to_string()
+    }
+
+    async fn post_rotate<'a>(
+        client: &'a Client,
+        token: &str,
+        body: String,
+    ) -> rocket::local::asynchronous::LocalResponse<'a> {
+        client
+            .post("/v1/rotate-keys")
+            .header(ContentType::JSON)
+            .header(bearer(token))
+            .body(body)
+            .dispatch()
+            .await
+    }
+
+    async fn stored_profile(client: &Client) -> Profile {
+        let bytes = client
+            .rocket()
+            .state::<SharedStore>()
+            .unwrap()
+            .get_object(&key_profile(UID))
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn rotate_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client
+            .post("/v1/rotate-keys")
+            .header(ContentType::JSON)
+            .body("{}")
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn rotate_happy_path_advances_kv_and_mints_token() {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let store = MemStore::new();
+        let token = seed_for_rotation(&store, &sk).await;
+        let client = client_with(store).await;
+        let (auth, sharing, salt, kdf) = new_keys();
+
+        let body = rotation_body(REQ_ID, 2, &sk, &auth, &sharing, &salt, &kdf);
+        let resp = post_rotate(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Ok);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["key_version"], 2);
+        let new_token = rb["token"].as_str().unwrap().to_string();
+
+        // Profile advanced to kv=2 with the new key.
+        let p = stored_profile(&client).await;
+        assert_eq!(p.key_version, 2);
+        assert_eq!(p.auth_public_key, auth);
+
+        // The freshly minted kv=2 token authenticates (the kv cache was invalidated).
+        let uri = format!("/v1/store/list?prefix=inbox/{UID}/live/");
+        let r2 = client
+            .get(uri.as_str())
+            .header(bearer(&new_token))
+            .dispatch()
+            .await;
+        assert_eq!(r2.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn rotate_is_idempotent_on_request_id() {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let store = MemStore::new();
+        let token = seed_for_rotation(&store, &sk).await;
+        let client = client_with(store).await;
+        let (auth, sharing, salt, kdf) = new_keys();
+        let body = rotation_body(REQ_ID, 2, &sk, &auth, &sharing, &salt, &kdf);
+
+        let r1 = post_rotate(&client, &token, body.clone()).await;
+        assert_eq!(r1.status(), Status::Ok);
+        let token1: serde_json::Value =
+            serde_json::from_str(&r1.into_string().await.unwrap()).unwrap();
+
+        // Replaying the same request_id returns the recorded outcome verbatim...
+        let r2 = post_rotate(&client, &token, body).await;
+        assert_eq!(r2.status(), Status::Ok);
+        let token2: serde_json::Value =
+            serde_json::from_str(&r2.into_string().await.unwrap()).unwrap();
+        assert_eq!(token1["token"], token2["token"]);
+        // ...and the kv did NOT advance a second time.
+        assert_eq!(stored_profile(&client).await.key_version, 2);
+    }
+
+    #[tokio::test]
+    async fn rotate_wrong_target_kv_is_409() {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let store = MemStore::new();
+        let token = seed_for_rotation(&store, &sk).await; // current kv=1
+        let client = client_with(store).await;
+        let (auth, sharing, salt, kdf) = new_keys();
+        // Target kv=5 ≠ current+1 (=2) → precondition fails before continuity.
+        let body = rotation_body(REQ_ID, 5, &sk, &auth, &sharing, &salt, &kdf);
+        let resp = post_rotate(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Conflict);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["error"], "key_version_stale");
+        assert_eq!(rb["current"], 1);
+    }
+
+    #[tokio::test]
+    async fn rotate_bad_continuity_is_403() {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let store = MemStore::new();
+        let token = seed_for_rotation(&store, &sk).await;
+        let client = client_with(store).await;
+        let (auth, sharing, salt, kdf) = new_keys();
+        // Sign with a different key than the account's auth_public_key.
+        let wrong = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let body = rotation_body(REQ_ID, 2, &wrong, &auth, &sharing, &salt, &kdf);
+        let resp = post_rotate(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Forbidden);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["error"], "bad_continuity");
+    }
+
+    #[tokio::test]
+    async fn rotate_contention_is_409_with_current_minus_one() {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let store = MemStore::new();
+        let token = seed_for_rotation(&store, &sk).await;
+        let client = client_with(store).await;
+        // Hold the rotation lock for UID externally → the handler times out.
+        let mu = client.rocket().state::<RotationMutex>().unwrap().0.clone();
+        let _held = mu.acquire(UID, StdDuration::from_secs(5)).await.unwrap();
+
+        let (auth, sharing, salt, kdf) = new_keys();
+        let body = rotation_body(REQ_ID, 2, &sk, &auth, &sharing, &salt, &kdf);
+        let resp = post_rotate(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Conflict);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["current"], -1);
+    }
+
+    #[tokio::test]
+    async fn rotate_stale_token_still_reaches_handler() {
+        // authNoKV: a superseded token must NOT be 401'd at the guard (as it would
+        // be on a normal endpoint) — it reaches the handler and hits the kv
+        // precondition (409), proving the guard's kv check was skipped.
+        let store = MemStore::new();
+        let _ = seed_account(&store, 2).await; // profile kv=2 + device
+        let stale = token::generate(TEST_SECRET, UID, DID, KeyVersion::ONE); // kv=1
+        let client = client_with(store).await;
+        let (auth, sharing, salt, kdf) = new_keys();
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[3u8; 32]);
+        // Wrong target kv (99) → 409 at the precondition, before continuity.
+        let body = rotation_body(REQ_ID, 99, &sk, &auth, &sharing, &salt, &kdf);
+        let resp = post_rotate(&client, &stale, body).await;
+        assert_eq!(resp.status(), Status::Conflict); // NOT 401
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["current"], 2);
     }
 
     // --- events SSE (phase 5c) ---
