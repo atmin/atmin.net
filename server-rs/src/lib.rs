@@ -19,4 +19,5 @@ pub mod reserved;
 pub mod routes;
 pub mod store;
 pub mod store_mem;
+pub mod store_s3;
 pub mod token;
