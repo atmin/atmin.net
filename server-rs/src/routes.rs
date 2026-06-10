@@ -7,6 +7,7 @@ use crate::cache::{DeviceCache, ProfileCache};
 use crate::cbor;
 use crate::config::ServerConfig;
 use crate::error::ApiError;
+use crate::events::{update_last_active, EventHub};
 use crate::guard::AuthedUser;
 use crate::media_quota::{
     InProcessMediaQuota, Reservation, SharedQuota, MAX_MEDIA_BYTES, USER_MEDIA_BLOB_CAP,
@@ -25,10 +26,11 @@ use base64::Engine;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use ciborium::value::Value;
 use rocket::http::ContentType;
+use rocket::response::stream::{Event, EventStream};
 use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
-use rocket::{delete, get, post, put, routes, Build, Request, Response, Rocket, State};
+use rocket::{delete, get, post, put, routes, Build, Request, Response, Rocket, Shutdown, State};
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -52,6 +54,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
         .manage(quota)
         .manage(DeviceCache::new())
         .manage(ProfileCache::new())
+        .manage(EventHub::new())
         .mount(
             "/",
             routes![
@@ -65,7 +68,8 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
                 delete_object,
                 store_presign,
                 store_compact,
-                update_profile
+                update_profile,
+                events
             ],
         )
 }
@@ -712,6 +716,54 @@ async fn update_profile(
     Ok(())
 }
 
+/// `GET /v1/events` — Server-Sent Events stream of real-time notifications for the
+/// authenticated user. The token arrives via `?token=` (EventSource can't set an
+/// `Authorization` header); the guard already accepts it there. Mirrors
+/// `handleEvents`.
+///
+/// Rocket emits its own periodic heartbeat comment to hold the connection open
+/// (Go writes a `:` keepalive by hand every 30s). On client disconnect the stream
+/// future drops, dropping the `Subscription`, which unregisters from the hub.
+///
+/// TODO(cutover): Go also sets `Cache-Control: no-cache` and `X-Accel-Buffering:
+/// no` to defeat proxy buffering. Rocket's `EventStream` responder doesn't expose
+/// header injection; revisit when the Rust server faces a real proxy (Scaleway).
+/// The phase-6 e2e runs against a native server with no proxy, so it isn't needed
+/// to pass the gate.
+#[get("/v1/events")]
+async fn events(
+    auth: Result<AuthedUser, ApiError>,
+    hub: &State<EventHub>,
+    store: &State<SharedStore>,
+    mut shutdown: Shutdown,
+) -> Result<EventStream![Event], ApiError> {
+    let user = auth?;
+    let mut sub = hub.register(user.user_id.as_str());
+
+    // Refresh last_active in a detached task — background metadata that must not
+    // delay or fail the stream. Mirrors Go's `go updateLastActive(...)`.
+    let store: SharedStore = store.inner().clone();
+    let uid = user.user_id.as_str().to_owned();
+    rocket::tokio::spawn(async move {
+        update_last_active(&store, &uid).await;
+    });
+
+    let stream = EventStream! {
+        // Initial event so the client knows the stream is live (Go's `connected`).
+        yield Event::data("{}").event("connected");
+        loop {
+            rocket::tokio::select! {
+                maybe = sub.recv() => match maybe {
+                    Some(ev) => yield Event::data("{}").event(ev),
+                    None => break, // hub side gone
+                },
+                _ = &mut shutdown => break, // graceful shutdown
+            }
+        }
+    };
+    Ok(stream.heartbeat(StdDuration::from_secs(30)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1039,6 +1091,18 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::Ok);
+    }
+
+    // --- events SSE (phase 5c) ---
+    // Only the pre-stream auth path is unit-testable: a successful stream is
+    // infinite and would hang the local client. Fan-out + last_active are covered
+    // by events.rs unit tests; the live stream is the phase-6 e2e's job.
+
+    #[tokio::test]
+    async fn events_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client.get("/v1/events").dispatch().await;
+        assert_eq!(resp.status(), Status::Unauthorized);
     }
 
     // --- store/object (authed single-key read) ---

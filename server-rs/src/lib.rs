@@ -11,6 +11,7 @@ pub mod cache;
 pub mod cbor;
 pub mod config;
 pub mod error;
+pub mod events;
 pub mod guard;
 pub mod keyed_mutex;
 pub mod media_quota;
