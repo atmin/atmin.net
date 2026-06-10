@@ -2,6 +2,7 @@ DOCKER ?= docker
 
 .PHONY: all build test lint fmt clean dev run e2e e2e-local install
 .PHONY: server server-build server-test server-lint server-fmt
+.PHONY: server-rs-test server-rs-lint server-rs-fmt
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
 .PHONY: up down
 
@@ -35,11 +36,11 @@ all: lint test build
 
 build: web-build server-build
 
-test: server-test web-test
+test: server-test web-test server-rs-test
 
-lint: server-lint web-lint web-lint-arch
+lint: server-lint web-lint web-lint-arch server-rs-lint
 
-fmt: server-fmt web-fmt
+fmt: server-fmt web-fmt server-rs-fmt
 
 # --- Server (Go) ---
 
@@ -66,6 +67,20 @@ server-lint: server/dist/PLACEHOLDER
 
 server-fmt:
 	cd server && gofmt -w .
+
+# --- Server (Rust, experimental — ADR-0018; not in `build`, Go is still the deployed binary) ---
+
+server-rs-test:
+	cd server-rs && cargo test
+
+# fmt --check lives in lint so the pre-commit hook (lint + test) catches unformatted
+# Rust; clippy -D warnings treats every lint as an error. --lib --tests covers source
+# and tests but skips the throwaway examples/ playground.
+server-rs-lint:
+	cd server-rs && cargo fmt --check && cargo clippy --lib --tests -- -D warnings
+
+server-rs-fmt:
+	cd server-rs && cargo fmt
 
 # --- Web (TypeScript) ---
 

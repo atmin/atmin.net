@@ -66,10 +66,13 @@ Required tools: Go (see `server/go.mod`), pnpm, Rust + `wasm32-unknown-unknown`,
 Run in this order; `fmt` must come before `lint` because lint flags formatting violations.
 
 ```
-make fmt    # gofmt + Biome write
-make lint   # go vet + Biome + tsc + architecture rules
-make test   # go test ./... + Vitest
+make fmt    # gofmt + Biome write + cargo fmt
+make lint   # go vet + Biome + tsc + architecture rules + cargo fmt --check + clippy
+make test   # go test ./... + Vitest + cargo test
 ```
+
+The `cargo` steps cover the `server-rs/` Rust port experiment (ADR-0018); they are
+not in `make build` — the Go server is still the deployed binary.
 
 Aggregates: `make all` = `lint test build`. CI runs the same Make targets — if they pass locally, CI passes (modulo deploy).
 
