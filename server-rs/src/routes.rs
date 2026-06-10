@@ -15,7 +15,8 @@ use crate::media_quota::{
 };
 use crate::model::{DeviceId, Handle, KeyVersion, UserId};
 use crate::paths::{
-    authorize_key, authorize_key_write, authorize_prefix, key_device, key_handle, key_profile,
+    authorize_key, authorize_key_write, authorize_prefix, key_device, key_handle, key_inbox_live,
+    key_profile,
 };
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
@@ -31,6 +32,8 @@ use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::{delete, get, post, put, routes, Build, Request, Response, Rocket, Shutdown, State};
+use serde_json::value::RawValue;
+use std::collections::BTreeSet;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration as StdDuration;
@@ -69,6 +72,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
                 store_presign,
                 store_compact,
                 update_profile,
+                send,
                 events
             ],
         )
@@ -716,6 +720,65 @@ async fn update_profile(
     Ok(())
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct SendRequest<'a> {
+    #[serde(borrow)]
+    envelopes: Vec<&'a RawValue>,
+}
+
+/// The sender-identity + routing fields read off each envelope; the rest of the
+/// envelope is opaque ciphertext, stored verbatim.
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct EnvelopeHeader {
+    to_user: String,
+    from_user: String,
+    from_device: String,
+    msg_id: String,
+}
+
+/// `POST /v1/send` — deliver encrypted envelopes to recipients' inboxes and notify
+/// them over SSE. Mirrors `handleSend`. Each envelope's `from_user`/`from_device`
+/// must match the authenticated token (else 403); the whole envelope is written
+/// verbatim to `inbox/{to_user}/live/{msg_id}`. No authorization on `to_user` —
+/// writing to any recipient's inbox is the point. Notifies each unique recipient
+/// once with `new_message`.
+#[post("/v1/send", data = "<body>")]
+async fn send(
+    auth: Result<AuthedUser, ApiError>,
+    body: &str,
+    store: &State<SharedStore>,
+    hub: &State<EventHub>,
+) -> Result<(), ApiError> {
+    let user = auth?;
+    let req: SendRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+
+    let mut recipients: BTreeSet<String> = BTreeSet::new();
+    for raw in &req.envelopes {
+        let env: EnvelopeHeader =
+            serde_json::from_str(raw.get()).map_err(|_| ApiError::BadRequest)?;
+        // Sender identity must match the token (can't forge from_user/from_device).
+        if env.from_user != user.user_id.as_str() || env.from_device != user.device_id.as_str() {
+            return Err(ApiError::Forbidden);
+        }
+        // Write the envelope exactly as received (opaque ciphertext).
+        store
+            .put_object(
+                &key_inbox_live(&env.to_user, &env.msg_id),
+                raw.get().as_bytes(),
+                "application/json",
+            )
+            .await?;
+        recipients.insert(env.to_user);
+    }
+
+    for to in &recipients {
+        hub.notify(to, "new_message");
+    }
+    Ok(())
+}
+
 /// `GET /v1/events` — Server-Sent Events stream of real-time notifications for the
 /// authenticated user. The token arrives via `?token=` (EventSource can't set an
 /// `Authorization` header); the guard already accepts it there. Mirrors
@@ -1091,6 +1154,103 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::Ok);
+    }
+
+    // --- send (authed; writes inbox + SSE notify) ---
+
+    /// A recipient uid distinct from the sender (UID). Any string works as an
+    /// inbox target — send doesn't validate `to_user`.
+    const RID: &str = "01BX5ZZKBKACTAV9WEVGEMMVRZ";
+
+    fn send_body(to: &str, from_user: &str, from_device: &str, msg_id: &str) -> String {
+        serde_json::json!({
+            "envelopes": [{
+                "to_user": to,
+                "from_user": from_user,
+                "from_device": from_device,
+                "msg_id": msg_id,
+                "ciphertext": "BHEf…",
+            }]
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn send_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client
+            .post("/v1/send")
+            .header(ContentType::JSON)
+            .body(send_body(RID, UID, DID, "m1"))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn send_delivers_to_inbox_and_notifies_recipient() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await; // authed as UID/DID
+        let client = client_with(store).await;
+
+        // A connected recipient device, so we can observe the SSE notification.
+        let hub = client.rocket().state::<EventHub>().unwrap().clone();
+        let mut sub = hub.register(RID);
+
+        let resp = client
+            .post("/v1/send")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(send_body(RID, UID, DID, "m1"))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // The envelope landed in the recipient's live inbox, verbatim.
+        let stored = client
+            .rocket()
+            .state::<SharedStore>()
+            .unwrap()
+            .get_object(&format!("inbox/{RID}/live/m1"))
+            .await
+            .unwrap();
+        let env: serde_json::Value = serde_json::from_slice(&stored).unwrap();
+        assert_eq!(env["from_user"], UID);
+        assert_eq!(env["ciphertext"], "BHEf…");
+
+        // ...and the recipient was notified.
+        assert_eq!(sub.recv().await, Some("new_message".into()));
+    }
+
+    #[tokio::test]
+    async fn send_rejects_forged_sender() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        // from_user claims a different account than the token's UID.
+        let resp = client
+            .post("/v1/send")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(send_body(RID, RID, DID, "m1"))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn send_bad_body_is_400() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .post("/v1/send")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body("not json")
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::BadRequest);
     }
 
     // --- events SSE (phase 5c) ---

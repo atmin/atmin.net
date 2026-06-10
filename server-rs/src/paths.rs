@@ -19,6 +19,12 @@ pub fn prefix_media(user_id: &str) -> String {
     format!("media/{user_id}/")
 }
 
+/// A live inbox message key — `inbox/{user_id}/live/{msg_id}`. Mirrors
+/// `keyInboxLive`; `send` writes each delivered envelope here.
+pub fn key_inbox_live(user_id: &str, msg_id: &str) -> String {
+    format!("inbox/{user_id}/live/{msg_id}")
+}
+
 const USERS_ROOT: &str = "users/";
 const DATA_PREFIXES: [&str; 3] = ["inbox/", "keys/", "media/"];
 
