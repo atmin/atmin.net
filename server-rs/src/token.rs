@@ -11,6 +11,7 @@
 //! key_version rewritten. Tokens are always 4 segments; the legacy 3-segment
 //! (no-kv) shape is rejected.
 
+use crate::model::KeyVersion;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -31,10 +32,10 @@ pub enum TokenError {
     Signature,
 }
 
-/// Mirrors `generateToken`. `key_version < 1` is clamped to 1, matching Go.
-pub fn generate(secret: &[u8], user_id: &str, device_id: &str, key_version: u32) -> String {
-    let kv = key_version.max(1);
-    let payload = format!("{user_id}.{device_id}.{kv}");
+/// Mirrors `generateToken`. Go clamps `kv < 1` to 1; here `KeyVersion` is ≥ 1 by
+/// construction, so the clamp is unrepresentable and simply gone.
+pub fn generate(secret: &[u8], user_id: &str, device_id: &str, key_version: KeyVersion) -> String {
+    let payload = format!("{user_id}.{device_id}.{}", key_version.get());
     let mac = compute_hmac(secret, payload.as_bytes());
     let raw = format!("{payload}.{}", URL_SAFE_NO_PAD.encode(mac));
     URL_SAFE_NO_PAD.encode(raw.as_bytes())
@@ -42,7 +43,7 @@ pub fn generate(secret: &[u8], user_id: &str, device_id: &str, key_version: u32)
 
 /// Mirrors `parseToken`. Decodes a 4-segment token and verifies its HMAC.
 /// Any other shape — including the legacy 3-segment form — is rejected.
-pub fn parse(secret: &[u8], token: &str) -> Result<(String, String, u32), TokenError> {
+pub fn parse(secret: &[u8], token: &str) -> Result<(String, String, KeyVersion), TokenError> {
     let raw = URL_SAFE_NO_PAD
         .decode(token)
         .map_err(|_| TokenError::Encoding)?;
@@ -54,11 +55,13 @@ pub fn parse(secret: &[u8], token: &str) -> Result<(String, String, u32), TokenE
     }
     let (user_id, device_id, kv_str, sig_b64) = (parts[0], parts[1], parts[2], parts[3]);
 
-    // Parse before decoding the signature, matching Go's order.
-    let kv: u32 = kv_str.parse().map_err(|_| TokenError::KeyVersion)?;
-    if kv < 1 {
-        return Err(TokenError::KeyVersion);
-    }
+    // Parse before decoding the signature, matching Go's order. `KeyVersion`
+    // rejects 0; `parse::<u32>` rejects negatives and non-numerics.
+    let kv = kv_str
+        .parse::<u32>()
+        .ok()
+        .and_then(KeyVersion::new)
+        .ok_or(TokenError::KeyVersion)?;
 
     let sig = URL_SAFE_NO_PAD
         .decode(sig_b64)
@@ -83,6 +86,7 @@ fn compute_hmac(secret: &[u8], message: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::KeyVersion;
 
     const SECRET: &[u8] = b"test-server-secret";
 
@@ -94,21 +98,25 @@ mod tests {
 
     #[test]
     fn round_trip() {
-        let token = generate(SECRET, "u-alice", "d-1", 3);
+        let token = generate(SECRET, "u-alice", "d-1", KeyVersion::new(3).unwrap());
         let (uid, did, kv) = parse(SECRET, &token).unwrap();
-        assert_eq!((uid.as_str(), did.as_str(), kv), ("u-alice", "d-1", 3));
+        assert_eq!(
+            (uid.as_str(), did.as_str(), kv.get()),
+            ("u-alice", "d-1", 3)
+        );
     }
 
     #[test]
-    fn key_version_clamped_to_one() {
-        let token = generate(SECRET, "u-alice", "d-1", 0);
-        let (_, _, kv) = parse(SECRET, &token).unwrap();
-        assert_eq!(kv, 1);
+    fn key_version_zero_rejected_on_parse() {
+        // generate() cannot be handed a 0 — KeyVersion is ≥1 by construction — so
+        // the only place a 0 can appear is an untrusted token, which parse rejects.
+        let token = encode_segments(&["u-alice", "d-1", "0", "c2ln"]);
+        assert_eq!(parse(SECRET, &token), Err(TokenError::KeyVersion));
     }
 
     #[test]
     fn wrong_secret_rejected() {
-        let token = generate(SECRET, "u-alice", "d-1", 1);
+        let token = generate(SECRET, "u-alice", "d-1", KeyVersion::ONE);
         assert_eq!(parse(b"other-secret", &token), Err(TokenError::Signature));
     }
 
@@ -128,7 +136,7 @@ mod tests {
     #[test]
     fn tampered_payload_rejected() {
         // Keep a valid signature but swap the user id: HMAC no longer matches.
-        let valid = generate(SECRET, "u-alice", "d-1", 1);
+        let valid = generate(SECRET, "u-alice", "d-1", KeyVersion::ONE);
         let raw = String::from_utf8(URL_SAFE_NO_PAD.decode(&valid).unwrap()).unwrap();
         let parts: Vec<&str> = raw.split('.').collect();
         let forged = encode_segments(&["u-mallory", parts[1], parts[2], parts[3]]);

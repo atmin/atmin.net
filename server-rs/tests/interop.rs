@@ -9,7 +9,7 @@
 //! Go/TS emitters, never from this crate, or the conformance check degrades into a
 //! circular self-snapshot (see `tests/vectors/README.md`).
 
-use atmin_server::{authproof, cbor, token};
+use atmin_server::{authproof, cbor, model::KeyVersion, token};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use ciborium::value::Value;
 use serde::Deserialize;
@@ -91,13 +91,14 @@ fn token_byte_identity_with_go() {
         let secret = v.secret.as_bytes();
 
         // Rust generates the exact same token bytes Go did.
-        let got = token::generate(secret, &v.user_id, &v.device_id, v.key_version);
+        let kv = KeyVersion::new(v.key_version).expect("vector key_version >= 1");
+        let got = token::generate(secret, &v.user_id, &v.device_id, kv);
         assert_eq!(got, v.token, "token mismatch for {}", v.user_id);
 
         // Rust parses + verifies a Go-produced token.
-        let (uid, did, kv) = token::parse(secret, &v.token).expect("parse Go token");
+        let (uid, did, parsed_kv) = token::parse(secret, &v.token).expect("parse Go token");
         assert_eq!(
-            (uid.as_str(), did.as_str(), kv),
+            (uid.as_str(), did.as_str(), parsed_kv.get()),
             (v.user_id.as_str(), v.device_id.as_str(), v.key_version)
         );
     }
