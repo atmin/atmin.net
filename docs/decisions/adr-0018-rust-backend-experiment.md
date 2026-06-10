@@ -204,6 +204,16 @@ interop tests in `server-rs`. Phase 2 (type skeleton) is unblocked.
     assume canonical encoding — both already true of `ciborium`. Verified by
     `cbor_decodes_go_archive` / `cbor_roundtrip_stable`.
 
+- **`user_id`/`device_id` are spec'd as ULIDs but unvalidated on the login path.**
+  Registration generates ULIDs and the spec (mvp-v0.1 "IDs & naming") declares both as
+  ULIDs, but the login / add-device handler trusts the client-supplied `user_id` and the
+  auth-proof's `device_id` without a format check. The Rust port models `UserId`/`DeviceId`
+  as ULID-validated newtypes (phase 2) — *decision: the spec is the source of truth, the
+  leniency is an omission to fix* — which also makes them safe by construction in the dotted
+  token format and as S3 key segments (a ULID has no `.` or `/`).
+  - *Impact:* a deliberate tightening over current Go behaviour, enforced at the API
+    boundary (phase 3). If it ever rejects a real input, that input was already off-spec.
+
 ## Alternatives considered
 
 - **Keep Go (status quo).** Zero risk; foregoes the spec audit and the TS+Rust consolidation.
