@@ -70,6 +70,7 @@ dependencies = [
  "ed25519-dalek",
  "hex",
  "hmac",
+ "log",
  "rocket",
  "serde",
  "serde_jcs",

@@ -13,6 +13,12 @@ pub fn key_handle(handle: &str) -> String {
     format!("handles/{handle}.json")
 }
 
+/// The `media/{user_id}/` prefix — the quota subsystem scans it to total usage.
+/// Mirrors `prefixMedia`.
+pub fn prefix_media(user_id: &str) -> String {
+    format!("media/{user_id}/")
+}
+
 const USERS_ROOT: &str = "users/";
 const DATA_PREFIXES: [&str; 3] = ["inbox/", "keys/", "media/"];
 
@@ -34,6 +40,19 @@ pub fn authorize_prefix(user_id: &str, prefix: &str) -> bool {
 /// envelope). The write path stays owner-only. Mirrors `authorizeKey`.
 pub fn authorize_key(user_id: &str, key: &str) -> bool {
     authorize_prefix(user_id, key) || key.starts_with("media/")
+}
+
+/// Whether `user_id` may *write* `key`. Like [`authorize_key`] but owner-only:
+/// the public `media/` read capability and the public `users/…` read are both
+/// dropped — only the caller's own data subtree and own `users/{uid}/` are
+/// writable. Mirrors `authorizeKeyWrite`.
+pub fn authorize_key_write(user_id: &str, key: &str) -> bool {
+    for p in DATA_PREFIXES {
+        if key.starts_with(&format!("{p}{user_id}/")) {
+            return true;
+        }
+    }
+    key.starts_with(&format!("{USERS_ROOT}{user_id}/"))
 }
 
 #[cfg(test)]
@@ -66,5 +85,18 @@ mod tests {
         // But another user's inbox/keys is still denied.
         assert!(!authorize_key("u1", "inbox/u2/live/m"));
         assert!(!authorize_key("u1", "keys/u2/live/s"));
+    }
+
+    #[test]
+    fn authorize_key_write_is_owner_only() {
+        // Own data subtree and own users/ path are writable.
+        assert!(authorize_key_write("u1", "inbox/u1/live/m"));
+        assert!(authorize_key_write("u1", "media/u1/01ABC"));
+        assert!(authorize_key_write("u1", "users/u1/profile.json"));
+
+        // No public media write, no other-user write, no foreign users/ path.
+        assert!(!authorize_key_write("u1", "media/u2/01ABC"));
+        assert!(!authorize_key_write("u1", "inbox/u2/live/m"));
+        assert!(!authorize_key_write("u1", "users/u2/profile.json"));
     }
 }

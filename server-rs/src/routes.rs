@@ -7,8 +7,14 @@ use crate::cbor;
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::guard::AuthedUser;
+use crate::media_quota::{
+    InProcessMediaQuota, Reservation, SharedQuota, MAX_MEDIA_BYTES, USER_MEDIA_BLOB_CAP,
+    USER_MEDIA_QUOTA_BYTES,
+};
 use crate::model::{DeviceId, Handle, KeyVersion, UserId};
-use crate::paths::{authorize_key, authorize_prefix, key_device, key_handle, key_profile};
+use crate::paths::{
+    authorize_key, authorize_key_write, authorize_prefix, key_device, key_handle, key_profile,
+};
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
 use crate::store::{SharedStore, StoreError};
@@ -21,8 +27,10 @@ use rocket::http::ContentType;
 use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
-use rocket::{get, post, put, routes, Build, Request, Response, Rocket, State};
+use rocket::{delete, get, post, put, routes, Build, Request, Response, Rocket, State};
 use std::io::Cursor;
+use std::sync::Arc;
+use std::time::Duration as StdDuration;
 use ulid::Ulid;
 
 /// Post-deletion handle reservation window (ADR-0013).
@@ -34,19 +42,29 @@ const STORE_LIST_LIMIT: usize = 50;
 /// Build the Rocket app over a given store + config. Tests pass a `MemStore`;
 /// production will pass an S3-backed store.
 pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
-    rocket::build().manage(store).manage(config).mount(
-        "/",
-        routes![
-            healthz,
-            resolve,
-            register,
-            add_device,
-            store_list,
-            store_object,
-            store_compact,
-            update_profile
-        ],
-    )
+    // One shared quota instance across presign (reserve) and delete (invalidate),
+    // so the delete path expires the same cached usage. Mirrors `newMux`.
+    let quota: SharedQuota = Arc::new(InProcessMediaQuota::new(store.clone()));
+    rocket::build()
+        .manage(store)
+        .manage(config)
+        .manage(quota)
+        .mount(
+            "/",
+            routes![
+                healthz,
+                resolve,
+                register,
+                add_device,
+                store_list,
+                store_usage,
+                store_object,
+                delete_object,
+                store_presign,
+                store_compact,
+                update_profile
+            ],
+        )
 }
 
 #[get("/healthz")]
@@ -158,6 +176,104 @@ async fn store_object(
         data,
         cacheable: key.starts_with("media/"),
     })
+}
+
+#[derive(Serialize)]
+struct StoreUsageResponse {
+    used_bytes: u64,
+    quota_bytes: u64,
+    blob_count: usize,
+    quota_blob_cap: usize,
+}
+
+/// `GET /v1/store/usage` — the caller's media usage from the quota cache (re-probing
+/// S3 on a miss). No prefix authorization: implicitly scoped to the authenticated
+/// user, takes no key, read-only. Mirrors `handleStoreUsage`.
+#[get("/v1/store/usage")]
+async fn store_usage(
+    auth: Result<AuthedUser, ApiError>,
+    quota: &State<SharedQuota>,
+) -> Result<Json<StoreUsageResponse>, ApiError> {
+    let user = auth?;
+    let (used, count) = quota.get_usage(user.user_id.as_str()).await?;
+    Ok(Json(StoreUsageResponse {
+        used_bytes: used,
+        quota_bytes: USER_MEDIA_QUOTA_BYTES,
+        blob_count: count,
+        quota_blob_cap: USER_MEDIA_BLOB_CAP,
+    }))
+}
+
+/// `DELETE /v1/store/object` — owner-only delete (unlike the capability-protected
+/// GET). Idempotent. On a media delete the user's cached quota usage is
+/// invalidated (the handler has only the key, not the byte size, so it can't
+/// decrement precisely — the next access re-probes S3). Mirrors `handleDeleteObject`.
+#[delete("/v1/store/object?<key>")]
+async fn delete_object(
+    auth: Result<AuthedUser, ApiError>,
+    key: Option<&str>,
+    store: &State<SharedStore>,
+    quota: &State<SharedQuota>,
+) -> Result<(), ApiError> {
+    let user = auth?;
+    let key = key.filter(|k| !k.is_empty()).ok_or(ApiError::BadRequest)?;
+    if !authorize_key_write(user.user_id.as_str(), key) {
+        return Err(ApiError::Forbidden);
+    }
+    store.delete_object(key).await?;
+    if key.starts_with("media/") {
+        quota.invalidate(user.user_id.as_str()).await;
+    }
+    Ok(())
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct PresignRequest {
+    key: String,
+    bytes: i64,
+}
+
+#[derive(Serialize)]
+struct PresignResponse {
+    presigned_url: String,
+}
+
+/// `POST /v1/store/presign` — issue a presigned PUT URL for a key the caller owns.
+/// Media keys are size-checked (per-blob cap) and quota-reserved before signing.
+/// Mirrors `handleStorePresign`.
+#[post("/v1/store/presign", data = "<body>")]
+async fn store_presign(
+    auth: Result<AuthedUser, ApiError>,
+    body: &str,
+    store: &State<SharedStore>,
+    quota: &State<SharedQuota>,
+) -> Result<Json<PresignResponse>, ApiError> {
+    let user = auth?;
+    let req: PresignRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+    if req.key.is_empty() || req.bytes <= 0 {
+        return Err(ApiError::BadRequest);
+    }
+    if !authorize_key_write(user.user_id.as_str(), &req.key) {
+        return Err(ApiError::Forbidden);
+    }
+    let bytes = req.bytes as u64;
+    if req.key.starts_with("media/") {
+        if bytes > MAX_MEDIA_BYTES {
+            return Err(ApiError::TooLarge);
+        }
+        match quota.reserve_upload(user.user_id.as_str(), bytes).await? {
+            Reservation::Granted => {}
+            Reservation::DeniedBytes | Reservation::DeniedCount => {
+                return Err(ApiError::QuotaExceeded)
+            }
+        }
+    }
+
+    let url = store
+        .presign_put(&req.key, bytes, StdDuration::from_secs(15 * 60))
+        .await?;
+    Ok(Json(PresignResponse { presigned_url: url }))
 }
 
 /// Serialize `value` as JSON and store it. Serialization failure → 500.
@@ -1379,5 +1495,215 @@ mod tests {
         let pb: serde_json::Value =
             serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
         assert_eq!(pb["display_name"], "Alice A.");
+    }
+
+    // --- store/usage + presign + delete (the MediaQuota cluster) ---
+
+    #[tokio::test]
+    async fn store_usage_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client.get("/v1/store/usage").dispatch().await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn store_usage_reports_quota_constants_and_zero_usage() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .get("/v1/store/usage")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        let b: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["used_bytes"], 0);
+        assert_eq!(b["blob_count"], 0);
+        assert_eq!(b["quota_bytes"], 1u64 << 30);
+        assert_eq!(b["quota_blob_cap"], 1000);
+    }
+
+    #[tokio::test]
+    async fn presign_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .body(serde_json::json!({ "key": format!("media/{UID}/01A"), "bytes": 10 }).to_string())
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn presign_missing_fields_is_400() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        // bytes <= 0 is rejected.
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(serde_json::json!({ "key": format!("media/{UID}/01A"), "bytes": 0 }).to_string())
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::BadRequest);
+    }
+
+    #[tokio::test]
+    async fn presign_other_users_key_is_403() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(
+                serde_json::json!({ "key": "media/01BX5ZZKBKACTAV9WEVGEMMVRZ/01A", "bytes": 10 })
+                    .to_string(),
+            )
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn presign_media_over_blob_cap_is_413_too_large() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(
+                serde_json::json!({
+                    "key": format!("media/{UID}/01A"),
+                    "bytes": MAX_MEDIA_BYTES + 1,
+                })
+                .to_string(),
+            )
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::PayloadTooLarge);
+        let b: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "too_large");
+    }
+
+    #[tokio::test]
+    async fn presign_media_happy_path_returns_url_and_reserves() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let key = format!("media/{UID}/01A");
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(serde_json::json!({ "key": key, "bytes": 1234 }).to_string())
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+        let b: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["presigned_url"], format!("http://fake-presign/{key}"));
+
+        // The reservation is reflected in usage (optimistic increment, no S3 write).
+        let resp = client
+            .get("/v1/store/usage")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        let u: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(u["used_bytes"], 1234);
+        assert_eq!(u["blob_count"], 1);
+    }
+
+    #[tokio::test]
+    async fn presign_non_media_skips_quota() {
+        // A keys/ backup presign isn't size-checked or quota-reserved.
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(
+                serde_json::json!({
+                    "key": format!("keys/{UID}/live/01S"),
+                    "bytes": MAX_MEDIA_BYTES + 1, // would exceed the media cap, but not media
+                })
+                .to_string(),
+            )
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn delete_object_owner_only_and_invalidates_quota() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        // A media blob exists in S3; usage probes it.
+        store
+            .put_object(
+                &format!("media/{UID}/01A"),
+                &[0u8; 500],
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+        let client = client_with(store).await;
+
+        // Usage reflects the 500-byte blob (first probe populates the cache).
+        let resp = client
+            .get("/v1/store/usage")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        let u: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(u["used_bytes"], 500);
+
+        // Delete it (owner-only); idempotent 200.
+        let del_uri = format!("/v1/store/object?key=media/{UID}/01A");
+        let resp = client
+            .delete(del_uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // Quota was invalidated → the next usage re-probes and sees the blob gone.
+        let resp = client
+            .get("/v1/store/usage")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        let u: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(u["used_bytes"], 0);
+        assert_eq!(u["blob_count"], 0);
+    }
+
+    #[tokio::test]
+    async fn delete_object_other_users_key_is_403() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        // Media is publicly *readable* but owner-only for writes/deletes.
+        let resp = client
+            .delete("/v1/store/object?key=media/01BX5ZZKBKACTAV9WEVGEMMVRZ/01A")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
     }
 }
