@@ -10,7 +10,12 @@
 //! This module verifies the *signature* only. Freshness (the 5-minute window)
 //! and `key_version >= 1` are handler concerns, deferred to phase 3.
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, VerifyingKey};
+use serde::Deserialize;
+use serde_json::value::RawValue;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AuthProofError {
@@ -48,4 +53,56 @@ pub fn verify(
 
     vk.verify_strict(&canonical, &sig)
         .map_err(|_| AuthProofError::VerifyFailed)
+}
+
+/// Max age of an auth proof's timestamp (the ±5-minute freshness window, auth.go).
+pub const AUTH_PROOF_MAX_AGE_SECS: i64 = 300;
+
+/// A signed auth proof as sent on the wire: a `payload` object plus a base64url
+/// Ed25519 `signature` over its JCS-canonical bytes. The payload is kept as a
+/// `RawValue` so it can be canonicalized exactly as received (mirrors Go's
+/// `payloadRaw`).
+#[derive(Deserialize)]
+pub struct AuthProof {
+    pub payload: Box<RawValue>,
+    pub signature: String,
+}
+
+/// The typed payload inside an [`AuthProof`].
+#[derive(Deserialize)]
+pub struct AuthProofPayload {
+    pub user_id: String,
+    pub device_id: String,
+    pub timestamp: String,
+    #[serde(default)]
+    pub key_version: u32,
+}
+
+/// Verify a proof's signature (over JCS(payload)), its freshness (±5 min from
+/// `now`), and that it carries `key_version >= 1`. Mirrors `verifyAuthProof`.
+/// Does *not* check key_version against the account's current value — the caller
+/// does that, since it needs the profile. Returns the parsed payload on success.
+pub fn verify_proof(
+    public_key: &[u8],
+    proof: &AuthProof,
+    now: DateTime<Utc>,
+) -> Result<AuthProofPayload, AuthProofError> {
+    let sig = URL_SAFE_NO_PAD
+        .decode(&proof.signature)
+        .map_err(|_| AuthProofError::BadSignature)?;
+    verify(public_key, proof.payload.get().as_bytes(), &sig)?;
+
+    let payload: AuthProofPayload =
+        serde_json::from_str(proof.payload.get()).map_err(|_| AuthProofError::Canonicalize)?;
+
+    let ts = DateTime::parse_from_rfc3339(&payload.timestamp)
+        .map_err(|_| AuthProofError::VerifyFailed)?
+        .with_timezone(&Utc);
+    if (now - ts).num_seconds().abs() > AUTH_PROOF_MAX_AGE_SECS {
+        return Err(AuthProofError::VerifyFailed);
+    }
+    if payload.key_version == 0 {
+        return Err(AuthProofError::VerifyFailed);
+    }
+    Ok(payload)
 }

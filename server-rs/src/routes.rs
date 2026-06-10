@@ -2,15 +2,18 @@
 //! phase 3; `build` mounts whatever handlers exist so far. Production wiring (an
 //! S3-backed store, `#[launch]` main) lands in phase 4.
 
+use crate::authproof::{verify_proof, AuthProof};
 use crate::config::ServerConfig;
 use crate::error::ApiError;
 use crate::guard::AuthedUser;
-use crate::model::{Handle, KeyVersion};
+use crate::model::{DeviceId, Handle, KeyVersion, UserId};
 use crate::paths::{authorize_key, authorize_prefix, key_device, key_handle, key_profile};
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
 use crate::store::{SharedStore, StoreError};
 use crate::token;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rocket::http::ContentType;
 use rocket::response::Responder;
@@ -31,7 +34,14 @@ const STORE_LIST_LIMIT: usize = 50;
 pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
     rocket::build().manage(store).manage(config).mount(
         "/",
-        routes![healthz, resolve, register, store_list, store_object],
+        routes![
+            healthz,
+            resolve,
+            register,
+            add_device,
+            store_list,
+            store_object
+        ],
     )
 }
 
@@ -291,6 +301,89 @@ async fn register(
         device_id,
         token,
         handle: req.handle,
+    }))
+}
+
+#[derive(Deserialize)]
+struct AddDeviceRequest {
+    #[serde(default)]
+    user_id: String,
+    auth_proof: AuthProof,
+    #[serde(default)]
+    device_label: String,
+}
+
+#[derive(Serialize)]
+struct AddDeviceResponse {
+    device_id: String,
+    token: String,
+}
+
+/// `POST /v1/devices` — the returning-device flow: verify a signed auth proof
+/// against the account, then write a new device file and issue a token. Public
+/// (the proof *is* the credential). Mirrors `handleAddDevice`.
+#[post("/v1/devices", data = "<body>")]
+async fn add_device(
+    body: &str,
+    store: &State<SharedStore>,
+    config: &State<ServerConfig>,
+) -> Result<Json<AddDeviceResponse>, ApiError> {
+    let req: AddDeviceRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+    let user_id = UserId::new(&req.user_id).map_err(|_| ApiError::BadRequest)?;
+
+    // Load the account; a missing profile → 404 (via From<StoreError>).
+    let profile_bytes = store.get_object(&key_profile(user_id.as_str())).await?;
+    let profile: Profile = serde_json::from_slice(&profile_bytes)
+        .map_err(|_| ApiError::Internal("Failed to parse profile".into()))?;
+
+    // Verify the proof against the account's auth public key. A malformed key,
+    // bad signature, or stale timestamp is all a 403 (mirrors errAuthProofInvalid).
+    let pubkey = URL_SAFE_NO_PAD
+        .decode(&profile.auth_public_key)
+        .ok()
+        .filter(|b| b.len() == 32)
+        .ok_or(ApiError::Forbidden)?;
+    let payload =
+        verify_proof(&pubkey, &req.auth_proof, Utc::now()).map_err(|_| ApiError::Forbidden)?;
+
+    // The proof is only valid against the account's current key_version.
+    let current = if profile.key_version == 0 {
+        1
+    } else {
+        profile.key_version
+    };
+    if payload.key_version != current {
+        return Err(ApiError::KeyVersionStale {
+            current: KeyVersion::new(current).unwrap_or(KeyVersion::ONE),
+        });
+    }
+
+    // device_id comes from the signed payload; validate it's a ULID (the port's
+    // ULID-strict tightening, ADR-0018 Findings).
+    let device_id = DeviceId::new(&payload.device_id).map_err(|_| ApiError::BadRequest)?;
+    let kv = KeyVersion::new(current).unwrap_or(KeyVersion::ONE);
+    let token = token::generate(
+        &config.server_secret,
+        user_id.as_str(),
+        device_id.as_str(),
+        kv,
+    );
+
+    let device = serde_json::json!({
+        "device_id": device_id.as_str(),
+        "device_label": req.device_label,
+        "created_at": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+    });
+    write_json(
+        store,
+        &key_device(user_id.as_str(), device_id.as_str()),
+        &device,
+    )
+    .await?;
+
+    Ok(Json(AddDeviceResponse {
+        device_id: device_id.as_str().to_string(),
+        token,
     }))
 }
 
@@ -761,5 +854,151 @@ mod tests {
         let client = client_with(MemStore::new()).await;
         let resp = register(&client, serde_json::json!({ "handle": "dave" }).to_string()).await;
         assert_eq!(resp.status(), Status::BadRequest);
+    }
+
+    // --- add-device / returning device (public; the signed proof is the credential) ---
+
+    fn proof_keypair() -> (ed25519_dalek::SigningKey, String) {
+        let sk = ed25519_dalek::SigningKey::from_bytes(&[7u8; 32]);
+        let pubkey_b64 = URL_SAFE_NO_PAD.encode(sk.verifying_key().to_bytes());
+        (sk, pubkey_b64)
+    }
+
+    fn signed_proof(
+        sk: &ed25519_dalek::SigningKey,
+        user_id: &str,
+        device_id: &str,
+        timestamp: &str,
+        kv: u32,
+    ) -> serde_json::Value {
+        use ed25519_dalek::Signer;
+        let payload = serde_json::json!({
+            "user_id": user_id, "device_id": device_id,
+            "timestamp": timestamp, "key_version": kv,
+        });
+        // Sign over the JCS-canonical payload — exactly what the server re-derives.
+        let canonical = crate::authproof::canonicalize(payload.to_string().as_bytes()).unwrap();
+        let sig = sk.sign(&canonical);
+        serde_json::json!({
+            "payload": payload,
+            "signature": URL_SAFE_NO_PAD.encode(sig.to_bytes()),
+        })
+    }
+
+    async fn seed_profile_with_pubkey(store: &MemStore, pubkey_b64: &str, kv: u32) {
+        let profile = Profile {
+            user_id: UID.into(),
+            auth_public_key: pubkey_b64.into(),
+            key_version: kv,
+            ..Default::default()
+        };
+        put_json(store, &key_profile(UID), &profile).await;
+    }
+
+    fn now_rfc3339() -> String {
+        Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+    }
+
+    async fn post_add_device(
+        client: &Client,
+        body: String,
+    ) -> rocket::local::asynchronous::LocalResponse<'_> {
+        client
+            .post("/v1/devices")
+            .header(ContentType::JSON)
+            .body(body)
+            .dispatch()
+            .await
+    }
+
+    #[tokio::test]
+    async fn add_device_happy_then_token_works() {
+        let (sk, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 1).await;
+        let client = client_with(store).await;
+
+        let proof = signed_proof(&sk, UID, DID, &now_rfc3339(), 1);
+        let body =
+            serde_json::json!({ "user_id": UID, "device_label": "phone", "auth_proof": proof })
+                .to_string();
+        let resp = post_add_device(&client, body).await;
+        assert_eq!(resp.status(), Status::Ok);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["device_id"], DID);
+        let token = rb["token"].as_str().unwrap().to_string();
+
+        // The freshly issued token authenticates (the device file was written).
+        let uri = format!("/v1/store/list?prefix=inbox/{UID}/live/");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn add_device_unknown_account_is_404() {
+        let (sk, _) = proof_keypair();
+        let client = client_with(MemStore::new()).await; // no profile seeded
+        let proof = signed_proof(&sk, UID, DID, &now_rfc3339(), 1);
+        let body = serde_json::json!({ "user_id": UID, "device_label": "x", "auth_proof": proof })
+            .to_string();
+        assert_eq!(
+            post_add_device(&client, body).await.status(),
+            Status::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn add_device_bad_signature_is_403() {
+        let (_, pk) = proof_keypair();
+        // Sign with a different key than the account's auth_public_key.
+        let wrong = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 1).await;
+        let client = client_with(store).await;
+        let proof = signed_proof(&wrong, UID, DID, &now_rfc3339(), 1);
+        let body = serde_json::json!({ "user_id": UID, "device_label": "x", "auth_proof": proof })
+            .to_string();
+        assert_eq!(
+            post_add_device(&client, body).await.status(),
+            Status::Forbidden
+        );
+    }
+
+    #[tokio::test]
+    async fn add_device_expired_proof_is_403() {
+        let (sk, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 1).await;
+        let client = client_with(store).await;
+        let stale = (Utc::now() - Duration::days(1)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let proof = signed_proof(&sk, UID, DID, &stale, 1);
+        let body = serde_json::json!({ "user_id": UID, "device_label": "x", "auth_proof": proof })
+            .to_string();
+        assert_eq!(
+            post_add_device(&client, body).await.status(),
+            Status::Forbidden
+        );
+    }
+
+    #[tokio::test]
+    async fn add_device_stale_key_version_is_401() {
+        let (sk, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 2).await; // account at kv 2
+        let client = client_with(store).await;
+        let proof = signed_proof(&sk, UID, DID, &now_rfc3339(), 1); // proof claims kv 1
+        let body = serde_json::json!({ "user_id": UID, "device_label": "x", "auth_proof": proof })
+            .to_string();
+        let resp = post_add_device(&client, body).await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(rb["error"], "key_version_stale");
+        assert_eq!(rb["current"], 2);
     }
 }
