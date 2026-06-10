@@ -11,6 +11,7 @@ pub mod cbor;
 pub mod config;
 pub mod error;
 pub mod guard;
+pub mod keyed_mutex;
 pub mod media_quota;
 pub mod model;
 pub mod paths;
