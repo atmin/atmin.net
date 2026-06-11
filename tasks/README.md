@@ -3,7 +3,19 @@
 Active implementation tasks, grouped by milestone and in priority order.
 Delete a file once its change lands.
 
-## MVP v0.1 — complete ✅
+## 🔴 Fix first — known data-integrity bug
+
+- **[key-backup-unsafe-session-id-key](key-backup-unsafe-session-id-key.md)** — the
+  base64 Megolm `session_id` is used **raw** as an S3 key segment
+  (`keys/{uid}/live/{session_id}`); when it contains a `/`, the object name is invalid,
+  the **fire-and-forget key backup PUT silently 400s**, and ~4% of sessions' messages
+  become **undecryptable on restore** (new device / post-rotation / migration).
+  Pre-existing on `master`, backend-agnostic (not the Rust port). **Parked** during the
+  Rust cutover (ADR-0018) only to avoid a mid-transition context-switch — apply it
+  **first thing after cutover**, on `master`, then rebase the branch. Found by the
+  `flaky-compare` stress test; trace-confirmed (`XMinioInvalidObjectName`).
+
+## MVP v0.1 — complete ✅ (modulo the bug above)
 
 The v0.1 baseline is done: a self-contained, self-service E2E messenger
 (password credentials, handles, rotation, media, edit/delete, account
