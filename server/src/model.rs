@@ -1,14 +1,14 @@
 //! Domain newtypes: making illegal states unrepresentable.
 //!
-//! The opening move of phase 2 (ADR-0018). Invariants the Go server enforces at
-//! runtime move into the type system, so the compiler — not a defensive check —
-//! rules out the bad state.
+//! Invariants that would otherwise be enforced by runtime checks live in the type
+//! system instead, so the compiler — not a defensive check — rules out the bad
+//! state.
 
 use std::num::NonZeroU32;
 
 /// A `key_version` (ADR-0012): ≥ 1 by construction. There is no `KeyVersion(0)`,
-/// so the Go server's "clamp `kv < 1` to 1" step is simply unnecessary here — a
-/// caller cannot express the bad value in the first place.
+/// so no clamp-to-1 step is needed — a caller cannot express the bad value in the
+/// first place.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct KeyVersion(NonZeroU32);
 
@@ -35,7 +35,7 @@ pub enum IdError {
 }
 
 /// Crockford base32 alphabet (the ULID encoding): digits + uppercase letters,
-/// excluding I, L, O, U. The Go server emits ULIDs uppercase.
+/// excluding I, L, O, U. ULIDs are emitted uppercase.
 const CROCKFORD: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 fn validate_ulid(s: &str) -> Result<(), IdError> {
@@ -54,10 +54,9 @@ fn validate_ulid(s: &str) -> Result<(), IdError> {
 
 /// A user id: a ULID (spec mvp-v0.1 "IDs & naming"). Validated on construction.
 ///
-/// The Go login path trusts the client-supplied `user_id` without this check —
-/// an omission the spec doesn't sanction (ADR-0018 Findings). Enforcing it here
-/// also guarantees the value is safe in the dotted token format and as an S3 key
-/// segment (a ULID contains no `.` or `/`).
+/// Enforcing the ULID shape here — rather than trusting the client-supplied
+/// `user_id` — guarantees the value is safe in the dotted token format and as an
+/// S3 key segment (a ULID contains no `.` or `/`).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct UserId(String);
 
@@ -124,7 +123,7 @@ fn validate_handle_syntax(s: &str) -> Result<(), HandleError> {
     }
     // First char a lowercase letter; last char a lowercase letter or digit (never
     // a hyphen); body is [a-z0-9-]. "No consecutive hyphens" can't be expressed in
-    // an RE2 regex, so Go checks it separately — and so do we.
+    // a single character-class regex, so it's checked separately below.
     if !b[0].is_ascii_lowercase() {
         return Err(HandleError::Invalid);
     }

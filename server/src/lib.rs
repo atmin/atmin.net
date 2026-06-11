@@ -1,10 +1,10 @@
-//! atmin backend — Rust port experiment (ADR-0018).
+//! atmin backend: a stateless S3 proxy + SSE hub.
 //!
-//! Phase 1 is the interop spike: reproduce and verify the Go server's three
-//! wire formats (token, auth-proof over JCS, CBOR archive) against golden
-//! vectors emitted by the Go + TS code. No HTTP/Rocket surface yet.
-//!
-//! See `tasks/rust-backend-spike.md`.
+//! All durable state lives in S3 behind the [`store::Store`] trait; the only
+//! in-process state is the SSE hub, the device-existence cache, and the
+//! media-quota cache (ADR-0001, ADR-0004). The three wire formats — token,
+//! auth-proof over JCS, and the CBOR archive — are pinned byte-for-byte against
+//! golden vectors shared with the TS client (see `tests/interop.rs`).
 
 pub mod authproof;
 pub mod cache;

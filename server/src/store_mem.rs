@@ -1,10 +1,7 @@
-//! In-memory `Store` for tests. Mirrors `server/store_mem.go`.
+//! In-memory `Store` for tests.
 //!
 //! Backed by a `BTreeMap`, so keys are intrinsically sorted — listing is a
 //! filtered scan and matches S3's lexicographic order without an explicit sort.
-//!
-//! The Go `MemStore`'s fault-injection hooks (`headErr`, `putErr`) are not ported
-//! yet; they land with the phase-3 handler tests that need them.
 
 use crate::store::{ListPage, ObjectSizes, Store, StoreError};
 use async_trait::async_trait;

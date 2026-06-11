@@ -1,4 +1,4 @@
-//! Data-retention cleanup (ADR-0006 + ADR-0013). Mirrors `server/cleanup.go`.
+//! Data-retention cleanup (ADR-0006 + ADR-0013).
 //!
 //! A single idempotent sweep over `handles/` that removes three kinds of dead
 //! data:
@@ -23,8 +23,8 @@ use chrono::{DateTime, Duration, Utc};
 /// Fixed grace window after registration before an abandoned account is eligible
 /// (ADR-0006). Only the inactive threshold is configurable.
 const ABANDONED_GRACE_DAYS: i64 = 7;
-/// Post-deletion handle reservation window (ADR-0013). Mirrors the same constant
-/// in `routes.rs` — both descend from ADR-0013 (dedupe in the cleanup pass).
+/// Post-deletion handle reservation window (ADR-0013). The registration path in
+/// `routes.rs` carries the same constant; they could be deduplicated here.
 const HANDLE_COOLDOWN_DAYS: i64 = 30;
 /// One `handles/` listing page.
 const HANDLES_PAGE_SIZE: usize = 1000;
@@ -124,7 +124,7 @@ pub async fn run_cleanup(
 }
 
 /// Classify one handle file. `None` = keep. A tombstone or a handle pointing at a
-/// missing profile is kept unless it's an *expired* tombstone. Mirrors `evaluateUser`.
+/// missing profile is kept unless it's an *expired* tombstone.
 async fn evaluate_user(
     store: &SharedStore,
     handle_key: &str,
@@ -195,7 +195,7 @@ async fn inbox_empty(store: &SharedStore, uid: &str) -> Result<bool, StoreError>
 }
 
 /// Remove everything for a user: all objects under their four prefixes, plus the
-/// handle file. Idempotent. Mirrors `deleteUser`.
+/// handle file. Idempotent.
 async fn delete_user(store: &SharedStore, profile: &Profile) -> Result<(), StoreError> {
     let uid = &profile.user_id;
     for prefix in [

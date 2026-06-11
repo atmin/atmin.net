@@ -1,14 +1,14 @@
-//! Per-user media quota. Mirrors `server/media_quota.go`.
+//! Per-user media quota.
 //!
-//! In-process for the port's current phase — the same "in-process now, shared
-//! state later" pattern as the EventHub (ADR-0004). A Redis-backed implementation
-//! can swap in behind the [`MediaQuota`] trait without touching handlers.
+//! In-process for now — the same "in-process now, shared state later" pattern as
+//! the EventHub (ADR-0004). A Redis-backed implementation can swap in behind the
+//! [`MediaQuota`] trait without touching handlers.
 //!
-//! Concurrency mirrors Go's `sync.Map` + per-entry `sync.Mutex`: an outer
-//! `std::sync::Mutex` guards the map only briefly (never across an `.await`),
-//! handing out a cloned `Arc<tokio::Mutex<…>>` per user. The per-user async lock
-//! *is* held across the S3 probe, so concurrent uploads for one user serialize —
-//! they don't double-probe, and the optimistic increment stays atomic.
+//! Two-tier locking: an outer `std::sync::Mutex` guards the map only briefly
+//! (never across an `.await`), handing out a cloned `Arc<tokio::Mutex<…>>` per
+//! user. The per-user async lock *is* held across the S3 probe, so concurrent
+//! uploads for one user serialize — they don't double-probe, and the optimistic
+//! increment stays atomic.
 
 use crate::paths::prefix_media;
 use crate::store::{SharedStore, StoreError};
@@ -24,12 +24,12 @@ pub const MAX_MEDIA_BYTES: u64 = 25 * 1024 * 1024;
 pub const USER_MEDIA_QUOTA_BYTES: u64 = 1 << 30;
 /// Per-user blob count cap: one `ListObjectsV2` page.
 pub const USER_MEDIA_BLOB_CAP: usize = 1000;
-/// Cached usage TTL: 10 minutes (matches Go's `QUOTA_CACHE_TTL`).
+/// Cached usage TTL: 10 minutes.
 const QUOTA_CACHE_TTL_SECS: i64 = 600;
 
 /// Outcome of [`MediaQuota::reserve_upload`]. `DeniedBytes`/`DeniedCount` both
-/// surface to clients as the same 413 `quota_exceeded`; the split mirrors Go's
-/// `reason` string and keeps the cause inspectable for logging.
+/// surface to clients as the same 413 `quota_exceeded`; splitting them keeps the
+/// cause inspectable for logging.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Reservation {
     Granted,
@@ -37,7 +37,7 @@ pub enum Reservation {
     DeniedCount,
 }
 
-/// Per-user quota cache + reservation. The Go `MediaQuotaStore` interface.
+/// Per-user quota cache + reservation.
 #[async_trait]
 pub trait MediaQuota: Send + Sync {
     /// Check quota + cap and optimistically increment usage. `Granted` permits
@@ -63,7 +63,7 @@ struct QuotaEntry {
     usage_bytes: u64,
     blob_count: usize,
     /// `None` until first populated (and after [`MediaQuota::invalidate`]) — both
-    /// mean "expired", forcing a re-probe. Mirrors Go's zero-`time.Time`.
+    /// mean "expired", forcing a re-probe.
     expires_at: Option<DateTime<Utc>>,
 }
 
@@ -71,7 +71,7 @@ struct QuotaEntry {
 pub struct InProcessMediaQuota {
     store: SharedStore,
     entries: StdMutex<HashMap<String, Arc<AsyncMutex<QuotaEntry>>>>,
-    /// Injectable clock (mirrors Go's `now func() time.Time`) — tests drive TTL.
+    /// Injectable clock — tests drive TTL.
     now: Box<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
 

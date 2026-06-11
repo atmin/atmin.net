@@ -1,4 +1,4 @@
-//! Profile / handle data types. Mirrors `server/profile.go`.
+//! Profile / handle data types.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -12,9 +12,9 @@ const KDF_FLOOR_ITERATIONS: u32 = 3;
 const KDF_MAX_ITERATIONS: u32 = 16;
 const KDF_MAX_PARALLELISM: u32 = 8;
 
-/// Whether `salt` + `kdf` are an acceptable credential pair (mirrors
-/// `validKDFParams`): `argon2id`, params within the ADR-0016 floor/ceiling, and
-/// a salt that base64url-decodes to exactly 16 bytes.
+/// Whether `salt` + `kdf` are an acceptable credential pair: `argon2id`, params
+/// within the ADR-0016 floor/ceiling, and a salt that base64url-decodes to
+/// exactly 16 bytes.
 pub fn valid_kdf_params(salt: &str, kdf: &KdfParams) -> bool {
     if kdf.kind != "argon2id" {
         return false;
@@ -44,9 +44,9 @@ pub struct KdfParams {
 
 /// The public projection written to `handles/{handle}.json` and returned by
 /// resolve. Two shapes share the path: a *live* projection (fields set) or a
-/// *tombstone* (only `released_at`). Field presence mirrors Go's `omitempty` so
-/// the wire shape is byte-identical; `salt`/`kdf`/`key_version` are always
-/// present (null/0/"" on a tombstone).
+/// *tombstone* (only `released_at`). Optional string fields are omitted when
+/// empty (`skip_serializing_if`) to pin the wire shape; `salt`/`kdf`/`key_version`
+/// are always present (null/0/"" on a tombstone).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PublicHandleData {
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -68,9 +68,8 @@ pub struct PublicHandleData {
 }
 
 /// A user's full profile (`users/{uid}/profile.json`) — the server-owned source
-/// of truth. Mirrors `server/profile.go`. The container `#[serde(default)]`
-/// matches Go's `json.Unmarshal` tolerance: absent fields become the zero value
-/// rather than a parse error.
+/// of truth. The container `#[serde(default)]` makes decoding tolerant: absent
+/// fields become the zero value rather than a parse error.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Profile {

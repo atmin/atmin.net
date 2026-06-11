@@ -1,8 +1,8 @@
-//! Reserved-handle blocklist (ADR-0013). Mirrors `server/handle.go`'s embedded
-//! list + `parseReservedHandles`.
+//! Reserved-handle blocklist (ADR-0013).
 //!
-//! The Go side also supports a `RESERVED_HANDLES_PATH` env override for operators;
-//! that's deferred — only the embedded list is honored for now.
+//! The blocklist is the embedded `reserved_handles.txt`; the `RESERVED_HANDLES_PATH`
+//! operator override described in ADR-0013 is not wired up — only the embedded
+//! list is honored.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -27,7 +27,7 @@ fn reserved_set() -> &'static HashSet<String> {
 }
 
 /// Whether `handle` is on the reserved blocklist. The handle is assumed already
-/// lowercased (the charset rule forces lowercase), matching how Go compares.
+/// lowercased (the charset rule forces lowercase), so the comparison is direct.
 pub fn is_reserved(handle: &str) -> bool {
     reserved_set().contains(handle)
 }

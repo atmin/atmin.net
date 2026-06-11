@@ -1,12 +1,11 @@
-//! Cross-language interop: Rust must reproduce/verify the wire formats of both
-//! the Go server (`gowebpki/jcs`) and the TS production signer (the
-//! `canonicalize` npm package) byte-for-byte. Vectors are generated upstream —
-//! `server/interop_vectors_test.go` and `web/src/lib/jcs-interop-vectors.gen.test.ts`,
-//! both `GEN_VECTORS=1` — and embedded here at compile time. See
-//! `tasks/rust-backend-spike.md` (ADR-0018, phase 1).
+//! Cross-language interop: the wire formats (token, auth-proof over JCS, CBOR
+//! archive) must match the TS production signer (the `canonicalize` npm package)
+//! byte-for-byte. Vectors are generated upstream — by the JCS interop generator in
+//! `web/src/lib/jcs-interop-vectors.gen.test.ts` and a matching reference emitter,
+//! both under `GEN_VECTORS=1` — and embedded here at compile time.
 //!
-//! These vectors are an *independent oracle* — only ever regenerate them from the
-//! Go/TS emitters, never from this crate, or the conformance check degrades into a
+//! These vectors are an *independent oracle* — only ever regenerate them from
+//! those emitters, never from this crate, or the conformance check degrades into a
 //! circular self-snapshot (see `tests/vectors/README.md`).
 
 use atmin_server::{authproof, cbor, model::KeyVersion, token};
@@ -76,7 +75,7 @@ fn ts_vectors() -> TsVectors {
     serde_json::from_str(raw).expect("parse ts-vectors.json")
 }
 
-/// TS canonical bytes keyed by case name, for cross-referencing the Go battery.
+/// TS canonical bytes keyed by case name, for cross-referencing the JCS battery.
 fn ts_canonical_by_name() -> std::collections::HashMap<String, Vec<u8>> {
     ts_vectors()
         .jcs_battery
@@ -90,12 +89,12 @@ fn token_byte_identity_with_go() {
     for v in vectors().tokens {
         let secret = v.secret.as_bytes();
 
-        // Rust generates the exact same token bytes Go did.
+        // generate() reproduces the vector's token bytes exactly.
         let kv = KeyVersion::new(v.key_version).expect("vector key_version >= 1");
         let got = token::generate(secret, &v.user_id, &v.device_id, kv);
         assert_eq!(got, v.token, "token mismatch for {}", v.user_id);
 
-        // Rust parses + verifies a Go-produced token.
+        // parse() round-trips a vector-supplied token.
         let (uid, did, parsed_kv) = token::parse(secret, &v.token).expect("parse Go token");
         assert_eq!(
             (uid.as_str(), did.as_str(), parsed_kv.get()),
@@ -104,11 +103,10 @@ fn token_byte_identity_with_go() {
     }
 }
 
-/// Cases where serde_jcs is *known* to diverge from gowebpki/jcs — a phase-1
-/// spike finding (see ADR-0018 and tasks/rust-backend-spike.md). serde_jcs keeps
-/// JSON integers beyond 2^53 exact, whereas RFC 8785 — and Go, and the JS/TS
-/// `canonicalize` signer (JS numbers are IEEE-754 doubles) — round to the nearest
-/// double. The protocol never signs such numbers, so this is a documented
+/// Cases where serde_jcs is *known* to diverge from the reference canonicalizers.
+/// serde_jcs keeps JSON integers beyond 2^53 exact, whereas RFC 8785 — and the
+/// JS/TS `canonicalize` signer (JS numbers are IEEE-754 doubles) — round to the
+/// nearest double. The protocol never signs such numbers, so this is a documented
 /// constraint, not a blocker. `jcs_known_number_divergence_pinned` pins it.
 const KNOWN_DIVERGENCES: &[&str] = &["num_over_2pow53"];
 
@@ -174,8 +172,8 @@ fn jcs_battery_matches_ts() {
     );
 }
 
-/// The production signer (TS) and the server's verifier (Go) must agree on every
-/// case — this is a property of the *current* system, independent of the port.
+/// The two reference canonicalizers (the TS production signer and the vector
+/// emitter) must agree on every case — a property of the system as a whole.
 /// Holds even for the >2^53 case: both round to the nearest IEEE-754 double.
 #[test]
 fn go_and_ts_agree() {
@@ -205,8 +203,8 @@ fn auth_proof_canonical_matches_ts() {
 
 /// Pins the one known JCS divergence so a future serde_jcs change (e.g. it starts
 /// rounding large integers to f64 like RFC 8785) flips this test and prompts a
-/// docs update — rather than silently changing signing behaviour. Go and TS both
-/// round; serde_jcs alone keeps the exact integer.
+/// docs update — rather than silently changing signing behaviour. The reference
+/// canonicalizers both round; serde_jcs alone keeps the exact integer.
 #[test]
 fn jcs_known_number_divergence_pinned() {
     let case = vectors()
@@ -233,7 +231,7 @@ fn jcs_known_number_divergence_pinned() {
 fn auth_proof_canonical_matches_and_verifies() {
     let p = vectors().auth_proof;
 
-    // Canonical bytes agree with Go...
+    // Canonical bytes agree with the vector...
     let canonical = authproof::canonicalize(p.payload_json.as_bytes()).unwrap();
     assert_eq!(
         hex::encode(&canonical),
@@ -241,7 +239,7 @@ fn auth_proof_canonical_matches_and_verifies() {
         "canonical bytes differ from Go"
     );
 
-    // ...and the Go-produced signature verifies in Rust.
+    // ...and the vector's signature verifies.
     let pubkey = hex::decode(&p.public_key_hex).unwrap();
     let sig = URL_SAFE_NO_PAD.decode(&p.signature_b64url).unwrap();
     authproof::verify(&pubkey, p.payload_json.as_bytes(), &sig).expect("verify Go-signed proof");
@@ -279,7 +277,7 @@ fn cbor_decodes_go_archive() {
     // A text field round-trips...
     assert_eq!(cbor::get_text(&entries[0], "to_user"), Some("u-bob"));
 
-    // ...and the finding holds: JSON numbers are stored as CBOR doubles.
+    // ...and JSON numbers are stored as CBOR doubles.
     assert!(
         matches!(cbor::get(&entries[0], "v"), Some(Value::Float(_))),
         "expected `v` to be a CBOR double (compaction: json.Unmarshal -> float64 -> cbor)"
@@ -295,6 +293,6 @@ fn cbor_roundtrip_stable() {
     let again = cbor::decode_archive(&reencoded).unwrap();
 
     // Semantic stability. Byte-identity is *not* asserted: archives aren't
-    // canonically encoded (Go map iteration order), so re-encoded bytes may differ.
+    // canonically encoded (map key order isn't fixed), so re-encoded bytes may differ.
     assert_eq!(entries, again);
 }

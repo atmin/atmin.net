@@ -1,16 +1,15 @@
-//! CBOR archive: an array of envelope objects, as written by the Go compaction
-//! path (`fxamacker/cbor`). Decoded/encoded here with `ciborium`.
+//! CBOR archive: an array of envelope objects written by the compaction path,
+//! decoded/encoded here with `ciborium`.
 //!
-//! Two properties the Go side pins (see server/interop_vectors_test.go) that a
-//! reader must respect:
-//!   - JSON numbers arrive as CBOR **doubles** — compaction does
-//!     `json.Unmarshal` into `any` (→ float64) before `cbor.Marshal`. So a field
-//!     like `"v":1` decodes to `Value::Float(1.0)`, not an integer.
-//!   - Map key order is **not canonical** (Go map iteration). Decoding must be
-//!     order-tolerant; byte-identical re-encoding is not a goal.
+//! Two properties of the archive format a reader must respect:
+//!   - JSON numbers arrive as CBOR **doubles** — compaction round-trips each
+//!     envelope through an untyped JSON decode (numbers become floats) before
+//!     CBOR-encoding. So a field like `"v":1` decodes to `Value::Float(1.0)`,
+//!     not an integer.
+//!   - Map key order is **not canonical**. Decoding must be order-tolerant;
+//!     byte-identical re-encoding is not a goal.
 //!
-//! The Go `map[any]any`-vs-`map[string]any` duality is a Go-internal artifact —
-//! here every archive map is just text-keyed, decoded directly.
+//! Every archive map is text-keyed and decoded directly.
 
 use ciborium::value::Value;
 
@@ -52,8 +51,7 @@ pub fn get_text<'a>(entry: &'a Value, key: &str) -> Option<&'a str> {
 }
 
 /// Deduplicate archive entries by `msg_id`, keeping the first occurrence; entries
-/// without a `msg_id` (e.g. key backups) are always kept. Mirrors
-/// `deduplicateByMsgID`. Order is preserved.
+/// without a `msg_id` (e.g. key backups) are always kept. Order is preserved.
 pub fn deduplicate_by_msg_id(objects: Vec<Value>) -> Vec<Value> {
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::with_capacity(objects.len());

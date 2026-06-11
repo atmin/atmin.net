@@ -1,7 +1,6 @@
 //! Device token: HMAC-SHA256 over `uid.did.kv`, the whole thing base64url-wrapped.
 //!
-//! Mirrors `server/auth.go` (`generateToken` / `parseToken`). Wire format
-//! (ADR-0012):
+//! Wire format (ADR-0012):
 //!
 //! ```text
 //! base64url( uid "." did "." kv "." base64url(HMAC-SHA256(secret, uid"."did"."kv)) )
@@ -32,8 +31,8 @@ pub enum TokenError {
     Signature,
 }
 
-/// Mirrors `generateToken`. Go clamps `kv < 1` to 1; here `KeyVersion` is ≥ 1 by
-/// construction, so the clamp is unrepresentable and simply gone.
+/// Generate a device token. `KeyVersion` is ≥ 1 by construction, so there's no
+/// `kv < 1` case to clamp — it's unrepresentable.
 pub fn generate(secret: &[u8], user_id: &str, device_id: &str, key_version: KeyVersion) -> String {
     let payload = format!("{user_id}.{device_id}.{}", key_version.get());
     let mac = compute_hmac(secret, payload.as_bytes());
@@ -41,7 +40,7 @@ pub fn generate(secret: &[u8], user_id: &str, device_id: &str, key_version: KeyV
     URL_SAFE_NO_PAD.encode(raw.as_bytes())
 }
 
-/// Mirrors `parseToken`. Decodes a 4-segment token and verifies its HMAC.
+/// Decode a 4-segment token and verify its HMAC.
 /// Any other shape — including the legacy 3-segment form — is rejected.
 pub fn parse(secret: &[u8], token: &str) -> Result<(String, String, KeyVersion), TokenError> {
     let raw = URL_SAFE_NO_PAD
@@ -55,7 +54,7 @@ pub fn parse(secret: &[u8], token: &str) -> Result<(String, String, KeyVersion),
     }
     let (user_id, device_id, kv_str, sig_b64) = (parts[0], parts[1], parts[2], parts[3]);
 
-    // Parse before decoding the signature, matching Go's order. `KeyVersion`
+    // Parse the key_version before decoding the signature. `KeyVersion`
     // rejects 0; `parse::<u32>` rejects negatives and non-numerics.
     let kv = kv_str
         .parse::<u32>()
@@ -68,7 +67,7 @@ pub fn parse(secret: &[u8], token: &str) -> Result<(String, String, KeyVersion),
         .map_err(|_| TokenError::SignatureEncoding)?;
 
     // Recompute over the *original* kv segment (`kv_str`), not a re-formatted
-    // one — Go signs `parts[2]` verbatim. `verify_slice` is constant-time.
+    // one: the HMAC covers the segment verbatim. `verify_slice` is constant-time.
     let message = format!("{user_id}.{device_id}.{kv_str}");
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC accepts any key length");
     mac.update(message.as_bytes());

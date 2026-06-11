@@ -1,17 +1,16 @@
-//! Server-Sent Events fan-out + the `last_active` updater. Mirrors
-//! `server/events.go` (`EventHub`, `updateLastActive`).
+//! Server-Sent Events fan-out + the `last_active` updater.
 //!
 //! One user can have several connected devices, so the hub maps `user_id` → a
 //! list of per-connection channels; `notify` fans an event out to all of them.
 //! In-process now, shared-state (Redis pub/sub) later — the same trajectory as
 //! the quota and caches (ADR-0004).
 //!
-//! Faithful to Go's semantics: a buffered channel (capacity 10) per connection,
-//! and a **non-blocking** send (`try_send`) so a slow device is skipped rather
-//! than stalling `notify` — Go's `select { case ch <- e: default: }`. The Go
-//! handler's manual `Register`/`Unregister` pair becomes a RAII [`Subscription`]:
-//! dropping it (client disconnects → the SSE stream future drops) unregisters and
-//! prunes the user's entry when its last connection goes.
+//! Each connection gets a buffered channel (capacity 10), and sends are
+//! **non-blocking** (`try_send`) so a slow device is skipped rather than
+//! stalling `notify`. Lifecycle is RAII: [`register`](EventHub::register)
+//! returns a [`Subscription`], and dropping it (client disconnects → the SSE
+//! stream future drops) unregisters and prunes the user's entry when its last
+//! connection goes.
 
 use crate::paths::key_profile;
 use crate::profile::Profile;
@@ -22,11 +21,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// Per-connection channel buffer (mirrors Go's `make(chan string, 10)`).
+/// Per-connection channel buffer.
 const CHANNEL_BUFFER: usize = 10;
 
 /// Skip refreshing `last_active` if the stored value is younger than this
-/// (mirrors `updateLastActive`'s 1-hour skip).
+/// (the 1-hour write-coalescing window).
 const LAST_ACTIVE_REFRESH_SECS: i64 = 3600;
 
 struct Conn {
@@ -107,7 +106,7 @@ impl EventHub {
 }
 
 /// A live SSE connection. Holds the receiving end; dropping it unregisters from
-/// the hub (replacing Go's explicit `defer hub.Unregister`).
+/// the hub.
 pub struct Subscription {
     inner: Arc<HubInner>,
     user_id: String,
@@ -131,7 +130,6 @@ impl Drop for Subscription {
 /// Refresh `last_active` on the user's profile, skipping if the stored value is
 /// less than an hour old. Best-effort: any read/parse/write failure is swallowed
 /// (it's a background metadata update, not part of the request's contract).
-/// Mirrors `updateLastActive`.
 pub async fn update_last_active(store: &SharedStore, user_id: &str) {
     let key = key_profile(user_id);
     let Ok(bytes) = store.get_object(&key).await else {

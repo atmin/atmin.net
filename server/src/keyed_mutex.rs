@@ -1,6 +1,5 @@
 //! Per-key async serialization. One generic primitive serving both callers that
-//! `server/` split into two identical files (`rotation_mutex.go` keyed by uid,
-//! `handle_mutex.go` keyed by handle).
+//! need it: rotation (keyed by uid) and the handle claim (keyed by handle).
 //!
 //! Why it exists: the object store has no conditional writes, so the
 //! GET-VERIFY-WRITE on `profile.json` (rotation) and the GET-then-PUT handle claim
@@ -10,9 +9,8 @@
 //!
 //! A per-key `Semaphore` with one permit is the lock; a refcount keeps the entry
 //! alive only while someone holds or waits for it, so a key locked once doesn't
-//! pin a slot forever. The Go version returns a `release func()` the caller "MUST
-//! invoke"; here [`acquire`](KeyedMutex::acquire) returns a [`KeyedGuard`] that
-//! releases on `Drop` — leaking it is not possible.
+//! pin a slot forever. [`acquire`](KeyedMutex::acquire) returns a [`KeyedGuard`]
+//! that releases on `Drop` — leaking the lock is not possible.
 
 use rocket::tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use rocket::tokio::time::timeout;
@@ -93,7 +91,7 @@ impl KeyedMutex {
         }
     }
 
-    /// Number of live lock slots — for tests/observability (mirrors Go's `size`).
+    /// Number of live lock slots — for tests/observability.
     pub fn len(&self) -> usize {
         self.inner.slots.lock().unwrap().len()
     }

@@ -1,6 +1,5 @@
-//! HTTP routes (Rocket). Mirrors `server/routes.go` (`newMux`). Built up through
-//! phase 3; `build` mounts whatever handlers exist so far. Production wiring (an
-//! S3-backed store, `#[launch]` main) lands in phase 4.
+//! HTTP routes (Rocket). [`build`] wires the store, config, and in-process state
+//! into a Rocket app and mounts every handler.
 
 use crate::authproof::{verify, verify_proof, AuthProof};
 use crate::cache::{DeviceCache, ProfileCache};
@@ -45,11 +44,11 @@ use ulid::Ulid;
 /// Post-deletion handle reservation window (ADR-0013).
 const HANDLE_COOLDOWN_DAYS: i64 = 30;
 
-/// Default page size for `GET /v1/store/list` (mirrors Go's `limit := 50`).
+/// Default page size for `GET /v1/store/list`.
 const STORE_LIST_LIMIT: usize = 50;
 
 /// How long `register` waits for the per-handle claim lock before giving up with
-/// `registration_unavailable` (mirrors Go's 500ms).
+/// `registration_unavailable`.
 const HANDLE_CLAIM_TIMEOUT: StdDuration = StdDuration::from_millis(500);
 
 /// Per-handle claim lock (keyed by handle), serializing `register`'s GET-then-PUT
@@ -58,8 +57,8 @@ const HANDLE_CLAIM_TIMEOUT: StdDuration = StdDuration::from_millis(500);
 /// rotation lock) is coming.
 struct HandleClaimMutex(KeyedMutex);
 
-/// How long `rotate-keys` waits for the per-uid lock before giving up (mirrors
-/// Go's 500ms). Two genuinely-concurrent rotations from one user are degenerate.
+/// How long `rotate-keys` waits for the per-uid lock before giving up. Two
+/// genuinely-concurrent rotations from one user are degenerate.
 const ROTATION_TIMEOUT: StdDuration = StdDuration::from_millis(500);
 
 /// Per-uid rotation lock, serializing the GET-VERIFY-WRITE on `profile.json`
@@ -71,7 +70,7 @@ struct RotationMutex(KeyedMutex);
 /// production will pass an S3-backed store.
 pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
     // One shared quota instance across presign (reserve) and delete (invalidate),
-    // so the delete path expires the same cached usage. Mirrors `newMux`.
+    // so the delete path expires the same cached usage.
     let quota: SharedQuota = Arc::new(InProcessMediaQuota::new(store.clone()));
     let app = rocket::build()
         .manage(store)
@@ -118,7 +117,7 @@ fn healthz() -> &'static str {
     "ok"
 }
 
-/// `GET /v1/resolve/{handle}` — public handle lookup. Mirrors `handleResolve`.
+/// `GET /v1/resolve/{handle}` — public handle lookup.
 #[get("/v1/resolve/<handle>")]
 async fn resolve(
     handle: &str,
@@ -146,9 +145,9 @@ async fn resolve(
         return Err(ApiError::NotFound);
     }
 
-    // TODO(phase 3): legacy backfill from profile.json for pre-v2 projections
-    // (missing sharing_public_key / salt / kdf). Skipped — fresh-world projections
-    // are always complete; only legacy data triggered it.
+    // No backfill from profile.json for missing projection fields
+    // (sharing_public_key / salt / kdf): projections are written complete, so an
+    // incomplete one can't arise.
 
     Ok(Json(h))
 }
@@ -156,12 +155,12 @@ async fn resolve(
 #[derive(Serialize)]
 struct StoreListResponse {
     keys: Vec<String>,
-    /// Empty string when there are no more pages (mirrors Go's `""` convention).
+    /// Empty string when there are no more pages.
     next_cursor: String,
 }
 
 /// `GET /v1/store/list` — authed listing of keys under a prefix the caller owns.
-/// Mirrors `handleStoreList`. First endpoint behind the `AuthedUser` guard.
+/// The first endpoint behind the `AuthedUser` guard.
 #[get("/v1/store/list?<prefix>&<cursor>")]
 async fn store_list(
     auth: Result<AuthedUser, ApiError>,
@@ -205,7 +204,6 @@ impl<'r> Responder<'r, 'static> for ObjectResponse {
 }
 
 /// `GET /v1/store/object` — authed fetch of a single object the caller may read.
-/// Mirrors `handleStoreObject`.
 #[get("/v1/store/object?<key>")]
 async fn store_object(
     auth: Result<AuthedUser, ApiError>,
@@ -234,7 +232,7 @@ struct StoreUsageResponse {
 
 /// `GET /v1/store/usage` — the caller's media usage from the quota cache (re-probing
 /// S3 on a miss). No prefix authorization: implicitly scoped to the authenticated
-/// user, takes no key, read-only. Mirrors `handleStoreUsage`.
+/// user, takes no key, read-only.
 #[get("/v1/store/usage")]
 async fn store_usage(
     auth: Result<AuthedUser, ApiError>,
@@ -253,7 +251,7 @@ async fn store_usage(
 /// `DELETE /v1/store/object` — owner-only delete (unlike the capability-protected
 /// GET). Idempotent. On a media delete the user's cached quota usage is
 /// invalidated (the handler has only the key, not the byte size, so it can't
-/// decrement precisely — the next access re-probes S3). Mirrors `handleDeleteObject`.
+/// decrement precisely — the next access re-probes S3).
 #[delete("/v1/store/object?<key>")]
 async fn delete_object(
     auth: Result<AuthedUser, ApiError>,
@@ -287,7 +285,6 @@ struct PresignResponse {
 
 /// `POST /v1/store/presign` — issue a presigned PUT URL for a key the caller owns.
 /// Media keys are size-checked (per-blob cap) and quota-reserved before signing.
-/// Mirrors `handleStorePresign`.
 #[post("/v1/store/presign", data = "<body>")]
 async fn store_presign(
     auth: Result<AuthedUser, ApiError>,
@@ -354,7 +351,7 @@ struct RegisterResponse {
 }
 
 /// `POST /v1/register` — create an account: claim a handle, mint ids + token,
-/// write the handle projection + profile + device. Public. Mirrors `handleRegister`.
+/// write the handle projection + profile + device. Public.
 #[post("/v1/register", data = "<body>")]
 async fn register(
     body: &str,
@@ -387,10 +384,9 @@ async fn register(
     }
 
     // Claim the handle under the per-handle lock (ADR-0013). Held to the end of
-    // the handler (the RAII guard drops on return — Go's `defer release()`), so the
-    // GET-then-PUT and the projection/profile/device writes are all serialized
-    // against a concurrent registration of the same handle. Timeout → 503
-    // registration_unavailable.
+    // the handler (the RAII guard drops on return), so the GET-then-PUT and the
+    // projection/profile/device writes are all serialized against a concurrent
+    // registration of the same handle. Timeout → 503 registration_unavailable.
     let _claim = handle_mu
         .0
         .acquire(handle.as_str(), HANDLE_CLAIM_TIMEOUT)
@@ -494,7 +490,7 @@ struct AddDeviceResponse {
 
 /// `POST /v1/devices` — the returning-device flow: verify a signed auth proof
 /// against the account, then write a new device file and issue a token. Public
-/// (the proof *is* the credential). Mirrors `handleAddDevice`.
+/// (the proof *is* the credential).
 #[post("/v1/devices", data = "<body>")]
 async fn add_device(
     body: &str,
@@ -510,7 +506,7 @@ async fn add_device(
         .map_err(|_| ApiError::Internal("Failed to parse profile".into()))?;
 
     // Verify the proof against the account's auth public key. A malformed key,
-    // bad signature, or stale timestamp is all a 403 (mirrors errAuthProofInvalid).
+    // bad signature, or stale timestamp is all a 403 (auth_proof_invalid).
     let pubkey = URL_SAFE_NO_PAD
         .decode(&profile.auth_public_key)
         .ok()
@@ -531,8 +527,8 @@ async fn add_device(
         });
     }
 
-    // device_id comes from the signed payload; validate it's a ULID (the port's
-    // ULID-strict tightening, ADR-0018 Findings).
+    // device_id comes from the signed payload; validate it's a ULID before using
+    // it as an S3 key segment and token field.
     let device_id = DeviceId::new(&payload.device_id).map_err(|_| ApiError::BadRequest)?;
     let kv = KeyVersion::new(current).unwrap_or(KeyVersion::ONE);
     let token = token::generate(
@@ -575,12 +571,12 @@ struct CompactResponse {
 
 /// `POST /v1/store/compact` — merge live objects (≤ `prefix + up_to`) into a daily
 /// CBOR archive, dedup by `msg_id`, then delete the live objects + merged-in
-/// same-day archives. Mirrors `handleStoreCompact`.
+/// same-day archives.
 ///
 /// Note: live objects are JSON; decoded here to `ciborium::Value`, so JSON
-/// integers stay CBOR integers (Go's path goes via `float64`, producing CBOR
-/// doubles — the phase-1 finding). Benign: clients already tolerate both, since
-/// live objects are JSON ints and Go archives are doubles; no legacy data exists.
+/// integers stay CBOR integers. An archive written via a JSON→float→CBOR path
+/// would instead carry doubles, so a reader must tolerate both representations of
+/// a number (see [`crate::cbor`]). Benign for clients, which already accept both.
 #[post("/v1/store/compact", data = "<body>")]
 async fn store_compact(
     auth: Result<AuthedUser, ApiError>,
@@ -698,7 +694,6 @@ async fn store_compact(
 }
 
 /// Build the public handle projection (`handles/{handle}.json`) from a profile.
-/// Mirrors `putHandleProjection`'s field set.
 fn handle_projection(p: &Profile) -> PublicHandleData {
     PublicHandleData {
         user_id: p.user_id.clone(),
@@ -720,9 +715,8 @@ struct ProfileUpdateRequest {
 }
 
 /// `PUT /v1/profile` — authed update of mutable profile fields, then re-project
-/// the public fields to the handle file. Mirrors `handleProfile`. A field absent
-/// or `null` means "leave unchanged"; present (even `""`) means "set". At least
-/// one field is required.
+/// the public fields to the handle file. A field absent or `null` means "leave
+/// unchanged"; present (even `""`) means "set". At least one field is required.
 #[put("/v1/profile", data = "<body>")]
 async fn update_profile(
     auth: Result<AuthedUser, ApiError>,
@@ -748,8 +742,8 @@ async fn update_profile(
     }
     write_json(store, &key, &profile).await?;
 
-    // Re-project public fields. Best-effort, like Go — a projection failure does
-    // not fail the update.
+    // Re-project public fields. Best-effort — a projection failure does not fail
+    // the update.
     if !profile.handle.is_empty() {
         let _ = write_json(
             store,
@@ -762,12 +756,12 @@ async fn update_profile(
     Ok(())
 }
 
-/// `DELETE /v1/profile` — wipe the account and leave the handle reserved. Mirrors
-/// `handleDeleteProfile`: read the profile for its handle (404 if gone), delete
-/// every object under the account's four owned prefixes (evicting the device
-/// cache for any device about to vanish, so other signed-in devices are cut off
-/// now rather than at TTL), then replace the handle projection with a 30-day
-/// cooldown tombstone (ADR-0013) under the *same* handle lock register uses.
+/// `DELETE /v1/profile` — wipe the account and leave the handle reserved. Reads
+/// the profile for its handle (404 if gone), deletes every object under the
+/// account's four owned prefixes (evicting the device cache for any device about
+/// to vanish, so other signed-in devices are cut off now rather than at TTL), then
+/// replaces the handle projection with a 30-day cooldown tombstone (ADR-0013)
+/// under the *same* handle lock register uses.
 #[delete("/v1/profile")]
 async fn delete_profile(
     auth: Result<AuthedUser, ApiError>,
@@ -783,7 +777,7 @@ async fn delete_profile(
     let profile: Profile = serde_json::from_slice(&profile_bytes)
         .map_err(|_| ApiError::Internal("Failed to read profile".into()))?;
 
-    // Wipe every prefix the account owns (single 1000-key page each, like Go).
+    // Wipe every prefix the account owns (single 1000-key page each).
     let devices_prefix = prefix_user_devices(uid);
     for prefix in [
         prefix_user(uid),
@@ -812,7 +806,7 @@ async fn delete_profile(
 
     // Replace the handle projection with a cooldown tombstone, serialized against
     // any in-flight registration of the same handle (contention → 503). The RAII
-    // guard releases the lock when this block ends (Go's explicit `release()`).
+    // guard releases the lock when this block ends.
     if !profile.handle.is_empty() {
         let _claim = handle_mu
             .0
@@ -832,8 +826,8 @@ async fn delete_profile(
 }
 
 /// `DELETE /v1/devices` — self-delete the *calling* device (token only, no proof).
-/// Mirrors `handleDeleteDevice`: delete the token's own device file and evict its
-/// cache entry so it stops authenticating immediately. Idempotent.
+/// Deletes the token's own device file and evicts its cache entry so it stops
+/// authenticating immediately. Idempotent.
 #[delete("/v1/devices")]
 async fn delete_device(
     auth: Result<AuthedUser, ApiError>,
@@ -859,10 +853,10 @@ struct RevokeDeviceRequest {
 }
 
 /// `POST /v1/devices/revoke` — revoke *any* of the account's devices, authorized by
-/// an auth-proof (so a device holding the password can cut off a lost one). Mirrors
-/// `handleRevokeDevice`: the token gives the uid; the proof must verify against the
-/// account's current key_version (stale → 401, invalid → 403); then delete the
-/// named device and evict its cache entry.
+/// an auth-proof (so a device holding the password can cut off a lost one). The
+/// token gives the uid; the proof must verify against the account's current
+/// key_version (stale → 401, invalid → 403); then the named device is deleted and
+/// its cache entry evicted.
 #[post("/v1/devices/revoke", data = "<body>")]
 async fn revoke_device(
     auth: Result<AuthedUser, ApiError>,
@@ -926,8 +920,8 @@ struct EnvelopeHeader {
 }
 
 /// `POST /v1/send` — deliver encrypted envelopes to recipients' inboxes and notify
-/// them over SSE. Mirrors `handleSend`. Each envelope's `from_user`/`from_device`
-/// must match the authenticated token (else 403); the whole envelope is written
+/// them over SSE. Each envelope's `from_user`/`from_device` must match the
+/// authenticated token (else 403); the whole envelope is written
 /// verbatim to `inbox/{to_user}/live/{msg_id}`. No authorization on `to_user` —
 /// writing to any recipient's inbox is the point. Notifies each unique recipient
 /// once with `new_message`.
@@ -1080,7 +1074,7 @@ impl<'r> Responder<'r, 'static> for RotateOutcome {
     }
 }
 
-/// A canonical hex UUID (8-4-4-4-12). Dep-free, mirrors Go's `requestIDRegex`.
+/// A canonical hex UUID (8-4-4-4-12). Dependency-free validation, no regex.
 fn is_valid_request_id(s: &str) -> bool {
     let groups = [8usize, 4, 4, 4, 12];
     let parts: Vec<&str> = s.split('-').collect();
@@ -1091,17 +1085,16 @@ fn is_valid_request_id(s: &str) -> bool {
             .all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
 }
 
-/// Whether `b64` base64url-decodes to exactly `want_len` bytes (mirrors
-/// `validPublicKey`): 32 for the Ed25519 auth key, 65 for the P-256 sharing key.
+/// Whether `b64` base64url-decodes to exactly `want_len` bytes: 32 for the
+/// Ed25519 auth key, 65 for the P-256 sharing key.
 fn valid_public_key(b64: &str, want_len: usize) -> bool {
     matches!(URL_SAFE_NO_PAD.decode(b64), Ok(b) if b.len() == want_len)
 }
 
 /// `POST /v1/rotate-keys` — advance the account credential to `key_version` =
-/// current+1, proven by a continuity signature from the *old* auth key. Mirrors
-/// `handleRotateKeys`. Uses `AuthedUserNoKv` so the just-superseded token still
-/// authenticates; serialized per-uid by the rotation lock; idempotent on
-/// `request_id`.
+/// current+1, proven by a continuity signature from the *old* auth key. Uses
+/// `AuthedUserNoKv` so the just-superseded token still authenticates; serialized
+/// per-uid by the rotation lock; idempotent on `request_id`.
 #[post("/v1/rotate-keys", data = "<body>")]
 async fn rotate_keys(
     auth: Result<AuthedUserNoKv, ApiError>,
@@ -1141,7 +1134,7 @@ async fn rotate_keys(
         Err(_) => return Ok(RotateOutcome::KeyVersionStale { current: -1 }),
     };
 
-    // 2. Idempotent replay (a load failure is treated as a miss, like Go).
+    // 2. Idempotent replay (a load failure is treated as a miss).
     if let Ok(Some(rec)) = load_rotation_record(store, &record_key).await {
         return Ok(RotateOutcome::from_record(&rec));
     }
@@ -1233,18 +1226,15 @@ async fn rotate_keys(
 
 /// `GET /v1/events` — Server-Sent Events stream of real-time notifications for the
 /// authenticated user. The token arrives via `?token=` (EventSource can't set an
-/// `Authorization` header); the guard already accepts it there. Mirrors
-/// `handleEvents`.
+/// `Authorization` header); the guard already accepts it there.
 ///
-/// Rocket emits its own periodic heartbeat comment to hold the connection open
-/// (Go writes a `:` keepalive by hand every 30s). On client disconnect the stream
-/// future drops, dropping the `Subscription`, which unregisters from the hub.
+/// Rocket emits its own periodic heartbeat comment (every 30s) to hold the
+/// connection open. On client disconnect the stream future drops, dropping the
+/// `Subscription`, which unregisters from the hub.
 ///
-/// TODO(cutover): Go also sets `Cache-Control: no-cache` and `X-Accel-Buffering:
-/// no` to defeat proxy buffering. Rocket's `EventStream` responder doesn't expose
-/// header injection; revisit when the Rust server faces a real proxy (Scaleway).
-/// The phase-6 e2e runs against a native server with no proxy, so it isn't needed
-/// to pass the gate.
+/// TODO: defeat proxy buffering with `Cache-Control: no-cache` and
+/// `X-Accel-Buffering: no`. Rocket's `EventStream` responder doesn't expose header
+/// injection; revisit if a buffering proxy (e.g. Scaleway) is put in front.
 #[get("/v1/events")]
 async fn events(
     auth: Result<AuthedUser, ApiError>,
@@ -1256,7 +1246,7 @@ async fn events(
     let mut sub = hub.register(user.user_id.as_str());
 
     // Refresh last_active in a detached task — background metadata that must not
-    // delay or fail the stream. Mirrors Go's `go updateLastActive(...)`.
+    // delay or fail the stream.
     let store: SharedStore = store.inner().clone();
     let uid = user.user_id.as_str().to_owned();
     rocket::tokio::spawn(async move {
@@ -1264,7 +1254,7 @@ async fn events(
     });
 
     let stream = EventStream! {
-        // Initial event so the client knows the stream is live (Go's `connected`).
+        // Initial `connected` event so the client knows the stream is live.
         yield Event::data("{}").event("connected");
         loop {
             rocket::tokio::select! {
@@ -1529,7 +1519,7 @@ mod tests {
         assert_eq!(body["next_cursor"], "");
     }
 
-    // --- guard TTL caches (phase 5b): prove they short-circuit S3 ---
+    // --- guard TTL caches: prove they short-circuit S3 ---
 
     #[tokio::test]
     async fn device_cache_skips_revocation_within_ttl() {
@@ -1548,8 +1538,8 @@ mod tests {
 
         // Revoke the device by deleting its file. Without the cache the next
         // request would 403; within the 30s TTL the HeadObject is skipped, so it
-        // still succeeds — exactly Go's window (the delete handler invalidates,
-        // wired in 5d).
+        // still succeeds — the delete handler invalidates the cache to close this
+        // window.
         client
             .rocket()
             .state::<SharedStore>()
@@ -2140,10 +2130,10 @@ mod tests {
         assert_eq!(b["current"], 2);
     }
 
-    // --- events SSE (phase 5c) ---
+    // --- events SSE ---
     // Only the pre-stream auth path is unit-testable: a successful stream is
     // infinite and would hang the local client. Fan-out + last_active are covered
-    // by events.rs unit tests; the live stream is the phase-6 e2e's job.
+    // by events.rs unit tests; the live stream is covered by the e2e suite.
 
     #[tokio::test]
     async fn events_requires_a_token() {

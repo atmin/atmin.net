@@ -1,9 +1,9 @@
 //! Canonical API errors → Rocket responses.
 //!
-//! Mirrors `server/error.go`: the same `{ "error": <code>, "message": <msg> }`
-//! body and HTTP status per case. Where Go has a flat struct + package vars, here
-//! it's an enum — a handler returning `Result<T, ApiError>` enumerates exactly its
-//! failure modes and the compiler checks the match.
+//! Every variant maps to a `{ "error": <code>, "message": <msg> }` body and a
+//! fixed HTTP status. Modeling these as an enum means a handler returning
+//! `Result<T, ApiError>` enumerates exactly its failure modes and the compiler
+//! checks the match.
 
 use crate::model::KeyVersion;
 use crate::store::StoreError;
@@ -16,9 +16,9 @@ use std::io::Cursor;
 pub enum ApiError {
     BadRequest,
     Unauthorized,
-    /// 401 from the auth middleware; carries the account's current `key_version`
+    /// 401 from the auth guard; carries the account's current `key_version`
     /// so the client knows what to re-login at. (Rotate-keys also raises this as a
-    /// 409 precondition failure — that status override is a handler concern, phase 3.)
+    /// 409 precondition failure, overriding the status at the handler.)
     KeyVersionStale {
         current: KeyVersion,
     },
@@ -43,7 +43,7 @@ pub enum ApiError {
     RegistrationUnavailable,
     QuotaExceeded,
     TooLarge,
-    /// 500 with an ad-hoc context message (Go's inline `APIError{500, "internal", …}`).
+    /// 500 with an ad-hoc context message for one-off internal failures.
     Internal(String),
 }
 

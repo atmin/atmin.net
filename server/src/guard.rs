@@ -1,19 +1,17 @@
-//! The `AuthedUser` request guard — Rocket's equivalent of `requireAuth`
-//! (`server/middleware.go`). A handler that takes `AuthedUser` (in practice
+//! The `AuthedUser` request guard: a handler that takes `AuthedUser` (in practice
 //! `Result<AuthedUser, ApiError>`, then `?`) cannot do authenticated work without
 //! a valid, non-revoked, current-`key_version` token.
 //!
-//! Checks, mirroring requireAuth:
+//! Checks:
 //!   1. token from `Authorization: Bearer …`, else the `?token=` query param;
 //!   2. HMAC parse → `(UserId, DeviceId, KeyVersion)`;
 //!   3. device-revocation: the device file must still exist;
 //!   4. `key_version`: the token's kv must equal the profile's current kv (ADR-0012).
 //!
-//! Two in-process TTL caches (`DeviceCache`/`ProfileCache`, mirroring Go's
-//! `deviceCache`/`profileCache`) keep the hot path off S3: a recently-seen device
-//! skips the `HeadObject`, a recently-read profile skips the kv `GET`. Both
-//! self-heal within their TTL and are invalidated explicitly by the mutating
-//! handlers (device delete/revoke, rotate-keys).
+//! Two in-process TTL caches (`DeviceCache`/`ProfileCache`) keep the hot path off
+//! S3: a recently-seen device skips the `HeadObject`, a recently-read profile
+//! skips the kv `GET`. Both self-heal within their TTL and are invalidated
+//! explicitly by the mutating handlers (device delete/revoke, rotate-keys).
 
 use crate::cache::{DeviceCache, ProfileCache};
 use crate::config::ServerConfig;
@@ -37,8 +35,8 @@ fn deny(e: ApiError) -> Outcome<AuthedUser, ApiError> {
     Outcome::Error((e.status(), e))
 }
 
-/// `AuthedUser` with the `key_version` check skipped — Go's `authNoKV`. Used only
-/// by `POST /v1/rotate-keys`, which must stay reachable with the *just-superseded*
+/// `AuthedUser` with the `key_version` check skipped. Used only by
+/// `POST /v1/rotate-keys`, which must stay reachable with the *just-superseded*
 /// token: a retried rotation has to replay the recorded outcome, and the handler
 /// runs its own `key_version` precondition. Every other endpoint enforces kv.
 #[derive(Debug, Clone)]
@@ -116,7 +114,7 @@ async fn authenticate(req: &Request<'_>, enforce_kv: bool) -> Outcome<AuthedUser
     // key_version check (ADR-0012): a token bound to a superseded kv means
     // another device rotated; the client must re-login at the current kv. The
     // profile cache short-circuits the S3 GET on a fresh hit. Skipped entirely
-    // for `authNoKV` (rotate-keys) — see `AuthedUserNoKv`.
+    // for rotate-keys — see `AuthedUserNoKv`.
     if enforce_kv {
         let current = match profile_cache.get(user_id.as_str()) {
             Some(kv) => kv,

@@ -1,5 +1,4 @@
-//! In-process TTL caches for the authentication hot path. Mirror `deviceCache`
-//! and `profileCache` in `server/middleware.go`.
+//! In-process TTL caches for the authentication hot path.
 //!
 //! The guard checks two things per authed request that would otherwise be an S3
 //! round-trip each: the device file still exists (revocation) and the profile's
@@ -17,9 +16,9 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
-/// How long a device-existence check stays trusted (mirrors `deviceCacheTTL`).
+/// How long a device-existence check stays trusted.
 pub const DEVICE_CACHE_TTL: Duration = Duration::from_secs(30);
-/// How long a cached `key_version` stays trusted (mirrors `profileCacheTTL`).
+/// How long a cached `key_version` stays trusted.
 pub const PROFILE_CACHE_TTL: Duration = Duration::from_secs(5);
 
 /// Remembers that a device file existed, keyed by its S3 key, so the guard can

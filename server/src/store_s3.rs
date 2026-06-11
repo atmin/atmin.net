@@ -1,12 +1,10 @@
-//! S3-backed [`Store`] for production. Mirrors `S3Client` in `server/store.go`,
-//! built on the official `aws-sdk-s3` (the closest analogue to Go's
-//! `aws-sdk-go-v2`). MinIO/Scaleway compatibility comes from a custom endpoint +
-//! path-style addressing + static credentials — the same three knobs Go sets.
+//! S3-backed [`Store`] for production, built on the official `aws-sdk-s3`.
+//! MinIO/Scaleway compatibility comes from three knobs: a custom endpoint,
+//! path-style addressing, and static credentials.
 //!
-//! Not unit-tested: there's no in-process S3 to exercise it against (the Go
-//! `S3Client` isn't unit-tested either). It's compile-checked here and validated
-//! end-to-end against MinIO by the phase-6 Playwright suite. Handler logic is
-//! covered via `MemStore`.
+//! Not unit-tested: there's no in-process S3 to exercise it against. It's
+//! compile-checked here and validated end-to-end against MinIO by the Playwright
+//! suite. Handler logic is covered via `MemStore`.
 
 use crate::config::S3Config;
 use crate::store::{ListPage, ObjectSizes, Store, StoreError};
@@ -20,7 +18,7 @@ use std::time::Duration;
 
 /// Wraps the S3 client + bucket. A separate `presigner` client points at the
 /// browser-reachable endpoint so presigned URLs are usable from the client
-/// (mirrors Go's split when `S3_PUBLIC_ENDPOINT` differs from `S3_ENDPOINT`).
+/// (this matters when `S3_PUBLIC_ENDPOINT` differs from `S3_ENDPOINT`).
 pub struct S3Store {
     client: Client,
     presigner: Client,
@@ -28,8 +26,8 @@ pub struct S3Store {
 }
 
 /// Build an S3 client config for `endpoint`. Static creds + explicit region +
-/// path-style — no credential-chain discovery (Go overrides the same fields after
-/// `LoadDefaultConfig`; building the config directly drops the `aws-config` dep).
+/// path-style — no credential-chain discovery. Building the config directly
+/// (rather than via `LoadDefaultConfig`) drops the `aws-config` dependency.
 fn client_for(cfg: &S3Config, endpoint: &str) -> Client {
     let creds = Credentials::new(
         cfg.access_key.clone(),

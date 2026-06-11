@@ -1,8 +1,7 @@
-//! Server configuration, held as Rocket-managed state. Mirrors the auth-relevant
-//! slice of `server/config.go`; grows as handlers need more.
+//! Server configuration, held as Rocket-managed state.
 //!
-//! Split from Go's monolithic `Config`: handlers/guards only ever read the HMAC
-//! secret, so [`ServerConfig`] carries just that. The S3 credentials live in
+//! Config is split by audience: handlers/guards only ever read the HMAC secret,
+//! so [`ServerConfig`] carries just that. The S3 credentials live in
 //! [`S3Config`], consumed once by `main.rs` to build the store and never seen by a
 //! handler — the store encapsulates them.
 
@@ -12,10 +11,10 @@ pub struct ServerConfig {
     pub server_secret: Vec<u8>,
 }
 
-/// S3 connection settings. Mirrors the `S3*` fields of `server/config.go`.
+/// S3 connection settings, loaded from the `S3_*` environment variables.
 pub struct S3Config {
     pub endpoint: String,
-    /// Browser-reachable endpoint for presigned URLs (Go's `S3PublicEndpoint`);
+    /// Browser-reachable endpoint for presigned URLs (`S3_PUBLIC_ENDPOINT`);
     /// defaults to `endpoint` when unset.
     pub public_endpoint: String,
     pub bucket: String,
@@ -25,7 +24,7 @@ pub struct S3Config {
 }
 
 impl S3Config {
-    /// Load from the environment, mirroring `loadConfig`'s S3 block. Returns
+    /// Load from the environment. Returns
     /// `None` when `S3_ENDPOINT` is unset — the signal `main.rs` uses to fall back
     /// to the in-memory store for a no-MinIO dev run. When `S3_ENDPOINT` *is* set,
     /// the remaining required vars must be present (else `Err`), so a half-configured

@@ -1,11 +1,9 @@
 //! Storage interface — the durable-state boundary (ADR-0001). All persistent
-//! state lives behind this trait; production is S3 (phase 4), tests use `MemStore`.
+//! state lives behind this trait; production is S3, tests use `MemStore`.
 //!
-//! Mirrors `server/store.go`, with deliberate differences (see ADR-0018, the 2d
-//! discussion):
-//!   - no `ctx` parameter — async cancellation is structural (drop the future);
-//!   - tuple returns become named structs (`ListPage`, `ObjectSizes`);
-//!   - the `ErrNotFound` sentinel becomes the `StoreError::NotFound` variant.
+//! Async cancellation is structural (drop the future), so there's no `ctx`
+//! parameter; list/size results are named structs (`ListPage`, `ObjectSizes`);
+//! a missing object is the `StoreError::NotFound` variant.
 //!
 //! `#[async_trait]` boxes each method's future so the trait is `dyn`-compatible
 //! and can be held as `Arc<dyn Store>` — one heap alloc per call, irrelevant next
@@ -21,7 +19,7 @@ pub type SharedStore = Arc<dyn Store>;
 /// Error from a storage operation.
 #[derive(Debug)]
 pub enum StoreError {
-    /// The object does not exist (Go's `ErrNotFound` sentinel).
+    /// The object does not exist.
     NotFound,
     /// Any other backend failure.
     Backend(Box<dyn std::error::Error + Send + Sync>),

@@ -1,5 +1,4 @@
-//! S3 key construction + per-prefix authorization. Mirrors `server/paths.go` and
-//! the `authorizePrefix` helper from `server/handlers.go`.
+//! S3 key construction + per-prefix authorization.
 
 pub fn key_profile(user_id: &str) -> String {
     format!("users/{user_id}/profile.json")
@@ -14,13 +13,12 @@ pub fn key_handle(handle: &str) -> String {
 }
 
 /// The `media/{user_id}/` prefix — the quota subsystem scans it to total usage.
-/// Mirrors `prefixMedia`.
 pub fn prefix_media(user_id: &str) -> String {
     format!("media/{user_id}/")
 }
 
-/// The four owner-scoped prefixes a profile delete wipes. Mirror `prefixUser`,
-/// `prefixInbox`, `prefixKeys`, `prefixMedia`.
+/// The four owner-scoped prefixes a profile delete wipes (`users/`, `inbox/`,
+/// `keys/`, `media/`, each scoped to the user).
 pub fn prefix_user(user_id: &str) -> String {
     format!("users/{user_id}/")
 }
@@ -30,8 +28,8 @@ pub fn prefix_inbox(user_id: &str) -> String {
 }
 
 /// The live / archive inbox subprefixes — `inbox/{uid}/live/` and
-/// `inbox/{uid}/archive/`. Mirror `prefixInboxLive` / `prefixInboxArchive`; the
-/// cleanup routine probes both to decide whether an inbox is empty.
+/// `inbox/{uid}/archive/`. The cleanup routine probes both to decide whether an
+/// inbox is empty.
 pub fn prefix_inbox_live(user_id: &str) -> String {
     format!("inbox/{user_id}/live/")
 }
@@ -45,20 +43,19 @@ pub fn prefix_keys(user_id: &str) -> String {
 }
 
 /// The device subtree — `users/{user_id}/devices/`. Used to spot device keys among
-/// a profile-delete's listing so their cache entries can be evicted. Mirrors
-/// `prefixUserDevices`.
+/// a profile-delete's listing so their cache entries can be evicted.
 pub fn prefix_user_devices(user_id: &str) -> String {
     format!("users/{user_id}/devices/")
 }
 
-/// A live inbox message key — `inbox/{user_id}/live/{msg_id}`. Mirrors
-/// `keyInboxLive`; `send` writes each delivered envelope here.
+/// A live inbox message key — `inbox/{user_id}/live/{msg_id}`.
+/// `send` writes each delivered envelope here.
 pub fn key_inbox_live(user_id: &str, msg_id: &str) -> String {
     format!("inbox/{user_id}/live/{msg_id}")
 }
 
 /// A rotation idempotency record — `users/{user_id}/rotation-records/{request_id}.json`.
-/// Mirrors `keyRotationRecord`; swept after a 24h TTL by the cleanup job.
+/// Swept after a 24h TTL by the cleanup job.
 pub fn key_rotation_record(user_id: &str, request_id: &str) -> String {
     format!("users/{user_id}/rotation-records/{request_id}.json")
 }
@@ -66,9 +63,9 @@ pub fn key_rotation_record(user_id: &str, request_id: &str) -> String {
 const USERS_ROOT: &str = "users/";
 const DATA_PREFIXES: [&str; 3] = ["inbox/", "keys/", "media/"];
 
-/// Whether `user_id` may access `prefix`. Mirrors `authorizePrefix`: a user's own
-/// `inbox/`/`keys/`/`media/` subtree, plus any `users/…` path (profile and key
-/// reads are intentionally public — resolve, key fetch).
+/// Whether `user_id` may access `prefix`: a user's own `inbox/`/`keys/`/`media/`
+/// subtree, plus any `users/…` path (profile and key reads are intentionally
+/// public — resolve, key fetch).
 pub fn authorize_prefix(user_id: &str, prefix: &str) -> bool {
     for p in DATA_PREFIXES {
         if prefix.starts_with(&format!("{p}{user_id}/")) {
@@ -81,7 +78,7 @@ pub fn authorize_prefix(user_id: &str, prefix: &str) -> bool {
 /// Whether `user_id` may *read* `key`. Like [`authorize_prefix`], plus: any
 /// `media/` blob is readable by any authenticated caller — media is
 /// capability-protected (the ULID path is delivered inside the encrypted
-/// envelope). The write path stays owner-only. Mirrors `authorizeKey`.
+/// envelope). The write path stays owner-only.
 pub fn authorize_key(user_id: &str, key: &str) -> bool {
     authorize_prefix(user_id, key) || key.starts_with("media/")
 }
@@ -89,7 +86,7 @@ pub fn authorize_key(user_id: &str, key: &str) -> bool {
 /// Whether `user_id` may *write* `key`. Like [`authorize_key`] but owner-only:
 /// the public `media/` read capability and the public `users/…` read are both
 /// dropped — only the caller's own data subtree and own `users/{uid}/` are
-/// writable. Mirrors `authorizeKeyWrite`.
+/// writable.
 pub fn authorize_key_write(user_id: &str, key: &str) -> bool {
     for p in DATA_PREFIXES {
         if key.starts_with(&format!("{p}{user_id}/")) {

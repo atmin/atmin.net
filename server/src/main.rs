@@ -1,10 +1,9 @@
-//! atmin server binary. Mirrors `server/main.go`: the same binary runs either the
-//! HTTP server (default) or the one-shot `cleanup` maintenance task.
+//! atmin server binary: the same binary runs either the HTTP server (default) or
+//! the one-shot `cleanup` maintenance task.
 //!
-//! Store selection (phase-4 wiring): if `S3_ENDPOINT` is set, build the S3-backed
-//! store from the `S3_*` env (production, and local dev against MinIO); otherwise
-//! fall back to the in-memory store so the endpoints can be exercised over HTTP
-//! without any S3.
+//! Store selection: if `S3_ENDPOINT` is set, build the S3-backed store from the
+//! `S3_*` env (production, and local dev against MinIO); otherwise fall back to
+//! the in-memory store so the endpoints can be exercised over HTTP without any S3.
 //!
 //! Run from `server/`:
 //!   SERVER_SECRET=dev cargo run                       # MemStore (no S3)
@@ -12,7 +11,7 @@
 //!   S3_ENDPOINT=… … cargo run -- cleanup [--apply]     # retention sweep (S3 only)
 //!
 //! Listen address/port is Rocket's own config (ROCKET_ADDRESS / ROCKET_PORT,
-//! default 127.0.0.1:8000), not Go's LISTEN_ADDR.
+//! default 127.0.0.1:8000).
 
 use atmin_server::cleanup::{run_cleanup, CleanupOpts};
 use atmin_server::config::{S3Config, ServerConfig};
@@ -27,8 +26,7 @@ use std::sync::Arc;
 #[rocket::main]
 async fn main() {
     // Subcommand dispatch: same image, either the server or the cleanup job
-    // (a scheduled Scaleway Serverless Job — see docs/ops.md). Mirrors Go's
-    // `os.Args[1] == "cleanup"`.
+    // (a scheduled Scaleway Serverless Job — see docs/ops.md).
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("cleanup") {
         run_cleanup_cmd(&args[2..]).await;

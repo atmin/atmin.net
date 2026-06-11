@@ -1,10 +1,9 @@
-//! Embedded single-page app, served as the catch-all GET fallback. Mirrors
-//! `server/static.go` (`//go:embed dist` + client-side-routing fallback). Compiled
-//! only under the `embed-spa` feature so the default build stays independent of a
-//! web build.
+//! Embedded single-page app, served as the catch-all GET fallback with
+//! client-side-routing support. Compiled only under the `embed-spa` feature so the
+//! default build stays independent of a web build.
 //!
-//! `rust-embed` embeds `../web/dist` into the binary for release builds (the
-//! single-binary parity with Go); in debug it reads the same files from disk at
+//! `rust-embed` embeds `../web/dist` into the binary for release builds (yielding
+//! a single self-contained binary); in debug it reads the same files from disk at
 //! runtime, so a `pnpm build` is picked up without recompiling the server.
 
 use rocket::get;

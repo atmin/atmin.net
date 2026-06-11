@@ -1,14 +1,10 @@
 //! Ed25519 auth proof over the JCS-canonical (RFC 8785) bytes of the payload.
 //!
-//! Mirrors `server/auth.go` (`verifyAuthProof`). The payload
-//! `{user_id, device_id, timestamp, key_version}` is canonicalized with JCS and
-//! signed with the account's auth key. The production signer is the TS client
+//! The payload `{user_id, device_id, timestamp, key_version}` is canonicalized
+//! with JCS and signed with the account's auth key. The signer is the TS client
 //! (`web/src/lib/crypto.ts`, the `canonicalize` package), so the canonical bytes
-//! produced here (`serde_jcs`) must match *both* Go and TS byte-for-byte — see
-//! the interop battery in `tests/interop.rs`.
-//!
-//! This module verifies the *signature* only. Freshness (the 5-minute window)
-//! and `key_version >= 1` are handler concerns, deferred to phase 3.
+//! produced here (`serde_jcs`) must match the client's byte-for-byte — see the
+//! interop battery in `tests/interop.rs`.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -60,8 +56,8 @@ pub const AUTH_PROOF_MAX_AGE_SECS: i64 = 300;
 
 /// A signed auth proof as sent on the wire: a `payload` object plus a base64url
 /// Ed25519 `signature` over its JCS-canonical bytes. The payload is kept as a
-/// `RawValue` so it can be canonicalized exactly as received (mirrors Go's
-/// `payloadRaw`).
+/// `RawValue` so it can be canonicalized exactly as received, before any
+/// re-serialization could perturb the bytes.
 #[derive(Deserialize)]
 pub struct AuthProof {
     pub payload: Box<RawValue>,
@@ -79,7 +75,7 @@ pub struct AuthProofPayload {
 }
 
 /// Verify a proof's signature (over JCS(payload)), its freshness (±5 min from
-/// `now`), and that it carries `key_version >= 1`. Mirrors `verifyAuthProof`.
+/// `now`), and that it carries `key_version >= 1`.
 /// Does *not* check key_version against the account's current value — the caller
 /// does that, since it needs the profile. Returns the parsed payload on success.
 pub fn verify_proof(

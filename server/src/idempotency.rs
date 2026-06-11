@@ -1,5 +1,4 @@
-//! Persisted rotation outcomes for idempotent replay. Mirrors
-//! `server/idempotency.go`.
+//! Persisted rotation outcomes for idempotent replay.
 //!
 //! `POST /v1/rotate-keys` records its outcome under the client's `request_id`, so
 //! a retry after a network timeout replays the recorded result rather than
@@ -7,10 +6,10 @@
 //! Idempotency). Records are swept after a 24h TTL by the cleanup job.
 //!
 //! Unlike the cross-implementation wire formats, this record is read back only by
-//! this server, so the on-disk shape is ours to choose: `Option` fields rather
-//! than Go's zero-value `omitempty` ints, which keeps a success record (token set,
-//! error unset) distinct from a failure record by construction. The handler
-//! ([`crate::routes`]) owns the mapping to/from its response outcome.
+//! this server, so the on-disk shape is ours to choose: `Option` fields, which
+//! keep a success record (token set, error unset) distinct from a failure record
+//! by construction. The handler ([`crate::routes`]) owns the mapping to/from its
+//! response outcome.
 
 use crate::store::{SharedStore, StoreError};
 use serde::{Deserialize, Serialize};
@@ -31,8 +30,7 @@ pub struct RotationRecord {
 }
 
 /// Load a record, or `None` if absent. A backend/parse failure is also surfaced
-/// as `Err`, but the caller (like Go's `_`-discarded error) treats any non-hit as
-/// "proceed fresh".
+/// as `Err`, but the caller treats any non-hit as "proceed fresh".
 pub async fn load_rotation_record(
     store: &SharedStore,
     key: &str,
