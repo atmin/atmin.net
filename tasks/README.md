@@ -3,7 +3,16 @@
 Active implementation tasks, grouped by milestone and in priority order.
 Delete a file once its change lands.
 
-## 🔴 Fix first — known data-integrity bug
+## 🚧 In progress — Rust cutover
+
+- **[rust-cutover](rust-cutover.md)** — adopt the Rust backend, retire Go (ADR-0018 →
+  ADR-0019). The port met its exit criterion (e2e green 5×) and passed real-infra interop
+  on staging; this is the ordered, fast-forward-preserving cutover: decision ADRs, delete
+  `server/`, rename `server-rs/`→`server/`, comment-groom, CI + docs (CONTRIBUTING, ops.md,
+  README), flip the deploy trigger back to `master`, ff-merge, tag prod, wire the cleanup
+  Job. Digestible commits, staging stays green throughout.
+
+## 🔴 Fix first — *after the cutover* — known data-integrity bug
 
 - **[key-backup-unsafe-session-id-key](key-backup-unsafe-session-id-key.md)** — the
   base64 Megolm `session_id` is used **raw** as an S3 key segment
@@ -11,9 +20,8 @@ Delete a file once its change lands.
   the **fire-and-forget key backup PUT silently 400s**, and ~4% of sessions' messages
   become **undecryptable on restore** (new device / post-rotation / migration).
   Pre-existing on `master`, backend-agnostic (not the Rust port). **Parked** during the
-  Rust cutover (ADR-0018) only to avoid a mid-transition context-switch — apply it
-  **first thing after cutover**, on `master`, then rebase the branch. Found by the
-  `flaky-compare` stress test; trace-confirmed (`XMinioInvalidObjectName`).
+  cutover only to avoid a mid-transition context-switch — the **first** post-cutover task.
+  Found by the `flaky-compare` stress test; trace-confirmed (`XMinioInvalidObjectName`).
 
 ## MVP v0.1 — complete ✅ (modulo the bug above)
 
@@ -42,4 +50,4 @@ be added here as v0.2 is iterated on.
 
 Not milestone scope — exploratory work gated by its own exit criteria.
 
-- **[rust-backend-spike](rust-backend-spike.md)** — Phase 1 of the Rust backend port experiment ([ADR-0018](../docs/decisions/adr-0018-rust-backend-experiment.md), branch `rust-port-experiment`): prove the Rust crates reproduce the Go server's token/auth-proof/JCS/CBOR wire formats against Go + TS golden vectors before any handler work. Carries the whole-experiment phase checklist.
+- **[rust-backend-spike](rust-backend-spike.md)** — the Rust backend port experiment ([ADR-0018](../docs/decisions/adr-0018-rust-backend-experiment.md), branch `rust-port-experiment`): **complete** — all phases done, exit criterion met (e2e green 5×), staging interop validated. Now graduating to adoption via [rust-cutover](rust-cutover.md) (top of this file); this spike file + its phase log get deleted when the cutover lands.
