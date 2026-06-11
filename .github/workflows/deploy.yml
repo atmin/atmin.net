@@ -67,6 +67,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Cache Rust build (server/)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
       - name: Cache cargo installs
         uses: actions/cache@v4
         with:
@@ -113,6 +118,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build (server/)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
 
       - name: Cache cargo installs
         uses: actions/cache@v4
@@ -175,7 +185,6 @@ jobs:
           E2E_BUCKET: atmin-e2e-${{ github.run_id }}
         run: |
           docker run -d --name app --network host \
-            -e LISTEN_ADDR=:8080 \
             -e SERVER_SECRET=e2e-test-secret \
             -e S3_ENDPOINT=http://localhost:9000 \
             -e S3_PUBLIC_ENDPOINT=http://localhost:9000 \
