@@ -1,7 +1,7 @@
 # ADR-0018 — Rust backend port (experiment)
 
 **Date:** 2026-06-08
-**Status:** Draft — experiment on branch `rust-port-experiment`. Not a commitment to replace the Go server. Phase 1 (interop spike) complete — see Findings.
+**Status:** Accepted — the experiment ran to completion: all phases done, exit criterion met (e2e suite green 5×, local + staging interop validated — see Findings). The adoption decision (retire Go) is recorded in [ADR-0019](./adr-0019-adopt-rust-backend.md).
 **Relates to:** [vision.md](../vision.md) (stateless server), [ADR-0001](./adr-0001-sync-first-s3-mailbox.md) (stateless S3 mailbox), [ADR-0009](./adr-0009-native-wrapper.md) (spike-on-a-branch precedent)
 
 ---
