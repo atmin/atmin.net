@@ -1,8 +1,8 @@
 DOCKER ?= docker
 
-.PHONY: all build test lint fmt clean dev run e2e e2e-local install
+.PHONY: all build test lint fmt clean dev run e2e e2e-local e2e-local-rs install
 .PHONY: server server-build server-test server-lint server-fmt
-.PHONY: server-rs-test server-rs-lint server-rs-fmt
+.PHONY: server-rs-test server-rs-lint server-rs-fmt server-rs-build
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
 .PHONY: up down
 
@@ -81,6 +81,13 @@ server-rs-lint:
 
 server-rs-fmt:
 	cd server-rs && cargo fmt
+
+# Build the Rust server with the embedded SPA (ADR-0018 phase 6). Depends on
+# web-build so dist is always fresh — a stale dist served via rust-embed's debug
+# mode is the footgun the phase-6 validation hit. Debug build: rust-embed reads
+# ../web/dist live, so the just-built SPA is served without a release embed.
+server-rs-build: web-build
+	cd server-rs && cargo build --features embed-spa
 
 # --- Web (TypeScript) ---
 
@@ -181,6 +188,43 @@ e2e-local: web-build server-build
 		sleep 0.2; \
 	done; \
 	if [ -z "$$up" ]; then echo "server did not come up on :8080" >&2; kill $$SERVER_PID 2>/dev/null || true; exit 1; fi; \
+	cd web && E2E_BUCKET=$$BUCKET pnpm exec playwright test $(SPEC); \
+	status=$$?; \
+	kill $$SERVER_PID 2>/dev/null || true; \
+	exit $$status
+
+# Same fast-local e2e, but against the RUST server (ADR-0018 phase 6): the
+# embed-spa binary on :8080 in place of the Go binary. The unmodified Playwright
+# suite is the spike's exit criterion. Still needs Docker for MinIO; wipes its
+# volume for a clean slate. SPEC scopes the run exactly as e2e-local.
+#
+#   make e2e-local-rs
+#   make e2e-local-rs SPEC=media
+e2e-local-rs: server-rs-build
+	@$(DOCKER) rm -f atmin-e2e 2>/dev/null || true
+	@# Free :8080 from a stray Go or Rust server left by an interrupted run.
+	@pkill -f 'bin/atmin' 2>/dev/null || true
+	@pkill -f 'target/debug/atmin-server' 2>/dev/null || true
+	$(DOCKER) compose down -v 2>/dev/null || true
+	$(DOCKER) compose up -d
+	@BUCKET=atmin-e2e-rs-$$$$; \
+	export SERVER_SECRET=e2e-test-secret; \
+	export S3_ENDPOINT=http://localhost:9000; \
+	export S3_PUBLIC_ENDPOINT=http://localhost:9000; \
+	export S3_BUCKET=$$BUCKET; \
+	export S3_REGION=us-east-1; \
+	export S3_ACCESS_KEY=minioadmin; \
+	export S3_SECRET_KEY=minioadmin; \
+	export ROCKET_PORT=8080; \
+	./server-rs/target/debug/atmin-server & \
+	SERVER_PID=$$!; \
+	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT INT TERM; \
+	up=""; \
+	for i in $$(seq 1 50); do \
+		if curl -sf http://localhost:8080/healthz >/dev/null; then up=1; break; fi; \
+		sleep 0.2; \
+	done; \
+	if [ -z "$$up" ]; then echo "rust server did not come up on :8080" >&2; kill $$SERVER_PID 2>/dev/null || true; exit 1; fi; \
 	cd web && E2E_BUCKET=$$BUCKET pnpm exec playwright test $(SPEC); \
 	status=$$?; \
 	kill $$SERVER_PID 2>/dev/null || true; \

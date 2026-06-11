@@ -111,7 +111,8 @@ would be a contained edge change, not a rewrite.
 ### Exit criteria — decision-pointed, not open-ended
 
 - **Success** = the Rust server passes the full e2e + invariant suite unmodified, **and**
-  the spec has absorbed anything the port forced to be made explicit.
+  the spec has absorbed anything the port forced to be made explicit. — **✅ Met** (phase-6
+  findings: 5 consecutive green runs of the unmodified suite; findings recorded in this ADR).
 - The experiment either reaches conformance and triggers a **migration ADR**, or it is
   **deleted**. No indefinite half-ported backend drifting against master.
 
@@ -226,8 +227,16 @@ interop tests in `server-rs`. Phase 2 (type skeleton) is unblocked.
 ## Findings (phase 6 — live cross-server validation)
 
 The port reached code-complete — every endpoint plus the `cleanup` job, 127 unit + 10
-interop tests green — and was exercised against the production web client backed by a real
-MinIO. Two results:
+interop tests green — and cleared the exit criterion against a real MinIO. Results:
+
+- **The full e2e + invariant suite passes unmodified — the exit criterion is met.**
+  `make e2e-local-rs` runs the entire Playwright suite (scenario specs + the fault-injection
+  invariant specs) against the embed-spa Rust binary on `:8080`, with the same MinIO env and
+  ephemeral bucket as the Go harness — only the binary differs, the suite is untouched. **Five
+  consecutive runs green, 2.1–2.2 min each** — deterministic, not a flaky single pass. This is
+  the Success condition defined above. The "spec absorbed anything the port made explicit" half
+  is handled by recording each finding here (JCS >2⁵³, CBOR encoding, ULID-strict ids), with
+  promotion to the frozen `mvp-v0.1` spec deliberately gated on adoption.
 
 - **The Go and Rust servers are interchangeable behind an unmodified client.** Pointed at
   the same MinIO bucket and the same `SERVER_SECRET`, the two binaries were swapped under a
