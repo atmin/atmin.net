@@ -18,7 +18,8 @@ use crate::media_quota::{
 use crate::model::{DeviceId, Handle, KeyVersion, UserId};
 use crate::paths::{
     authorize_key, authorize_key_write, authorize_prefix, key_device, key_handle, key_inbox_live,
-    key_profile, key_rotation_record,
+    key_profile, key_rotation_record, prefix_inbox, prefix_keys, prefix_media, prefix_user,
+    prefix_user_devices,
 };
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
@@ -95,6 +96,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
                 store_presign,
                 store_compact,
                 update_profile,
+                delete_profile,
                 send,
                 rotate_keys,
                 events
@@ -746,6 +748,75 @@ async fn update_profile(
             &handle_projection(&profile),
         )
         .await;
+    }
+
+    Ok(())
+}
+
+/// `DELETE /v1/profile` — wipe the account and leave the handle reserved. Mirrors
+/// `handleDeleteProfile`: read the profile for its handle (404 if gone), delete
+/// every object under the account's four owned prefixes (evicting the device
+/// cache for any device about to vanish, so other signed-in devices are cut off
+/// now rather than at TTL), then replace the handle projection with a 30-day
+/// cooldown tombstone (ADR-0013) under the *same* handle lock register uses.
+#[delete("/v1/profile")]
+async fn delete_profile(
+    auth: Result<AuthedUser, ApiError>,
+    store: &State<SharedStore>,
+    handle_mu: &State<HandleClaimMutex>,
+    device_cache: &State<DeviceCache>,
+) -> Result<(), ApiError> {
+    let user = auth?;
+    let uid = user.user_id.as_str();
+
+    // Read the profile for its handle (missing → 404 via From<StoreError>).
+    let profile_bytes = store.get_object(&key_profile(uid)).await?;
+    let profile: Profile = serde_json::from_slice(&profile_bytes)
+        .map_err(|_| ApiError::Internal("Failed to read profile".into()))?;
+
+    // Wipe every prefix the account owns (single 1000-key page each, like Go).
+    let devices_prefix = prefix_user_devices(uid);
+    for prefix in [
+        prefix_user(uid),
+        prefix_inbox(uid),
+        prefix_keys(uid),
+        prefix_media(uid),
+    ] {
+        let page = store
+            .list_objects(&prefix, 1000, None)
+            .await
+            .map_err(|_| ApiError::Internal("Failed to list objects".into()))?;
+        // Evict the device-existence cache for devices we're deleting, so other
+        // signed-in devices 403 on their next request instead of lingering a TTL.
+        for k in &page.keys {
+            if k.starts_with(&devices_prefix) {
+                device_cache.invalidate(k);
+            }
+        }
+        if !page.keys.is_empty() {
+            store
+                .delete_objects(&page.keys)
+                .await
+                .map_err(|_| ApiError::Internal("Failed to delete objects".into()))?;
+        }
+    }
+
+    // Replace the handle projection with a cooldown tombstone, serialized against
+    // any in-flight registration of the same handle (contention → 503). The RAII
+    // guard releases the lock when this block ends (Go's explicit `release()`).
+    if !profile.handle.is_empty() {
+        let _claim = handle_mu
+            .0
+            .acquire(&profile.handle, HANDLE_CLAIM_TIMEOUT)
+            .await
+            .map_err(|_| ApiError::RegistrationUnavailable)?;
+        let tombstone = PublicHandleData {
+            released_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+            ..Default::default()
+        };
+        write_json(store, &key_handle(&profile.handle), &tombstone)
+            .await
+            .map_err(|_| ApiError::Internal("Failed to write handle tombstone".into()))?;
     }
 
     Ok(())
@@ -1773,6 +1844,78 @@ mod tests {
         let rb: serde_json::Value =
             serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
         assert_eq!(rb["current"], 2);
+    }
+
+    // --- delete-profile (authed; wipe + handle tombstone under the claim lock) ---
+
+    #[tokio::test]
+    async fn delete_profile_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client.delete("/v1/profile").dispatch().await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn delete_profile_wipes_account_and_tombstones_handle() {
+        let client = client_with(MemStore::new()).await;
+        let resp = register(&client, register_body("alice")).await;
+        let rb: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        let user_id = rb["user_id"].as_str().unwrap().to_string();
+        let token = rb["token"].as_str().unwrap().to_string();
+
+        let resp = client
+            .delete("/v1/profile")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // The handle is now a cooldown tombstone (resolve → 410 released).
+        let r = client.get("/v1/resolve/alice").dispatch().await;
+        assert_eq!(r.status(), Status::Gone);
+        let b: serde_json::Value = serde_json::from_str(&r.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "released");
+
+        // The device was wiped *and* its cache entry evicted → the token no longer
+        // authenticates (403 device_revoked, not a stale-cache 200).
+        let uri = format!("/v1/store/list?prefix=inbox/{user_id}/live/");
+        let r = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(r.status(), Status::Forbidden);
+        let b: serde_json::Value = serde_json::from_str(&r.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "device_revoked");
+    }
+
+    #[tokio::test]
+    async fn delete_profile_handle_contention_is_503() {
+        let client = client_with(MemStore::new()).await;
+        let token = register_token(&client, "alice").await;
+        // Hold the (shared) handle lock for "alice"; the tombstone write then times
+        // out. Account contents are wiped first, so a retry installs the tombstone.
+        let mu = client
+            .rocket()
+            .state::<HandleClaimMutex>()
+            .unwrap()
+            .0
+            .clone();
+        let _held = mu
+            .acquire("alice", StdDuration::from_secs(5))
+            .await
+            .unwrap();
+
+        let resp = client
+            .delete("/v1/profile")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::ServiceUnavailable);
+        let b: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "registration_unavailable");
     }
 
     // --- events SSE (phase 5c) ---

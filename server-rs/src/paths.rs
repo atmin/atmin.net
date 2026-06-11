@@ -19,6 +19,27 @@ pub fn prefix_media(user_id: &str) -> String {
     format!("media/{user_id}/")
 }
 
+/// The four owner-scoped prefixes a profile delete wipes. Mirror `prefixUser`,
+/// `prefixInbox`, `prefixKeys`, `prefixMedia`.
+pub fn prefix_user(user_id: &str) -> String {
+    format!("users/{user_id}/")
+}
+
+pub fn prefix_inbox(user_id: &str) -> String {
+    format!("inbox/{user_id}/")
+}
+
+pub fn prefix_keys(user_id: &str) -> String {
+    format!("keys/{user_id}/")
+}
+
+/// The device subtree — `users/{user_id}/devices/`. Used to spot device keys among
+/// a profile-delete's listing so their cache entries can be evicted. Mirrors
+/// `prefixUserDevices`.
+pub fn prefix_user_devices(user_id: &str) -> String {
+    format!("users/{user_id}/devices/")
+}
+
 /// A live inbox message key — `inbox/{user_id}/live/{msg_id}`. Mirrors
 /// `keyInboxLive`; `send` writes each delivered envelope here.
 pub fn key_inbox_live(user_id: &str, msg_id: &str) -> String {
