@@ -210,7 +210,8 @@ interop tests in `server-rs`. Phase 2 (type skeleton) is unblocked.
     objects are JSON ints; Go archives are doubles), so it cannot rely on the CBOR major
     type — and there is no legacy archive data to stay byte-compatible with. Net effect of
     the port: numbers survive compaction unchanged (int → int) rather than being coerced to
-    float — arguably the cleaner behaviour.
+    float — arguably the cleaner behaviour. Confirmed benign against the real client in the
+    phase-6 live validation (below).
 
 - **`user_id`/`device_id` are spec'd as ULIDs but unvalidated on the login path.**
   Registration generates ULIDs and the spec (mvp-v0.1 "IDs & naming") declares both as
@@ -221,6 +222,35 @@ interop tests in `server-rs`. Phase 2 (type skeleton) is unblocked.
   token format and as S3 key segments (a ULID has no `.` or `/`).
   - *Impact:* a deliberate tightening over current Go behaviour, enforced at the API
     boundary (phase 3). If it ever rejects a real input, that input was already off-spec.
+
+## Findings (phase 6 — live cross-server validation)
+
+The port reached code-complete — every endpoint plus the `cleanup` job, 127 unit + 10
+interop tests green — and was exercised against the production web client backed by a real
+MinIO. Two results:
+
+- **The Go and Rust servers are interchangeable behind an unmodified client.** Pointed at
+  the same MinIO bucket and the same `SERVER_SECRET`, the two binaries were swapped under a
+  running PWA mid-session: a message sent through one was read through the other, in both
+  directions, with full history intact and the client unaware which backend it was talking
+  to. This is the experiment's central claim — a drop-in replacement — observed end to end,
+  and a single exercise that simultaneously covers token HMAC interop (the shared secret),
+  the S3 storage layout, the live/archive sync path, key rotation (`rotate-keys` plus the
+  client's presigned `key_chain.json` write), and CBOR compaction.
+
+- **The CBOR integer/double divergence is confirmed benign against the real client.** A
+  Rust-written inbox archive (`v` encoded as a CBOR integer, zero `0xfb` doubles) was
+  consumed by the production client without issue: the crypto-bearing fields
+  (`ephemeral_key`, `iv`, `ciphertext`) are base64 strings, untouched by the numeric
+  representation, so ECIES/AES-GCM decryption succeeds. This upgrades the phase-3
+  writer-side note from predicted-benign to observed-benign.
+
+*Operational note (not a protocol finding):* the embedded-SPA build serves `web/dist`, and
+in `rust-embed`'s debug mode that directory is read from disk at request time — so a stale
+`web/dist` (built before a frontend fix) served an old bundle that mishandled a correct,
+expected superseded-key key-share failure, which momentarily looked like a backend
+regression. The fix was a web rebuild, not a server change. Any manual run of the
+embedded-SPA binary must build the web first; the e2e harness does so by construction.
 
 ## Alternatives considered
 
