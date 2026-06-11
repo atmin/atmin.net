@@ -9,6 +9,7 @@
 pub mod authproof;
 pub mod cache;
 pub mod cbor;
+pub mod cleanup;
 pub mod config;
 pub mod error;
 pub mod events;

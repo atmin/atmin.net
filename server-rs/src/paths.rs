@@ -29,6 +29,17 @@ pub fn prefix_inbox(user_id: &str) -> String {
     format!("inbox/{user_id}/")
 }
 
+/// The live / archive inbox subprefixes — `inbox/{uid}/live/` and
+/// `inbox/{uid}/archive/`. Mirror `prefixInboxLive` / `prefixInboxArchive`; the
+/// cleanup routine probes both to decide whether an inbox is empty.
+pub fn prefix_inbox_live(user_id: &str) -> String {
+    format!("inbox/{user_id}/live/")
+}
+
+pub fn prefix_inbox_archive(user_id: &str) -> String {
+    format!("inbox/{user_id}/archive/")
+}
+
 pub fn prefix_keys(user_id: &str) -> String {
     format!("keys/{user_id}/")
 }
