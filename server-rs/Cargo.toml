@@ -19,6 +19,14 @@ ciborium = "0.2"
 ulid = "1"
 log = "0.4"
 aws-sdk-s3 = "1"
+rust-embed = { version = "8", features = ["mime-guess"], optional = true }
+
+[features]
+# Embed the built web SPA (../web/dist) into the binary and serve it (production
+# parity with Go's //go:embed). Off by default so the fmt/lint/test gates and a
+# standalone `cargo test` never depend on a web build; production, e2e, and the
+# dev SPA-smoke build with `--features embed-spa`.
+embed-spa = ["dep:rust-embed"]
 
 [dev-dependencies]
 hex = "0.4"

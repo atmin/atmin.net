@@ -73,7 +73,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
     // One shared quota instance across presign (reserve) and delete (invalidate),
     // so the delete path expires the same cached usage. Mirrors `newMux`.
     let quota: SharedQuota = Arc::new(InProcessMediaQuota::new(store.clone()));
-    rocket::build()
+    let app = rocket::build()
         .manage(store)
         .manage(config)
         .manage(quota)
@@ -103,7 +103,14 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
                 rotate_keys,
                 events
             ],
-        )
+        );
+
+    // Embedded SPA as the catch-all (ranked last) — only with the feature, so the
+    // default build/test gate stays free of a web-dist dependency.
+    #[cfg(feature = "embed-spa")]
+    let app = app.mount("/", routes![crate::spa::spa]);
+
+    app
 }
 
 #[get("/healthz")]

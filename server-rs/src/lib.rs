@@ -22,6 +22,8 @@ pub mod paths;
 pub mod profile;
 pub mod reserved;
 pub mod routes;
+#[cfg(feature = "embed-spa")]
+pub mod spa;
 pub mod store;
 pub mod store_mem;
 pub mod store_s3;
