@@ -26,16 +26,24 @@
 #
 # Usage:  ./scripts/flaky-compare.sh [N]                          # full suite, N=10
 #         SPEC=credential-rotate-ui ./scripts/flaky-compare.sh 30 # one spec, 30x
+#         UNTIL_FAIL=1 SPEC=credential-rotate-ui ./scripts/flaky-compare.sh
+#                                                # hunt: cycle until the FIRST
+#                                                # failure, keep its trace, stop
 #
 # SPEC is the same Playwright filter `make … SPEC=` takes (substring of the spec
 # path, or "file -g 'title'"); empty = the whole suite. Scope it to hunt one flaky
-# test fast. Results + per-run logs: test-results/flaky/
+# test fast. UNTIL_FAIL=1 stops at the first failing run (count becomes a safety
+# cap, default 200) — the efficient way to capture a rare flake's trace.zip rather
+# than grinding a fixed N. Results + per-run logs: test-results/flaky/
 
 set -uo pipefail
 
 N="${1:-10}"
-ORDER="interleave"  # "interleave" | "blocks"
-SPEC="${SPEC:-}"    # optional Playwright filter (env), same as `make … SPEC=…`
+ORDER="interleave"           # "interleave" | "blocks"
+SPEC="${SPEC:-}"             # optional Playwright filter (env), same as `make … SPEC=…`
+UNTIL_FAIL="${UNTIL_FAIL:-}" # env: stop at the FIRST failure — the rare-flake hunt
+# In until-fail mode the run count is only a safety cap, so default it high.
+[ -n "$UNTIL_FAIL" ] && N="${1:-200}"
 PW_ARGS="--retries=0 -x"
 
 # Don't let the HTML reporter auto-open a blocking report server on failure — it
@@ -78,31 +86,45 @@ run_one() {
 		[ -z "$firstfail" ] && firstfail="(see log)"
 		log "$label run $n: FAIL  ${secs}s  — $firstfail  [$runlog]"
 		# Preserve Playwright's per-failure artifacts (trace.zip, screenshots,
-		# video) before the NEXT run wipes test-results/ — otherwise the flake
-		# we're hunting leaves nothing to open.
+		# video) before the NEXT run wipes them. Playwright runs from web/, so its
+		# output is web/test-results/ (NOT repo-root test-results/, where our own
+		# logs go) — copying from the wrong dir captured nothing the first cut.
 		local artdir="$OUT/$label-run-$n-artifacts"
 		mkdir -p "$artdir"
-		find test-results -maxdepth 1 -type d -name '*-chromium' \
+		find web/test-results -maxdepth 1 -type d -name '*-chromium' \
 			-exec cp -R {} "$artdir/" \; 2>/dev/null || true
 	fi
+	return "$status"
 }
 
 log "flaky-compare: N=$N, order=$ORDER, spec='${SPEC:-<full suite>}', args='$PW_ARGS', started $STAMP"
 
-case "$ORDER" in
-interleave)
-	for i in $(seq 1 "$N"); do
-		run_one go e2e-local "$i"
-		run_one rust e2e-local-rs "$i"
-	done
-	;;
-*)
-	log "== Go =="
-	for i in $(seq 1 "$N"); do run_one go e2e-local "$i"; done
-	log "== Rust =="
-	for i in $(seq 1 "$N"); do run_one rust e2e-local-rs "$i"; done
-	;;
-esac
+# Run the configured schedule. In until-fail mode, return at the first failing
+# run (its trace already preserved by run_one) instead of finishing the count.
+run_schedule() {
+	local i st
+	if [ "$ORDER" = "interleave" ]; then
+		for i in $(seq 1 "$N"); do
+			run_one go e2e-local "$i"; st=$?
+			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
+			run_one rust e2e-local-rs "$i"; st=$?
+			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
+		done
+	else
+		log "== Go =="
+		for i in $(seq 1 "$N"); do
+			run_one go e2e-local "$i"; st=$?
+			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
+		done
+		log "== Rust =="
+		for i in $(seq 1 "$N"); do
+			run_one rust e2e-local-rs "$i"; st=$?
+			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
+		done
+	fi
+}
+
+run_schedule
 
 log "== Summary =="
 for label in go rust; do
@@ -116,3 +138,7 @@ for label in go rust; do
 	log "$label: $pass pass / $fail fail of $N   (mean ${mean}s/run)"
 done
 log "done. full summary: $SUMMARY"
+if [ -n "$UNTIL_FAIL" ] && grep -q ": FAIL" "$SUMMARY"; then
+	log "caught a failure — trace/screenshots under $OUT/<backend>-run-N-artifacts/"
+	log "open it:  npx playwright show-trace $OUT/<backend>-run-N-artifacts/*/trace.zip"
+fi
