@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'vitest';
 import { canonicalizeForSign } from './crypto.js';
 
-// Generator (not an assertion): emits server-rs/tests/vectors/ts-vectors.json —
+// Generator (not an assertion): emits server/tests/vectors/ts-vectors.json —
 // the JCS canonical bytes produced by the *production* auth-proof signer (the
 // `canonicalize` npm package, via canonicalizeForSign), for the same battery the
 // Go emitter defines in server/interop_vectors_test.go. The Rust spike then
@@ -18,7 +18,7 @@ import { canonicalizeForSign } from './crypto.js';
 
 const vectorsDir = join(
     dirname(fileURLToPath(import.meta.url)),
-    '../../../server-rs/tests/vectors',
+    '../../../server/tests/vectors',
 );
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString('hex');

@@ -40,7 +40,7 @@ web/crypto/pkg/
 web/crypto/pkg-node/
 
 # Build output
-server-rs/target/
+server/target/
 web/dist/
 
 # Playwright

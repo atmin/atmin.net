@@ -1,7 +1,7 @@
 DOCKER ?= docker
 
-.PHONY: all build test lint fmt clean dev run e2e e2e-local-rs install
-.PHONY: server-rs-test server-rs-lint server-rs-fmt server-rs-build
+.PHONY: all build test lint fmt clean dev run e2e e2e-local install
+.PHONY: server-test server-lint server-fmt server-build
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
 .PHONY: up down
 
@@ -32,33 +32,33 @@ install:
 
 all: lint test build
 
-build: server-rs-build
+build: server-build
 
-test: web-test server-rs-test
+test: web-test server-test
 
-lint: web-lint web-lint-arch server-rs-lint
+lint: web-lint web-lint-arch server-lint
 
-fmt: web-fmt server-rs-fmt
+fmt: web-fmt server-fmt
 
 # --- Server (Rust) ---
 
-server-rs-test:
-	cd server-rs && cargo test
+server-test:
+	cd server && cargo test
 
 # fmt --check lives in lint so the pre-commit hook (lint + test) catches unformatted
 # Rust; clippy -D warnings treats every lint as an error. --lib --bins --tests covers
 # source, the dev binary, and tests but skips the throwaway examples/ playground.
-server-rs-lint:
-	cd server-rs && cargo fmt --check && cargo clippy --lib --bins --tests -- -D warnings
+server-lint:
+	cd server && cargo fmt --check && cargo clippy --lib --bins --tests -- -D warnings
 
-server-rs-fmt:
-	cd server-rs && cargo fmt
+server-fmt:
+	cd server && cargo fmt
 
 # Build the server with the embedded SPA. Depends on web-build so dist is always
 # fresh — a stale dist served via rust-embed's debug mode is a footgun. Debug build:
 # rust-embed reads ../web/dist live; the Docker image does the release embed for deploys.
-server-rs-build: web-build
-	cd server-rs && cargo build --features embed-spa
+server-build: web-build
+	cd server && cargo build --features embed-spa
 
 # --- Web (TypeScript) ---
 
@@ -92,12 +92,12 @@ dev:
 	$(DOCKER) compose up -d
 	@set -a; . ./.env; set +a; \
 	trap 'kill 0' EXIT; \
-	(cd server-rs && ROCKET_PORT=8080 cargo run) & \
+	(cd server && ROCKET_PORT=8080 cargo run) & \
 	(cd web && pnpm dev) & \
 	wait
 
 run:
-	set -a; . ./.env; set +a; ROCKET_PORT=8080 ./server-rs/target/debug/atmin-server
+	set -a; . ./.env; set +a; ROCKET_PORT=8080 ./server/target/debug/atmin-server
 
 # --- Docker (local dev) ---
 
@@ -130,10 +130,10 @@ e2e: web-build
 # :8080. Needs `docker compose up -d` for MinIO; wipes its volume for a clean slate.
 #
 # Pass SPEC=... to scope the run:
-#   make e2e-local-rs SPEC=media                     # one file (substring match)
-#   make e2e-local-rs SPEC=e2e/media.spec.ts         # path form
-#   make e2e-local-rs SPEC="media -g 'inline image'" # filter by test title
-e2e-local-rs: server-rs-build
+#   make e2e-local SPEC=media                     # one file (substring match)
+#   make e2e-local SPEC=e2e/media.spec.ts         # path form
+#   make e2e-local SPEC="media -g 'inline image'" # filter by test title
+e2e-local: server-build
 	@$(DOCKER) rm -f atmin-e2e 2>/dev/null || true
 	@# Free :8080 from a stray server left by an interrupted run.
 	@pkill -f 'target/debug/atmin-server' 2>/dev/null || true
@@ -148,7 +148,7 @@ e2e-local-rs: server-rs-build
 	export S3_ACCESS_KEY=minioadmin; \
 	export S3_SECRET_KEY=minioadmin; \
 	export ROCKET_PORT=8080; \
-	./server-rs/target/debug/atmin-server & \
+	./server/target/debug/atmin-server & \
 	SERVER_PID=$$!; \
 	trap "kill $$SERVER_PID 2>/dev/null || true" EXIT INT TERM; \
 	up=""; \
@@ -164,4 +164,4 @@ e2e-local-rs: server-rs-build
 
 clean:
 	rm -rf bin/
-	cd server-rs && cargo clean
+	cd server && cargo clean

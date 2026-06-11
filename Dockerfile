@@ -30,8 +30,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake clang \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/server-rs
-COPY server-rs/ .
+WORKDIR /app/server
+COPY server/ .
 # rust-embed embeds ../web/dist (relative to the crate) at compile time, so the
 # built SPA must be in place before the release build.
 COPY --from=web /app/web/dist /app/web/dist
@@ -43,7 +43,7 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=server /app/server-rs/target/release/atmin-server /atmin
+COPY --from=server /app/server/target/release/atmin-server /atmin
 
 # Rocket binds 127.0.0.1 by default — invisible from outside the container. Bind
 # all interfaces on the platform's port (Scaleway routes to 8080, same as Go's

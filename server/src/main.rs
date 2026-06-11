@@ -6,7 +6,7 @@
 //! fall back to the in-memory store so the endpoints can be exercised over HTTP
 //! without any S3.
 //!
-//! Run from `server-rs/`:
+//! Run from `server/`:
 //!   SERVER_SECRET=dev cargo run                       # MemStore (no S3)
 //!   SERVER_SECRET=… S3_ENDPOINT=… … cargo run          # S3-backed server
 //!   S3_ENDPOINT=… … cargo run -- cleanup [--apply]     # retention sweep (S3 only)

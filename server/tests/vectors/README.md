@@ -16,7 +16,7 @@ Cross-language interop fixtures for the phase-1 spike (ADR-0018,
 
 These vectors are an **independent oracle**: the Rust spike asserts `serde_jcs`/
 `ciborium` match *them*. Regenerate ONLY from the Go and TS emitters above —
-**never** from this crate (`server-rs`). Producing the "expected" values from the
+**never** from this crate (`server`). Producing the "expected" values from the
 same `serde_jcs`/`ciborium` under test turns the conformance check into a circular
 self-snapshot that would silently bless divergence (e.g. the `>2^53` integer case
 in ADR-0018 Findings). If `jcs_battery_matches_go` goes red, the fix is to

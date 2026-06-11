@@ -7,12 +7,12 @@
 # backends; Go is retired, so it now hunts flakes on the one server — chiefly the
 # regression guard for the key-backup session_id fix (tasks/key-backup-...).
 #
-# Each run is `make e2e-local-rs SPEC="<filter> --retries=0 -x"`:
+# Each run is `make e2e-local SPEC="<filter> --retries=0 -x"`:
 #   --retries=0  a flaky test FAILS the run instead of being retried green
 #   -x           stop at the first failing test (we only need pass/fail per run)
 #
 # IMPORTANT (unattended + destructive):
-#   - `make e2e-local-rs` runs `docker compose down -v` (WIPES MinIO) and binds :8080,
+#   - `make e2e-local` runs `docker compose down -v` (WIPES MinIO) and binds :8080,
 #     so runs are sequential and any data in MinIO is lost. Stop `make dev` first.
 #   - Needs Docker running. caffeinate keeps the Mac awake.
 #
@@ -62,7 +62,7 @@ run_one() {
 	start=$(date +%s)
 	# Left SPEC= is the Make variable; $SPEC is our optional filter prepended to
 	# the no-retries/fail-fast flags.
-	make e2e-local-rs SPEC="$SPEC $PW_ARGS" >"$runlog" 2>&1
+	make e2e-local SPEC="$SPEC $PW_ARGS" >"$runlog" 2>&1
 	status=$?
 	end=$(date +%s)
 	secs=$((end - start))
