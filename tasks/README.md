@@ -23,6 +23,14 @@ Delete a file once its change lands.
   cutover only to avoid a mid-transition context-switch — the **first** post-cutover task.
   Found by the `flaky-compare` stress test; trace-confirmed (`XMinioInvalidObjectName`).
 
+## Then — Rust structured logging (not cutover-gating)
+
+- **[rust-structured-logging](rust-structured-logging.md)** — bring the Rust server's
+  logs to [ADR-0010](../docs/decisions/adr-0010-logging.md)'s slog-style **logfmt
+  (`key=value`, NOT JSON)** + restore the per-request access log Go had. The aggregation
+  decision is captured but nothing consumes the logs for field-querying yet, so this is
+  latent conformance — sequenced **after** the key-backup fix, blocks nothing at cutover.
+
 ## MVP v0.1 — complete ✅ (modulo the bug above)
 
 The v0.1 baseline is done: a self-contained, self-service E2E messenger
