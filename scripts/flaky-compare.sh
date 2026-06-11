@@ -1,28 +1,20 @@
 #!/usr/bin/env bash
 #
-# flaky-compare.sh — measure e2e flakiness, Go server vs Rust server (ADR-0018).
+# flaky-compare.sh — e2e flake hunt for the server.
 #
-# Runs the full Playwright suite N times against each backend, NO retries and
-# fail-fast, fully unattended, and tallies pass/fail + runtime. Turns "Rust feels
-# stabler" into a measured flake rate.
+# Runs the full Playwright suite N times, NO retries and fail-fast, unattended,
+# tallying pass/fail + runtime. Built during the Go→Rust cutover to compare the two
+# backends; Go is retired, so it now hunts flakes on the one server — chiefly the
+# regression guard for the key-backup session_id fix (tasks/key-backup-...).
 #
-# Each run is `make e2e-local[-rs] SPEC="--retries=0 -x"`:
+# Each run is `make e2e-local-rs SPEC="<filter> --retries=0 -x"`:
 #   --retries=0  a flaky test FAILS the run instead of being retried green
-#                (the local default is retries:1, which hides exactly the flake
-#                 we're trying to measure)
-#   -x           stop at the first failing test — we only need pass/fail per run,
-#                and a failed run shouldn't grind through the whole suite
+#   -x           stop at the first failing test (we only need pass/fail per run)
 #
-# IMPORTANT, because it's unattended and destructive:
-#   - Both Make targets run `docker compose down -v` (WIPES the MinIO volume) and
-#     bind :8080, so runs are strictly sequential and any data in MinIO is lost.
-#   - Stop `make dev` first — the targets pkill stray servers on :8080.
-#   - Needs Docker running.
-#   - ~N * 2.2 min * 2 backends (≈45 min for N=10). caffeinate keeps the Mac awake.
-#
-# Order is interleaved (go,rust,go,rust,…) so any time drift — the machine warming
-# up, background load shifting over the ~45 min — hits both backends evenly instead
-# of biasing one half. Set ORDER="blocks" for all-Go-then-all-Rust if you'd rather.
+# IMPORTANT (unattended + destructive):
+#   - `make e2e-local-rs` runs `docker compose down -v` (WIPES MinIO) and binds :8080,
+#     so runs are sequential and any data in MinIO is lost. Stop `make dev` first.
+#   - Needs Docker running. caffeinate keeps the Mac awake.
 #
 # Usage:  ./scripts/flaky-compare.sh [N]                          # full suite, N=10
 #         SPEC=credential-rotate-ui ./scripts/flaky-compare.sh 30 # one spec, 30x
@@ -30,16 +22,13 @@
 #                                                # hunt: cycle until the FIRST
 #                                                # failure, keep its trace, stop
 #
-# SPEC is the same Playwright filter `make … SPEC=` takes (substring of the spec
-# path, or "file -g 'title'"); empty = the whole suite. Scope it to hunt one flaky
-# test fast. UNTIL_FAIL=1 stops at the first failing run (count becomes a safety
-# cap, default 200) — the efficient way to capture a rare flake's trace.zip rather
-# than grinding a fixed N. Results + per-run logs: test-results/flaky/
+# SPEC is the same Playwright filter `make … SPEC=` takes. UNTIL_FAIL=1 stops at the
+# first failing run (count becomes a safety cap, default 200) — the efficient way to
+# capture a rare flake's trace.zip. Results + per-run logs: test-results/flaky/
 
 set -uo pipefail
 
 N="${1:-10}"
-ORDER="interleave"           # "interleave" | "blocks"
 SPEC="${SPEC:-}"             # optional Playwright filter (env), same as `make … SPEC=…`
 UNTIL_FAIL="${UNTIL_FAIL:-}" # env: stop at the FIRST failure — the rare-flake hunt
 # In until-fail mode the run count is only a safety cap, so default it high.
@@ -47,7 +36,7 @@ UNTIL_FAIL="${UNTIL_FAIL:-}" # env: stop at the FIRST failure — the rare-flake
 PW_ARGS="--retries=0 -x"
 
 # Don't let the HTML reporter auto-open a blocking report server on failure — it
-# would hang this unattended loop at the first flake (it did, once).
+# would hang this unattended loop at the first flake.
 export PW_TEST_HTML_REPORT_OPEN=never
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,31 +54,29 @@ fi
 
 log() { echo "$@" | tee -a "$SUMMARY"; }
 
-# run_one <label go|rust> <make-target> <run-number>
+# run_one <run-number> — one full-suite run; returns the make exit status.
 run_one() {
-	local label="$1" target="$2" n="$3"
-	local runlog="$OUT/$label-run-$n-$STAMP.log"
+	local n="$1"
+	local runlog="$OUT/run-$n-$STAMP.log"
 	local start end secs status
 	start=$(date +%s)
 	# Left SPEC= is the Make variable; $SPEC is our optional filter prepended to
 	# the no-retries/fail-fast flags.
-	make "$target" SPEC="$SPEC $PW_ARGS" >"$runlog" 2>&1
+	make e2e-local-rs SPEC="$SPEC $PW_ARGS" >"$runlog" 2>&1
 	status=$?
 	end=$(date +%s)
 	secs=$((end - start))
 	if [ "$status" -eq 0 ]; then
-		log "$label run $n: PASS  ${secs}s"
+		log "run $n: PASS  ${secs}s"
 	else
-		# Best-effort: the first failing test line Playwright prints under -x.
 		local firstfail
 		firstfail=$(grep -m1 -E '[0-9]+\).*›' "$runlog" | sed 's/^[[:space:]]*//')
 		[ -z "$firstfail" ] && firstfail="(see log)"
-		log "$label run $n: FAIL  ${secs}s  — $firstfail  [$runlog]"
-		# Preserve Playwright's per-failure artifacts (trace.zip, screenshots,
-		# video) before the NEXT run wipes them. Playwright runs from web/, so its
-		# output is web/test-results/ (NOT repo-root test-results/, where our own
-		# logs go) — copying from the wrong dir captured nothing the first cut.
-		local artdir="$OUT/$label-run-$n-artifacts"
+		log "run $n: FAIL  ${secs}s  — $firstfail  [$runlog]"
+		# Preserve Playwright's per-failure artifacts (trace.zip, screenshots) before
+		# the NEXT run wipes them. Playwright runs from web/, so its output is
+		# web/test-results/ (NOT repo-root test-results/, where our own logs go).
+		local artdir="$OUT/run-$n-artifacts"
 		mkdir -p "$artdir"
 		find web/test-results -maxdepth 1 -type d -name '*-chromium' \
 			-exec cp -R {} "$artdir/" \; 2>/dev/null || true
@@ -97,48 +84,23 @@ run_one() {
 	return "$status"
 }
 
-log "flaky-compare: N=$N, order=$ORDER, spec='${SPEC:-<full suite>}', args='$PW_ARGS', started $STAMP"
+log "flake-hunt: N=$N, spec='${SPEC:-<full suite>}', args='$PW_ARGS', started $STAMP"
 
-# Run the configured schedule. In until-fail mode, return at the first failing
-# run (its trace already preserved by run_one) instead of finishing the count.
-run_schedule() {
-	local i st
-	if [ "$ORDER" = "interleave" ]; then
-		for i in $(seq 1 "$N"); do
-			run_one go e2e-local "$i"; st=$?
-			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
-			run_one rust e2e-local-rs "$i"; st=$?
-			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
-		done
-	else
-		log "== Go =="
-		for i in $(seq 1 "$N"); do
-			run_one go e2e-local "$i"; st=$?
-			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
-		done
-		log "== Rust =="
-		for i in $(seq 1 "$N"); do
-			run_one rust e2e-local-rs "$i"; st=$?
-			{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && return
-		done
-	fi
-}
-
-run_schedule
+for i in $(seq 1 "$N"); do
+	run_one "$i"
+	st=$?
+	{ [ -n "$UNTIL_FAIL" ] && [ "$st" -ne 0 ]; } && break
+done
 
 log "== Summary =="
-for label in go rust; do
-	pass=$(grep -c "^$label run .*: PASS" "$SUMMARY")
-	fail=$(grep -c "^$label run .*: FAIL" "$SUMMARY")
-	# Mean runtime across this backend's runs (anchored on PASS/FAIL so a digit in
-	# a failing-test name can't be mistaken for the runtime).
-	mean=$(grep -E "^$label run .*(PASS|FAIL)  [0-9]+s" "$SUMMARY" |
-		sed -E 's/.*(PASS|FAIL)  ([0-9]+)s.*/\2/' |
-		awk '{ t += $1; n++ } END { if (n) printf "%.0f", t / n; else print "0" }')
-	log "$label: $pass pass / $fail fail of $N   (mean ${mean}s/run)"
-done
+pass=$(grep -c "^run .*: PASS" "$SUMMARY")
+fail=$(grep -c "^run .*: FAIL" "$SUMMARY")
+mean=$(grep -E "^run .*(PASS|FAIL)  [0-9]+s" "$SUMMARY" |
+	sed -E 's/.*(PASS|FAIL)  ([0-9]+)s.*/\2/' |
+	awk '{ t += $1; n++ } END { if (n) printf "%.0f", t / n; else print "0" }')
+log "total: $pass pass / $fail fail   (mean ${mean}s/run)"
 log "done. full summary: $SUMMARY"
 if [ -n "$UNTIL_FAIL" ] && grep -q ": FAIL" "$SUMMARY"; then
-	log "caught a failure — trace/screenshots under $OUT/<backend>-run-N-artifacts/"
-	log "open it:  npx playwright show-trace $OUT/<backend>-run-N-artifacts/*/trace.zip"
+	log "caught a failure — trace/screenshots under $OUT/run-N-artifacts/"
+	log "open it:  npx playwright show-trace $OUT/run-N-artifacts/*/trace.zip"
 fi

@@ -63,11 +63,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -96,9 +91,6 @@ jobs:
       - name: Build WASM
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd web && pnpm build:wasm
-
-      - name: Stub web dist for go embed
-        run: mkdir -p server/dist && touch server/dist/index.html
 
       - name: Lint
         run: make lint
@@ -118,11 +110,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -151,9 +138,6 @@ jobs:
       - name: Build WASM
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: cd web && pnpm build:wasm
-
-      - name: Stub web dist for go embed
-        run: mkdir -p server/dist && touch server/dist/index.html
 
       - name: Unit tests
         run: make test
