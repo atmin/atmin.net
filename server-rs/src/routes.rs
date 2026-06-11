@@ -97,6 +97,8 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
                 store_compact,
                 update_profile,
                 delete_profile,
+                delete_device,
+                revoke_device,
                 send,
                 rotate_keys,
                 events
@@ -819,6 +821,82 @@ async fn delete_profile(
             .map_err(|_| ApiError::Internal("Failed to write handle tombstone".into()))?;
     }
 
+    Ok(())
+}
+
+/// `DELETE /v1/devices` — self-delete the *calling* device (token only, no proof).
+/// Mirrors `handleDeleteDevice`: delete the token's own device file and evict its
+/// cache entry so it stops authenticating immediately. Idempotent.
+#[delete("/v1/devices")]
+async fn delete_device(
+    auth: Result<AuthedUser, ApiError>,
+    store: &State<SharedStore>,
+    device_cache: &State<DeviceCache>,
+) -> Result<(), ApiError> {
+    let user = auth?;
+    let device_key = key_device(user.user_id.as_str(), user.device_id.as_str());
+    store
+        .delete_object(&device_key)
+        .await
+        .map_err(|_| ApiError::Internal("Failed to delete device".into()))?;
+    device_cache.invalidate(&device_key);
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct RevokeDeviceRequest {
+    #[serde(default)]
+    device_id: String,
+    /// Required — the account credential authorizing the revocation.
+    auth_proof: AuthProof,
+}
+
+/// `POST /v1/devices/revoke` — revoke *any* of the account's devices, authorized by
+/// an auth-proof (so a device holding the password can cut off a lost one). Mirrors
+/// `handleRevokeDevice`: the token gives the uid; the proof must verify against the
+/// account's current key_version (stale → 401, invalid → 403); then delete the
+/// named device and evict its cache entry.
+#[post("/v1/devices/revoke", data = "<body>")]
+async fn revoke_device(
+    auth: Result<AuthedUser, ApiError>,
+    body: &str,
+    store: &State<SharedStore>,
+    device_cache: &State<DeviceCache>,
+) -> Result<(), ApiError> {
+    let user = auth?;
+    let req: RevokeDeviceRequest = serde_json::from_str(body).map_err(|_| ApiError::BadRequest)?;
+
+    // Verify the proof against the account (the token already gave us the uid).
+    let profile_bytes = store
+        .get_object(&key_profile(user.user_id.as_str()))
+        .await?;
+    let profile: Profile = serde_json::from_slice(&profile_bytes)
+        .map_err(|_| ApiError::Internal("Failed to read profile".into()))?;
+    let pubkey = URL_SAFE_NO_PAD
+        .decode(&profile.auth_public_key)
+        .ok()
+        .filter(|b| b.len() == 32)
+        .ok_or(ApiError::Forbidden)?;
+    let payload =
+        verify_proof(&pubkey, &req.auth_proof, Utc::now()).map_err(|_| ApiError::Forbidden)?;
+    let current = if profile.key_version == 0 {
+        1
+    } else {
+        profile.key_version
+    };
+    if payload.key_version != current {
+        return Err(ApiError::KeyVersionStale {
+            current: KeyVersion::new(current).unwrap_or(KeyVersion::ONE),
+        });
+    }
+
+    // Revoke the named device (idempotent) and evict its cache entry.
+    let device_key = key_device(user.user_id.as_str(), &req.device_id);
+    store
+        .delete_object(&device_key)
+        .await
+        .map_err(|_| ApiError::Internal("Failed to delete device".into()))?;
+    device_cache.invalidate(&device_key);
     Ok(())
 }
 
@@ -1916,6 +1994,143 @@ mod tests {
         let b: serde_json::Value =
             serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
         assert_eq!(b["error"], "registration_unavailable");
+    }
+
+    // --- device delete / revoke (authed; cache eviction) ---
+
+    /// A second device id to revoke (the handler doesn't validate its format).
+    const DID2: &str = "01BX5ZZKBKACTAV9WEVGEMMVR0";
+
+    async fn post_revoke<'a>(
+        client: &'a Client,
+        token: &str,
+        body: String,
+    ) -> rocket::local::asynchronous::LocalResponse<'a> {
+        client
+            .post("/v1/devices/revoke")
+            .header(ContentType::JSON)
+            .header(bearer(token))
+            .body(body)
+            .dispatch()
+            .await
+    }
+
+    #[tokio::test]
+    async fn delete_device_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client.delete("/v1/devices").dispatch().await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn delete_device_self_deletes_and_evicts_cache() {
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+
+        let resp = client
+            .delete("/v1/devices")
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // The calling device is gone and its cache entry evicted → the token no
+        // longer authenticates (403 device_revoked, not a stale-cache 200).
+        let uri = format!("/v1/store/list?prefix=inbox/{UID}/live/");
+        let r = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(r.status(), Status::Forbidden);
+        let b: serde_json::Value = serde_json::from_str(&r.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "device_revoked");
+    }
+
+    #[tokio::test]
+    async fn revoke_requires_a_token() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client
+            .post("/v1/devices/revoke")
+            .header(ContentType::JSON)
+            .body("{}")
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+    }
+
+    #[tokio::test]
+    async fn revoke_deletes_target_device_with_valid_proof() {
+        let (sk, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 1).await;
+        // Calling device (for the token) + the target device to revoke.
+        store
+            .put_object(&key_device(UID, DID), b"{}", "application/json")
+            .await
+            .unwrap();
+        store
+            .put_object(&key_device(UID, DID2), b"{}", "application/json")
+            .await
+            .unwrap();
+        let token = token::generate(TEST_SECRET, UID, DID, KeyVersion::ONE);
+        let client = client_with(store).await;
+
+        let proof = signed_proof(&sk, UID, DID, &now_rfc3339(), 1);
+        let body = serde_json::json!({ "device_id": DID2, "auth_proof": proof }).to_string();
+        let resp = post_revoke(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Ok);
+
+        // The target device file is gone.
+        let head = client
+            .rocket()
+            .state::<SharedStore>()
+            .unwrap()
+            .head_object(&key_device(UID, DID2))
+            .await;
+        assert!(head.is_err());
+    }
+
+    #[tokio::test]
+    async fn revoke_bad_proof_is_403() {
+        let (_, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 1).await;
+        store
+            .put_object(&key_device(UID, DID), b"{}", "application/json")
+            .await
+            .unwrap();
+        let token = token::generate(TEST_SECRET, UID, DID, KeyVersion::ONE);
+        let client = client_with(store).await;
+        // Proof signed by a different key than the account's auth_public_key.
+        let wrong = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let proof = signed_proof(&wrong, UID, DID, &now_rfc3339(), 1);
+        let body = serde_json::json!({ "device_id": DID, "auth_proof": proof }).to_string();
+        let resp = post_revoke(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn revoke_stale_proof_kv_is_401() {
+        let (sk, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 2).await; // account kv=2
+        store
+            .put_object(&key_device(UID, DID), b"{}", "application/json")
+            .await
+            .unwrap();
+        let token = token::generate(TEST_SECRET, UID, DID, KeyVersion::new(2).unwrap());
+        let client = client_with(store).await;
+        // Proof claims kv=1 against a kv=2 account.
+        let proof = signed_proof(&sk, UID, DID, &now_rfc3339(), 1);
+        let body = serde_json::json!({ "device_id": DID, "auth_proof": proof }).to_string();
+        let resp = post_revoke(&client, &token, body).await;
+        assert_eq!(resp.status(), Status::Unauthorized);
+        let b: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "key_version_stale");
+        assert_eq!(b["current"], 2);
     }
 
     // --- events SSE (phase 5c) ---
