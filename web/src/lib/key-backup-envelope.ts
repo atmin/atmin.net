@@ -3,10 +3,10 @@
  * contacts.json). See ADR-0012 — Backup migration. The outer `v` field
  * identifies which `key_version`'s backup key encrypted the ciphertext.
  *
- * - Key-backup blobs (`keys/{uid}/live/{session_id}`) also carry
- *   `session_id` so the chain-aware reader can dispatch per entry, and
- *   `msg_id` (= session_id) which the server's compaction uses for
- *   per-archive dedup.
+ * - Key-backup blobs (`keys/{uid}/live/{base64url(session_id)}`) also carry
+ *   the raw `session_id` in the body so the chain-aware reader can dispatch
+ *   per entry, and `msg_id` (= session_id) which the server's compaction uses
+ *   for per-archive dedup.
  * - `contacts.json` reuses the same envelope sans `session_id`.
  *
  * Every envelope written now carries `v`. The pre-ADR-0012 shape

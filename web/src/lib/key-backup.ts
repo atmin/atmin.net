@@ -2,8 +2,10 @@
  * Key backup — encrypt/upload and download/decrypt Megolm session keys.
  *
  * Session keys are encrypted with the user's *current* backup key
- * (AES-256-GCM) and stored at `keys/{userId}/live/{sessionId}` with a
- * versioned envelope (`{v, iv, ciphertext, session_id, msg_id}`).
+ * (AES-256-GCM) and stored at `keys/{userId}/live/{base64url(sessionId)}`
+ * with a versioned envelope (`{v, iv, ciphertext, session_id, msg_id}`).
+ * The key segment is base64url (object-name-safe); the envelope body carries
+ * the *raw* session_id, which is what restore reads (see paths.ts / I10).
  *
  * On restore, each blob's `v` tells the reader which key encrypted it.
  * For `v == currentKeyVersion` (the common case) the in-hand backup key

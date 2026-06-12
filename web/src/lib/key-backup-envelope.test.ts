@@ -17,6 +17,17 @@ describe('key-backup envelope', () => {
         expect(parsed.sessionId).toBe('session-abc');
     });
 
+    // I10: the S3 *key* segment is base64url-encoded, but the body keeps the
+    // raw session_id — restore reads it from the body, so an S3-unsafe sid
+    // (`/`, `+`) survives the round-trip verbatim and stays restorable.
+    it('preserves an S3-unsafe session_id verbatim in the body', () => {
+        const sid = '/u7WX//ab+cd/';
+        const parsed = parseKeyBackupEnvelope(
+            wrapKeyBackupEnvelope(2, iv, ct, sid),
+        );
+        expect(parsed.sessionId).toBe(sid);
+    });
+
     it('wrap mirrors session_id into msg_id for compaction dedup', () => {
         const env = wrapKeyBackupEnvelope(2, iv, ct, 'session-abc');
         expect(env.session_id).toBe('session-abc');

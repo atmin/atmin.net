@@ -86,7 +86,10 @@ Inbox (per user, not per device):
 
 Key backup (Megolm session keys, encrypted with the current backup key):
 
-- `keys/{user_id}/live/{session_id}`
+- `keys/{user_id}/live/{base64url(session_id)}` — the key segment is
+  base64url-encoded (a Megolm `session_id` is standard base64, whose `/`/`+`
+  would otherwise form an invalid S3 object name); the envelope body still
+  carries the raw `session_id`, which is what restore reads
 - `keys/{user_id}/archive/{YYYY}-{MM}-{DD}-{ULID}`
 - `keys/{user_id}/key_chain.json` — links of historical backup keys
   encrypted by their successors. Written on rotation; absent for

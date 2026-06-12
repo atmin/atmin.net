@@ -16,6 +16,7 @@ import {
 } from './crypto';
 import { deleteDatabase } from './db';
 import { createSessionManager } from './megolm-session';
+import { path } from './paths';
 import type { WasmModule } from './wasm';
 
 vi.mock('./api', async () => {
@@ -119,7 +120,7 @@ describe('backupSessionKey', () => {
             1,
         );
 
-        const expectedPath = `keys/${userId}/live/${sessionId}`;
+        const expectedPath = path.keyBackup(userId, sessionId);
         expect(stored.has(expectedPath)).toBe(true);
 
         const raw = JSON.parse(
@@ -499,7 +500,7 @@ describe('versioned envelopes + chain walking', () => {
             2,
         );
 
-        const blob = stored.get(`keys/${userId}/live/${sender.session_id}`);
+        const blob = stored.get(path.keyBackup(userId, sender.session_id));
         const raw = JSON.parse(new TextDecoder().decode(blob as Uint8Array));
         expect(raw.v).toBe(2);
         expect(raw.session_id).toBe(sender.session_id);
