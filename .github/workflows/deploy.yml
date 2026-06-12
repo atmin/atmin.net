@@ -67,10 +67,12 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Rust build (server/)
+      - name: Cache Rust build (server/ + web/crypto/)
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
+          workspaces: |
+            server
+            web/crypto
 
       - name: Cache cargo installs
         uses: actions/cache@v4
@@ -83,19 +85,6 @@ jobs:
 
       - name: Install web dependencies
         run: cd web && pnpm install --frozen-lockfile
-
-      - name: Cache WASM build
-        id: wasm-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            web/crypto/pkg
-            web/crypto/pkg-node
-          key: wasm-${{ hashFiles('web/crypto/Cargo.lock', 'web/crypto/src/**') }}
-
-      - name: Build WASM
-        if: steps.wasm-cache.outputs.cache-hit != 'true'
-        run: cd web && pnpm build:wasm
 
       - name: Lint
         run: make lint
@@ -119,10 +108,12 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Rust build (server/)
+      - name: Cache Rust build (server/ + web/crypto/)
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: server
+          workspaces: |
+            server
+            web/crypto
 
       - name: Cache cargo installs
         uses: actions/cache@v4
@@ -135,19 +126,6 @@ jobs:
 
       - name: Install web dependencies
         run: cd web && pnpm install --frozen-lockfile
-
-      - name: Cache WASM build
-        id: wasm-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            web/crypto/pkg
-            web/crypto/pkg-node
-          key: wasm-${{ hashFiles('web/crypto/Cargo.lock', 'web/crypto/src/**') }}
-
-      - name: Build WASM
-        if: steps.wasm-cache.outputs.cache-hit != 'true'
-        run: cd web && pnpm build:wasm
 
       - name: Unit tests
         run: make test
