@@ -7,7 +7,7 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 
 ```
 .
-├── server/           Go HTTP server — stateless S3 proxy + SSE hub
+├── server/           Rust HTTP server (Rocket) — stateless S3 proxy + SSE hub
 ├── web/              React 19 + TypeScript PWA (Vite)
 │   ├── src/          App source (see "Architecture" below)
 │   ├── crypto/       Rust crate → WASM (vodozemac Megolm)
@@ -22,7 +22,6 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 │   └── evolution/        Speculative future work, not commitments
 ├── tasks/            Active TODOs with spec ↔ current ↔ change ↔ verify sections
 ├── src-tauri/        Native desktop wrapper (ADR-0009)
-├── bin/              Build outputs — `bin/atmin` is the server binary
 ├── scripts/          Repo-wide scripts (e.g. pre-commit hook)
 ├── Makefile          Single source of truth for every command (CI calls these)
 └── docker-compose.yml MinIO for local dev/e2e
@@ -55,24 +54,21 @@ multi-part changes.
 ## Setup
 
 ```
-make install   # checks toolchain (go, pnpm, cargo, docker, wasm-pack), installs deps, copies pre-commit hook, seeds .env
-make dev       # docker compose up MinIO + go run server + pnpm dev for web
+make install   # checks toolchain (pnpm, cargo, docker, wasm-pack), installs deps, copies pre-commit hook, seeds .env
+make dev       # docker compose up MinIO + cargo run server + pnpm dev for web
 ```
 
-Required tools: Go (see `server/go.mod`), pnpm, Rust + `wasm32-unknown-unknown`, `wasm-pack`, Docker (for MinIO and e2e).
+Required tools: Rust (stable, see `server/Cargo.toml`) + `wasm32-unknown-unknown`, pnpm, `wasm-pack`, Docker (for MinIO and e2e).
 
 ## Gates — every change must pass
 
 Run in this order; `fmt` must come before `lint` because lint flags formatting violations.
 
 ```
-make fmt    # gofmt + Biome write + cargo fmt
-make lint   # go vet + Biome + tsc + architecture rules + cargo fmt --check + clippy
-make test   # go test ./... + Vitest + cargo test
+make fmt    # Biome write + cargo fmt
+make lint   # Biome + tsc + architecture rules + cargo fmt --check + clippy
+make test   # Vitest + cargo test
 ```
-
-The `cargo` steps cover the `server-rs/` Rust port experiment (ADR-0018); they are
-not in `make build` — the Go server is still the deployed binary.
 
 Aggregates: `make all` = `lint test build`. CI runs the same Make targets — if they pass locally, CI passes (modulo deploy).
 
@@ -110,7 +106,7 @@ routes/    → hooks/      → lib/
 | End-to-end flows | Playwright, one spec per `docs/scenarios/*.md` | `web/e2e/` |
 | Invariants (fault-injection) | Playwright with deliberate faults; asserts UI + IDB + S3 layers | `web/e2e/invariants/` |
 
-`make e2e-local` runs Playwright against a native Go server + Vite + MinIO; pass `SPEC=...` to scope (e.g. `make e2e-local SPEC=media`). `make e2e` runs the full Docker image (used by CI on tags).
+`make e2e-local` runs Playwright against a native Rust server + Vite + MinIO; pass `SPEC=...` to scope (e.g. `make e2e-local SPEC=media`). `make e2e` runs the full Docker image (used by CI on tags).
 
 ### Styling
 
@@ -125,47 +121,56 @@ routes/    → hooks/      → lib/
 
 ## Backend (`server/`)
 
-Single-package Go binary. **Stateless by design**: all durable state lives in S3 — the only in-process state is the SSE hub, the device-existence cache, and the media-quota cache (see ADR-0001 and ADR-0004 for the "in-process now, shared state later" pattern).
+Single Rust crate (Rocket 0.5). **Stateless by design**: all durable state lives in S3 — the only in-process state is the SSE hub, the device-existence and profile (`key_version`) caches, the media-quota cache, and the per-key claim mutexes (see ADR-0001 and ADR-0004 for the "in-process now, shared state later" pattern, ADR-0012/0013 for the mutexes).
 
-### File map
+### File map (`server/src/`)
 
 | File | Role |
 |---|---|
-| `main.go` | Wire-up only: config, S3 client, EventHub, mux, listen. |
-| `config.go` | Env-var loading. New env vars must be added here and to `docs/ops.md`. |
-| `routes.go` | Route table. Wraps authenticated handlers in `requireAuth`. |
-| `middleware.go` | `requireAuth`, `deviceCache`, `logRequests`, `remoteIP`. |
-| `handlers.go` | All HTTP handlers + prefix authorization (`authorizeKey`, `authorizeKeyWrite`). |
-| `auth.go` | Token (HMAC) + auth-proof (Ed25519) primitives. |
-| `events.go` | SSE hub + `last_active` updater. |
-| `store.go` | `Store` interface + S3 implementation. |
-| `store_mem.go` | `MemStore` for tests — must satisfy the `Store` interface in lockstep. |
-| `media_quota.go` | Per-user quota; in-process cache, swappable interface. |
-| `error.go` | Canonical `APIError` set. |
-| `static.go` | Embedded SPA + client-side-routing fallback. |
-| `handle.go` | BIP39 handle generator (collision retry happens at the call site). |
+| `main.rs` | Binary entry (`#[rocket::main]`): load config, pick the S3 or in-memory store, launch Rocket — or dispatch the `cleanup` subcommand (arg-based, no server). |
+| `lib.rs` | Crate root — module declarations; the surface `tests/` integrate against. |
+| `config.rs` | Env-var loading (`ServerConfig`, `S3Config::from_env`). New env vars go here **and** in `docs/ops.md`. |
+| `routes.rs` | All HTTP handlers **and** the route table — `build(store, config) -> Rocket` (`.mount` + `routes![]`). Per-prefix authorization lives inside each handler. |
+| `guard.rs` | `AuthedUser` / `AuthedUserNoKv` request guards (`FromRequest`). A handler does authenticated work only by taking the guard. |
+| `token.rs` | Bearer-token (HMAC) mint + verify. |
+| `authproof.rs` | Ed25519 auth-proof over JCS-canonical (RFC 8785) bytes (`serde_jcs`) — must match the TS client byte-for-byte. |
+| `events.rs` | SSE `EventHub` (RAII subscriptions) + `last_active` updater. |
+| `store.rs` | `Store` trait — the storage contract. |
+| `store_s3.rs` | `S3Store` — the `aws-sdk-s3` implementation. |
+| `store_mem.rs` | `MemStore` for tests — must satisfy `Store` in lockstep. |
+| `cache.rs` | TTL caches (device existence, profile `key_version`) — in-process now, shared-state later. |
+| `keyed_mutex.rs` | Per-key mutex (RAII guard) serialising handle-claim and profile GET-VERIFY-WRITE (ADR-0012/0013). |
+| `idempotency.rs` | Rotation idempotency records (`request_id`, 24h TTL). |
+| `media_quota.rs` | Per-user media quota; in-process cache, swappable interface. |
+| `model.rs` | Request/response DTOs + domain types (`Handle`, `Profile`) and validation. |
+| `paths.rs` | S3 key builders — the canonical prefix layout ("S3 layout" below). |
+| `reserved.rs` | Reserved-handle blocklist (embedded `reserved_handles.txt`, ADR-0013). |
+| `cbor.rs` | CBOR (de)serialisation for compacted archives. |
+| `cleanup.rs` | Data-retention sweep — the `cleanup` subcommand's logic (ADR-0006). |
+| `spa.rs` | Embedded-SPA serving + client-side-routing fallback (rust-embed, behind the `embed-spa` feature). |
+| `error.rs` | Canonical `ApiError` enum + its `Responder` (HTTP status + JSON body). |
 
 ### Style
 
-- Use `slog` for logs (text format, see ADR-0010). Never `fmt.Println`.
-- Errors: prefer the canonical `APIError` set in `error.go` (`errBadRequest`, `errForbidden`, …). For ad-hoc internal errors, use the inline form `APIError{http.StatusInternalServerError, "internal", "<context>"}`.
-- Authorization is **per-prefix**, enforced inside each handler via `authorizeKey` / `authorizeKeyWrite` / `authorizePrefix`. Keep the allow-list in `handlers.go` in sync with `docs/specs/mvp-v0.1.md` "Storage API".
-- HTTP routing uses Go 1.22 mux patterns (`GET /v1/...`). `requireAuth` is a closure, not middleware on the mux — wrap each authenticated handler explicitly so the device-cache is shared.
+- Errors: return `ApiError` (the enum in `error.rs`) — its variants map to the canonical status + JSON. Use `ApiError::Internal("<context>")` for ad-hoc internal errors.
+- Authorization is **per-prefix**, enforced inside each handler (the `authorize*` helpers in `routes.rs`). Keep the allow-list in sync with `docs/specs/mvp-v0.1.md` "Storage API".
+- Routing is Rocket attribute routes (`#[get("/v1/...")]`) collected in `build()`. Authentication is a request **guard** (`AuthedUser`), not middleware — a handler that needs a token takes the guard as `Result<AuthedUser, ApiError>` and `?`-propagates.
+- Logs follow ADR-0010 (key=value text, never JSON) via the `log` crate; never `println!` on the request path. Restoring structured request logging is tracked in `tasks/rust-structured-logging.md`.
 
 ### Testing
 
-- All handlers use `MemStore` — never spin up real S3 in unit tests.
-- Helpers live at the top of `handlers_test.go` (`testServer`, `registerTestUser`, `signAuthProof`, `authedRequest`). Reuse them instead of open-coding.
-- Cover golden path **and** authorization rejections for every new endpoint. Other-user-prefix denials are not optional.
-- Add a `MemStore` method whenever the `Store` interface changes — both must satisfy the same contract.
+- Handler tests use `MemStore` + Rocket's `LocalClient` — never real S3. Helpers live in the `#[cfg(test)]` module at the foot of `routes.rs` (`client_with`, `seed_account`, `bearer`, …); reuse them.
+- Cover the golden path **and** authorization rejections for every endpoint. Other-user-prefix denials are not optional.
+- Keep `MemStore` and `S3Store` in lockstep — when the `Store` trait changes, both implement the new method.
+- Cross-language interop vectors (token, auth-proof, CBOR) live in `tests/` + `tests/vectors/` — the frozen contract with the TS client (ADR-0019). Don't regenerate them casually.
 
 ### Adding an endpoint — checklist
 
 1. Update the active milestone spec under `docs/specs/` (request/response shape, error codes, S3 effects).
 2. Add an ADR if the change crosses a trust boundary, introduces a dependency, or affects storage layout (see `docs/decisions/README.md`).
-3. Implement the handler in `handlers.go`; wire in `routes.go` (wrap with `auth(...)` if it needs a token).
+3. Add the handler in `routes.rs` and register it in the `routes![]` list in `build()`; take `AuthedUser` if it needs a token.
 4. Add a typed wrapper in `web/src/lib/api.ts` and a request type alongside.
-5. Tests: handler-level Go test (golden + 400 + 401/403); unit test for the `api.ts` wrapper.
+5. Tests: a handler-level Rust test (golden + 400 + 401/403) using `MemStore`; a unit test for the `api.ts` wrapper.
 6. If it changes a user-visible flow, update or add a `docs/scenarios/*.md` and a matching `web/e2e/*.spec.ts`.
 
 ## S3 layout (canonical — do not drift)
@@ -204,7 +209,7 @@ Reference style:
 
 `docs/ops.md` is the canonical infrastructure doc — Scaleway resources, env vars, CORS config, deploy commands, log query recipes (Cockpit / Grafana per ADR-0010). Update it whenever you add an env var, change the deploy pipeline, or modify required infrastructure.
 
-`make build` produces a single self-contained binary that embeds the SPA via `//go:embed dist`. `server-build` copies `web/dist` into `server/dist` first; the Dockerfile does the same in two stages.
+`make build` compiles the server with the SPA wired in via rust-embed (the `embed-spa` cargo feature); `server-build` builds `web/dist` first so it's in place. Release builds (the Docker image) embed the assets into the binary; debug builds read `web/dist` from disk. The Dockerfile builds web then the release server across stages.
 
 ## Pre-commit
 
