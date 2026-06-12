@@ -1,6 +1,7 @@
 # Rust server — structured (logfmt) logging per ADR-0010
 
-**Priority: after the [key-backup bugfix](key-backup-unsafe-session-id-key.md). NOT
+**Priority: next post-cutover task — the key-backup bugfix has landed (invariant
+[I10](../docs/scenarios/invariants/i10-key-backup-object-name-safe.md)). NOT
 cutover-gating.** The aggregation *decision* is captured ([ADR-0010](../docs/decisions/adr-0010-logging.md)),
 but nothing consumes the logs for field-querying today — no live Cockpit/Grafana
 dashboards or alerts. So the Rust server's current logging breaks nothing operational

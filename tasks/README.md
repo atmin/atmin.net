@@ -12,26 +12,16 @@ Delete a file once its change lands.
   README), flip the deploy trigger back to `master`, ff-merge, tag prod, wire the cleanup
   Job. Digestible commits, staging stays green throughout.
 
-## 🔴 Fix first — *after the cutover* — known data-integrity bug
-
-- **[key-backup-unsafe-session-id-key](key-backup-unsafe-session-id-key.md)** — the
-  base64 Megolm `session_id` is used **raw** as an S3 key segment
-  (`keys/{uid}/live/{session_id}`); when it contains a `/`, the object name is invalid,
-  the **fire-and-forget key backup PUT silently 400s**, and ~4% of sessions' messages
-  become **undecryptable on restore** (new device / post-rotation / migration).
-  Pre-existing on `master`, backend-agnostic (not the Rust port). **Parked** during the
-  cutover only to avoid a mid-transition context-switch — the **first** post-cutover task.
-  Found by the `flaky-compare` stress test; trace-confirmed (`XMinioInvalidObjectName`).
-
-## Then — Rust structured logging (not cutover-gating)
+## Next — Rust structured logging (not cutover-gating)
 
 - **[rust-structured-logging](rust-structured-logging.md)** — bring the Rust server's
   logs to [ADR-0010](../docs/decisions/adr-0010-logging.md)'s slog-style **logfmt
   (`key=value`, NOT JSON)** + restore the per-request access log Go had. The aggregation
   decision is captured but nothing consumes the logs for field-querying yet, so this is
-  latent conformance — sequenced **after** the key-backup fix, blocks nothing at cutover.
+  latent conformance — the next post-cutover task now that the key-backup fix has landed
+  (as invariant [I10](../docs/scenarios/invariants/i10-key-backup-object-name-safe.md)).
 
-## MVP v0.1 — complete ✅ (modulo the bug above)
+## MVP v0.1 — complete ✅
 
 The v0.1 baseline is done: a self-contained, self-service E2E messenger
 (password credentials, handles, rotation, media, edit/delete, account

@@ -105,9 +105,10 @@ Delete this file once the cutover lands.
 
 ## 9. Post-cutover follow-ups
 
-- [ ] **First thing:** the 🔴 [key-backup `session_id` S3-key bug](key-backup-unsafe-session-id-key.md)
-      — fix on master; `flaky-compare.sh UNTIL_FAIL SPEC=credential-rotate-ui` should flip
-      ~4% → 0 as the regression guard.
+- [x] **First thing:** the key-backup `session_id` S3-key bug — **landed** as invariant
+      [I10](../docs/scenarios/invariants/i10-key-backup-object-name-safe.md) (base64url key
+      segment + retry queue + server presign belt); `flaky-compare.sh UNTIL_FAIL
+      SPEC=credential-rotate-ui` is the regression guard (~4% → 0).
 - [ ] **Then:** [structured (logfmt) logging](rust-structured-logging.md) per ADR-0010 —
       conform the Rust logs to slog-style `key=value` (not JSON) + restore the request log.
       Not cutover-gating (no log aggregator consumes them yet); sequenced after the bugfix.
