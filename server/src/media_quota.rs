@@ -110,7 +110,7 @@ impl InProcessMediaQuota {
                 .await?;
             if sizes.truncated {
                 log::warn!(
-                    "media_quota.list_truncated user={user_id} count={}",
+                    "media_quota.list_truncated user_id={user_id} count={}",
                     sizes.count
                 );
             }

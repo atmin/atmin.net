@@ -73,6 +73,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
     // so the delete path expires the same cached usage.
     let quota: SharedQuota = Arc::new(InProcessMediaQuota::new(store.clone()));
     let app = rocket::build()
+        .attach(crate::logging::RequestLog)
         .manage(store)
         .manage(config)
         .manage(quota)

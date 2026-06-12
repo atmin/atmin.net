@@ -3,15 +3,6 @@
 Active implementation tasks, grouped by milestone and in priority order.
 Delete a file once its change lands.
 
-## 🚧 Next up — Rust structured logging (post-cutover, non-blocking)
-
-- **[rust-structured-logging](rust-structured-logging.md)** — bring the Rust server's
-  logs to [ADR-0010](../docs/decisions/adr-0010-logging.md)'s slog-style **logfmt
-  (`key=value`, NOT JSON)** + restore the per-request access log Go had. The aggregation
-  decision is captured but nothing consumes the logs for field-querying yet, so this is
-  latent conformance — the next post-cutover task now that the key-backup fix has landed
-  (as invariant [I10](../docs/scenarios/invariants/i10-key-backup-object-name-safe.md)).
-
 ## MVP v0.1 — complete ✅
 
 The v0.1 baseline is done: a self-contained, self-service E2E messenger

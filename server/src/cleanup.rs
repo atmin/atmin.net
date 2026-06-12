@@ -12,6 +12,7 @@
 //! ([`crate::main`]) on a schedule (a Scaleway Serverless Job), never in-process:
 //! the server is stateless and only one instance should sweep.
 
+use crate::logging::logfmt_value;
 use crate::paths::{
     key_handle, key_profile, prefix_inbox, prefix_inbox_archive, prefix_inbox_live, prefix_keys,
     prefix_media, prefix_user,
@@ -82,7 +83,10 @@ pub async fn run_cleanup(
                 Ok(v) => v,
                 Err(e) => {
                     res.errors += 1;
-                    log::warn!("cleanup.evaluate_failed key={k} err={e}");
+                    log::warn!(
+                        "cleanup.evaluate_failed handle_key={k} err={}",
+                        logfmt_value(&e.to_string())
+                    );
                     continue;
                 }
             };
@@ -96,7 +100,7 @@ pub async fn run_cleanup(
             }
             let uid = profile.as_ref().map_or("", |p| p.user_id.as_str());
             log::info!(
-                "cleanup.match key={k} user_id={uid} policy={policy:?} dry_run={}",
+                "cleanup.match handle_key={k} user_id={uid} policy={policy:?} dry_run={}",
                 opts.dry_run
             );
 
@@ -108,7 +112,10 @@ pub async fn run_cleanup(
                 };
                 if let Err(e) = deleted {
                     res.errors += 1;
-                    log::warn!("cleanup.delete_failed key={k} user_id={uid} err={e}");
+                    log::warn!(
+                        "cleanup.delete_failed handle_key={k} user_id={uid} err={}",
+                        logfmt_value(&e.to_string())
+                    );
                     continue;
                 }
             }

@@ -118,6 +118,7 @@ staging and production):
 | Variable | Description |
 |----------|-------------|
 | `ROCKET_ADDRESS` / `ROCKET_PORT` | bind address/port — baked to `0.0.0.0:8080` in the image (Dockerfile); override only if the platform routes to a different port |
+| `ROCKET_LOG_LEVEL` | optional log verbosity: `off` \| `critical` (warn+) \| `normal` (default — request access log + warnings) \| `debug` (also Rocket routing + dependency logs, for tracing a request) |
 | `SERVER_SECRET` | HMAC secret for token signing |
 | `S3_ENDPOINT` | S3-compatible endpoint URL |
 | `S3_PUBLIC_ENDPOINT` | optional override for presigned-URL host |
@@ -407,6 +408,14 @@ scw container container delete <CONTAINER_ID>
 
 Scaleway forwards container stdout/stderr to Cockpit automatically — no app changes needed.
 Retention: 7 days (see ADR-0010).
+
+Format is logfmt (`key=value`, never JSON — ADR-0010). Each request emits one access
+line: `msg=request request_id=… method=… path=… status=… dur_ms=… ip=… user_id=…`.
+The `request_id` (a ULID, or a vetted inbound `X-Request-Id`) is echoed in the
+`X-Request-Id` response header, so a user/client error report carries the handle to
+grep the exact request. `ip` is the first `X-Forwarded-For` value. At `normal` only
+the app's own lines are emitted; set `ROCKET_LOG_LEVEL=debug` to also see Rocket's
+per-request routing when tracing an issue.
 
 ### One-time setup
 

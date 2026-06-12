@@ -16,6 +16,7 @@
 use crate::cache::{DeviceCache, ProfileCache};
 use crate::config::ServerConfig;
 use crate::error::ApiError;
+use crate::logging::RequestUserId;
 use crate::model::{DeviceId, KeyVersion, UserId};
 use crate::paths::{key_device, key_profile};
 use crate::profile::Profile;
@@ -143,6 +144,10 @@ async fn authenticate(req: &Request<'_>, enforce_kv: bool) -> Outcome<AuthedUser
             });
         }
     }
+
+    // Stash the user_id for the request-log fairing's on_response (it runs after
+    // the handler; the guard is its only source of the authenticated id). logging.rs.
+    req.local_cache(|| RequestUserId(Some(user_id.as_str().to_owned())));
 
     Outcome::Success(AuthedUser {
         user_id,

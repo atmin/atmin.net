@@ -16,6 +16,7 @@ pub mod events;
 pub mod guard;
 pub mod idempotency;
 pub mod keyed_mutex;
+pub mod logging;
 pub mod media_quota;
 pub mod model;
 pub mod paths;

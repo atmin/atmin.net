@@ -15,6 +15,7 @@
 
 use atmin_server::cleanup::{run_cleanup, CleanupOpts};
 use atmin_server::config::{S3Config, ServerConfig};
+use atmin_server::logging;
 use atmin_server::routes;
 use atmin_server::store::SharedStore;
 use atmin_server::store_mem::MemStore;
@@ -25,6 +26,10 @@ use std::sync::Arc;
 
 #[rocket::main]
 async fn main() {
+    // Install the logfmt logger before Rocket builds (so Rocket defers to it) and
+    // before the cleanup path, which logs too. ADR-0010 / logging.rs.
+    logging::init();
+
     // Subcommand dispatch: same image, either the server or the cleanup job
     // (a scheduled Scaleway Serverless Job — see docs/ops.md).
     let args: Vec<String> = std::env::args().collect();

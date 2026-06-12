@@ -155,7 +155,7 @@ Single Rust crate (Rocket 0.5). **Stateless by design**: all durable state lives
 - Errors: return `ApiError` (the enum in `error.rs`) — its variants map to the canonical status + JSON. Use `ApiError::Internal("<context>")` for ad-hoc internal errors.
 - Authorization is **per-prefix**, enforced inside each handler (the `authorize*` helpers in `routes.rs`). Keep the allow-list in sync with `docs/specs/mvp-v0.1.md` "Storage API".
 - Routing is Rocket attribute routes (`#[get("/v1/...")]`) collected in `build()`. Authentication is a request **guard** (`AuthedUser`), not middleware — a handler that needs a token takes the guard as `Result<AuthedUser, ApiError>` and `?`-propagates.
-- Logs follow ADR-0010 (key=value text, never JSON) via the `log` crate; never `println!` on the request path. Restoring structured request logging is tracked in `tasks/rust-structured-logging.md`.
+- Logs follow ADR-0010 (logfmt `key=value`, never JSON) via a custom `log::Log` sink + a request-log fairing in `logging.rs` (emits `msg=request …` with a `request_id`, echoed as `X-Request-Id`); at the default level only this crate's records are emitted, Rocket's per-request chatter is filtered. Never `println!` on the request path.
 
 ### Testing
 
