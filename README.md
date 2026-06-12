@@ -24,7 +24,9 @@ This project treats documentation as the primary interface — for humans and ag
 
 ## Status
 
-Early development. Expect breaking changes.
+Early development, but the wire format and storage layout are stable and well-tested — breaking changes are avoided, not expected.
+
+**June 2026** — the backend has been rewritten from Go to Rust ([ADR-0019](docs/decisions/adr-0019-adopt-rust-backend.md)); **v0.1.14** is the first Rust release, **v0.1.13** the last on Go. The HTTP API and S3 storage layout are unchanged, so existing clients are unaffected — live devices stayed authenticated straight through the swap.
 
 To run locally, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
