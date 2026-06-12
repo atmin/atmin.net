@@ -2,7 +2,7 @@
 name = "atmin-server"
 version = "0.1.0"
 edition = "2021"
-description = "Rust port experiment of the atmin backend (ADR-0018, phase 1 interop spike)."
+description = "atmin.net backend — a stateless, end-to-end-encrypted S3 proxy and SSE hub (Rocket)."
 
 [dependencies]
 rocket = { version = "0.5", features = ["json"] }
