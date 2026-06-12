@@ -1,7 +1,7 @@
 # Golden vectors
 
-Cross-language interop fixtures for the phase-1 spike (ADR-0018,
-`tasks/rust-backend-spike.md` step 1). Committed regression guards.
+Cross-language interop fixtures from the Go→Rust port (ADR-0018 → ADR-0019).
+Committed regression guards — the frozen contract with the TS client.
 
 - **Go-emitted** — tokens, an auth-proof (`pubkey`, `payload`, `signature`,
   `jcs_canonical` hex), and a CBOR archive blob (hex) + decoded values.

@@ -3,16 +3,7 @@
 Active implementation tasks, grouped by milestone and in priority order.
 Delete a file once its change lands.
 
-## 🚧 In progress — Rust cutover
-
-- **[rust-cutover](rust-cutover.md)** — adopt the Rust backend, retire Go (ADR-0018 →
-  ADR-0019). The port met its exit criterion (e2e green 5×) and passed real-infra interop
-  on staging; this is the ordered, fast-forward-preserving cutover: decision ADRs, delete
-  `server/`, rename `server-rs/`→`server/`, comment-groom, CI + docs (CONTRIBUTING, ops.md,
-  README), flip the deploy trigger back to `master`, ff-merge, tag prod, wire the cleanup
-  Job. Digestible commits, staging stays green throughout.
-
-## Next — Rust structured logging (not cutover-gating)
+## 🚧 Next up — Rust structured logging (post-cutover, non-blocking)
 
 - **[rust-structured-logging](rust-structured-logging.md)** — bring the Rust server's
   logs to [ADR-0010](../docs/decisions/adr-0010-logging.md)'s slog-style **logfmt
@@ -43,9 +34,3 @@ be added here as v0.2 is iterated on.
 2. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt so without this the PWA is effectively undiscoverable on the platform. Prerequisite for push notifications (task 1) to work on iOS.
 
 3. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
-
-## Experiments
-
-Not milestone scope — exploratory work gated by its own exit criteria.
-
-- **[rust-backend-spike](rust-backend-spike.md)** — the Rust backend port experiment ([ADR-0018](../docs/decisions/adr-0018-rust-backend-experiment.md), branch `rust-port-experiment`): **complete** — all phases done, exit criterion met (e2e green 5×), staging interop validated. Now graduating to adoption via [rust-cutover](rust-cutover.md) (top of this file); this spike file + its phase log get deleted when the cutover lands.
