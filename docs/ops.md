@@ -14,7 +14,7 @@ Living document — infrastructure, deployment, and CI decisions.
 
 - No load balancer needed — custom domains via CNAME with auto TLS
 - min-scale: 1 keeps one instance warm (no cold starts)
-- Stateless Go container: signs presigned URLs, validates auth, routes to S3
+- Stateless Rust container: signs presigned URLs, validates auth, routes to S3
 - Can scale to 0 in dev, always-on in prod
 
 ### Operational stance: EU-resident infrastructure
@@ -49,7 +49,7 @@ This shapes two parts of the system design:
   GET-then-PUT on `handles/{handle}.json`, instead of an
   `If-None-Match: *` conditional create.
 
-Both depend on the server running as a single Go process today.
+Both depend on the server running as a single process today.
 Multi-instance deployment requires a future ADR that picks a
 shared-state substrate (Redis SETNX, Postgres advisory locks,
 etc.) and migrates these primitives along with the other
@@ -90,10 +90,10 @@ Free tier: 200k vCPU-s + 400k GB-s per month per account.
 GitHub Actions (`.github/workflows/deploy.yml`):
 
 - **Trigger**: push to `master` or `v*` tag
-- **lint** job: `go vet`, `biome check`, architecture lint — blocks on any violation
-- **test** job: Go unit tests, web unit tests
+- **lint** job: `cargo fmt --check` + `clippy -D warnings`, `biome check`, architecture lint — blocks on any violation
+- **test** job: Rust unit tests, web unit tests
 - **build** job: Docker image build — runs on every push to `master`
-- **e2e** job: Playwright against Go server + Vite + MinIO service container — `v*` tags only
+- **e2e** job: Playwright against the server image + MinIO service container — `v*` tags only
 - **deploy-staging** job: deploys to `staging.atmin.net` on every green master push (after lint + test + build)
 - **deploy-prod** job: deploys to `app.atmin.net` on `v*` tags only, after lint + test + e2e all pass
 
@@ -117,7 +117,7 @@ staging and production):
 
 | Variable | Description |
 |----------|-------------|
-| `LISTEN_ADDR` | optional, defaults to `:8080` |
+| `ROCKET_ADDRESS` / `ROCKET_PORT` | bind address/port — baked to `0.0.0.0:8080` in the image (Dockerfile); override only if the platform routes to a different port |
 | `SERVER_SECRET` | HMAC secret for token signing |
 | `S3_ENDPOINT` | S3-compatible endpoint URL |
 | `S3_PUBLIC_ENDPOINT` | optional override for presigned-URL host |
@@ -216,8 +216,8 @@ scw container container create \
 ```
 
 Same Docker image as production — only env vars differ (`S3_BUCKET`, `SERVER_SECRET`).
-The Go server serves the SPA; all fetch calls are same-origin relative, so no build-time
-URL changes are needed.
+The server serves the SPA (embedded at build time); all fetch calls are same-origin
+relative, so no build-time URL changes are needed.
 
 ### Scheduled cleanup
 
@@ -241,9 +241,9 @@ One-time setup (production region/bucket):
 #    list/delete), nothing like the app's request path. command overrides the
 #    image ENTRYPOINT (/atmin) args.
 #
-#    NOTE: loadConfig() requires SERVER_SECRET, S3_ENDPOINT, S3_BUCKET,
-#    S3_ACCESS_KEY, S3_SECRET_KEY even though cleanup only touches S3 — set the
-#    same values as the container (SERVER_SECRET can be any non-empty value).
+#    NOTE: the cleanup reads only the S3 env (S3_ENDPOINT, S3_BUCKET,
+#    S3_ACCESS_KEY, S3_SECRET_KEY; S3_REGION optional). It does NOT need
+#    SERVER_SECRET — the cleanup path never launches the HTTP server.
 scw jobs definition create \
   name=atmin-cleanup \
   image-uri=rg.fr-par.scw.cloud/atmin/atmindotnet:latest \
@@ -253,16 +253,14 @@ scw jobs definition create \
   environment-variables.S3_REGION=fr-par \
   environment-variables.CLEANUP_INACTIVE_DAYS=180 \
   environment-variables.CLEANUP_BATCH_SIZE=100 \
-  secret-environment-variables.0.key=SERVER_SECRET \
-  secret-environment-variables.0.value=<any non-empty value> \
-  secret-environment-variables.1.key=S3_ENDPOINT \
-  secret-environment-variables.1.value=https://s3.fr-par.scw.cloud \
-  secret-environment-variables.2.key=S3_BUCKET \
-  secret-environment-variables.2.value=atmindotnet \
-  secret-environment-variables.3.key=S3_ACCESS_KEY \
-  secret-environment-variables.3.value=<KEY> \
-  secret-environment-variables.4.key=S3_SECRET_KEY \
-  secret-environment-variables.4.value=<SECRET>
+  secret-environment-variables.0.key=S3_ENDPOINT \
+  secret-environment-variables.0.value=https://s3.fr-par.scw.cloud \
+  secret-environment-variables.1.key=S3_BUCKET \
+  secret-environment-variables.1.value=atmindotnet \
+  secret-environment-variables.2.key=S3_ACCESS_KEY \
+  secret-environment-variables.2.value=<KEY> \
+  secret-environment-variables.3.key=S3_SECRET_KEY \
+  secret-environment-variables.3.value=<SECRET>
 
 # 2. Store the returned job-definition-id as the GitHub secret
 #    SCW_CLEANUP_JOB_DEFINITION_ID (so CI can repoint it at new images).

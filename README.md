@@ -1,8 +1,8 @@
 # <img src="web/public/favicon.svg" height="28" alt=""> atmin.net
 
-A sync-first, end-to-end encrypted messenger with a stateless Go backend and client-owned data.
+A sync-first, end-to-end encrypted messenger with a stateless Rust backend and client-owned data.
 
-![Go](https://img.shields.io/badge/Go-00ADD8?style=flat-square&logo=go&logoColor=white) ![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white) ![WASM](https://img.shields.io/badge/WASM-654FF0?style=flat-square&logo=webassembly&logoColor=white) ![vodozemac Megolm](https://img.shields.io/badge/vodozemac_Megolm-6366f1?style=flat-square) ![S3](https://img.shields.io/badge/S3_compatible-569A31?style=flat-square&logo=amazons3&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-000000?style=flat-square&logo=rust&logoColor=white) ![React 19](https://img.shields.io/badge/React_19-61DAFB?style=flat-square&logo=react&logoColor=black) ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white) ![WASM](https://img.shields.io/badge/WASM-654FF0?style=flat-square&logo=webassembly&logoColor=white) ![vodozemac Megolm](https://img.shields.io/badge/vodozemac_Megolm-6366f1?style=flat-square) ![S3](https://img.shields.io/badge/S3_compatible-569A31?style=flat-square&logo=amazons3&logoColor=white)
 
 The server is a dumb relay and mailbox — clients own their keys, history, and trust.
 
@@ -17,7 +17,7 @@ This project treats documentation as the primary interface — for humans and ag
 - End-to-end encryption on the client, browser-first
 - Megolm message encryption
 - Backup-secret-derived key sharing
-- Stateless Go server
+- Stateless Rust server
 - S3-compatible storage for encrypted messages and media
 - Sync-first delivery with explicit offline behaviour
 - Invite-based identity discovery
