@@ -163,5 +163,4 @@ e2e-local: server-build
 	exit $$status
 
 clean:
-	rm -rf bin/
 	cd server && cargo clean
