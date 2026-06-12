@@ -1,6 +1,6 @@
 # ADR-0007: Registration abuse prevention
 
-Status: Draft
+Status: Superseded by [ADR-0020](./adr-0020-registration-proof-of-work.md) — the SHA-256 PoW is replaced by a memory-hard Argon2id PoW, and the Cloudflare Turnstile CAPTCHA is dropped (non-EU third party on the registration path).
 Date: 2026-03-15
 
 ## Context
