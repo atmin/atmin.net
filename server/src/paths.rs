@@ -96,9 +96,31 @@ pub fn authorize_key_write(user_id: &str, key: &str) -> bool {
     key.starts_with(&format!("{USERS_ROOT}{user_id}/"))
 }
 
+/// Whether `key` is a valid S3/MinIO object name: no empty path segment
+/// (a leading, trailing, or doubled `/`). A raw base64 `session_id`
+/// interpolated into a key can violate this (`XMinioInvalidObjectName`, 400);
+/// the client encodes it base64url, and this is the server-side belt so a
+/// future client bug fails loudly here at the API instead of silently at the
+/// S3 PUT (invariant I10).
+pub fn is_object_name_safe(key: &str) -> bool {
+    !key.is_empty() && !key.starts_with('/') && !key.ends_with('/') && !key.contains("//")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn object_name_safety_rejects_empty_segments() {
+        // Valid object names.
+        assert!(is_object_name_safe("keys/u1/live/a-b_c"));
+        assert!(is_object_name_safe("media/u1/01ABC"));
+        // The XMinioInvalidObjectName shapes a raw session_id can produce.
+        assert!(!is_object_name_safe("keys/u1/live//abc")); // doubled
+        assert!(!is_object_name_safe("keys/u1/live/abc/")); // trailing
+        assert!(!is_object_name_safe("/keys/u1/live/abc")); // leading
+        assert!(!is_object_name_safe("")); // empty
+    }
 
     #[test]
     fn authorize_prefix_allows_own_data_and_any_user_path() {

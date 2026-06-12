@@ -16,9 +16,9 @@ use crate::media_quota::{
 };
 use crate::model::{DeviceId, Handle, KeyVersion, UserId};
 use crate::paths::{
-    authorize_key, authorize_key_write, authorize_prefix, key_device, key_handle, key_inbox_live,
-    key_profile, key_rotation_record, prefix_inbox, prefix_keys, prefix_media, prefix_user,
-    prefix_user_devices,
+    authorize_key, authorize_key_write, authorize_prefix, is_object_name_safe, key_device,
+    key_handle, key_inbox_live, key_profile, key_rotation_record, prefix_inbox, prefix_keys,
+    prefix_media, prefix_user, prefix_user_devices,
 };
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
@@ -299,6 +299,11 @@ async fn store_presign(
     }
     if !authorize_key_write(user.user_id.as_str(), &req.key) {
         return Err(ApiError::Forbidden);
+    }
+    // Belt for a future client bug: reject object-name-unsafe keys here (a clear
+    // 400 at the API) rather than letting the eventual S3 PUT fail opaquely (I10).
+    if !is_object_name_safe(&req.key) {
+        return Err(ApiError::BadRequest);
     }
     let bytes = req.bytes as u64;
     if req.key.starts_with("media/") {
@@ -2775,6 +2780,28 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn presign_object_name_unsafe_key_is_400() {
+        // A key under the caller's own prefix (authorize passes) but with a
+        // doubled slash — what a raw base64 session_id could produce — is
+        // rejected at the API as a clear 400 rather than failing opaquely at
+        // the eventual S3 PUT (I10).
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(
+                serde_json::json!({ "key": format!("keys/{UID}/live//abc"), "bytes": 10 })
+                    .to_string(),
+            )
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::BadRequest);
     }
 
     #[tokio::test]
