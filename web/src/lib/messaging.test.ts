@@ -15,12 +15,14 @@ import {
     clearInboundSessions,
     clearKeyShares,
     clearOutboundSession,
+    clearPendingKeyBackups,
     clearSyncCursors,
     loadSyncCursor,
     saveSyncCursor,
 } from './db';
 import { createSessionManager } from './megolm-session';
 import { fetchMessages, sendTextMessage } from './messaging';
+import { path } from './paths';
 import type { WasmModule } from './wasm';
 
 const fetchMock = vi.fn();
@@ -85,6 +87,7 @@ describe('messaging - Megolm send/receive', () => {
         await clearInboundSessions();
         await clearKeyShares();
         await clearSyncCursors();
+        await clearPendingKeyBackups();
     });
 
     describe('sendTextMessage', () => {
@@ -1071,6 +1074,7 @@ describe('messaging - key-share backup', () => {
         await clearInboundSessions();
         await clearKeyShares();
         await clearSyncCursors();
+        await clearPendingKeyBackups();
     });
 
     it('backs up received session key via storePresign on first key-share arrival', async () => {
@@ -1160,9 +1164,7 @@ describe('messaging - key-share backup', () => {
         );
         expect(presignCall).toBeDefined();
         const presignBody = JSON.parse(presignCall?.[1].body as string);
-        expect(presignBody.key).toBe(
-            `keys/${userId}/live/${sender.session_id}`,
-        );
+        expect(presignBody.key).toBe(path.keyBackup(userId, sender.session_id));
 
         const putCall = fetchMock.mock.calls.find(
             (call) => (call[0] as string) === presignedUrl,
@@ -1212,55 +1214,58 @@ describe('messaging - key-share backup', () => {
             },
         };
 
-        const mockKeyShareFetch = () => {
-            fetchMock.mockResolvedValueOnce(
-                mockJsonResponse({
-                    keys: [`inbox/${userId}/live/msg-ks-backup-02`],
+        // URL-aware mock (not an ordered queue) so the fire-and-forget backup's
+        // presign/PUT and syncArchive's list can't race over a shared response
+        // queue — the first backup deterministically succeeds, so nothing is
+        // queued for a retry that would presign again on the second sync (I10).
+        const presignedUrl = 'https://s3.example.com/backup1';
+        const envelopeBytes = new TextEncoder().encode(
+            JSON.stringify(keyShareEnvelope),
+        ).buffer;
+        fetchMock.mockImplementation(
+            async (url: string | URL | Request, init?: RequestInit) => {
+                const urlStr =
+                    typeof url === 'string'
+                        ? url
+                        : url instanceof URL
+                          ? url.href
+                          : (url as Request).url;
+                if (urlStr === presignedUrl && init?.method === 'PUT') {
+                    return new Response(null, { status: 200 });
+                }
+                if (urlStr === '/v1/store/presign') {
+                    return mockJsonResponse({
+                        presigned_url: presignedUrl,
+                    }) as Response;
+                }
+                if (urlStr.startsWith('/v1/store/object')) {
+                    return mockArrayBufferResponse(envelopeBytes) as Response;
+                }
+                if (urlStr.startsWith('/v1/store/list')) {
+                    const prefix =
+                        new URLSearchParams(urlStr.split('?')[1] ?? '').get(
+                            'prefix',
+                        ) ?? '';
+                    if (prefix === `inbox/${userId}/live/`) {
+                        return mockJsonResponse({
+                            keys: [`inbox/${userId}/live/msg-ks-backup-02`],
+                            next_cursor: '',
+                        }) as Response;
+                    }
+                }
+                return mockJsonResponse({
+                    keys: [],
                     next_cursor: '',
-                }) as Response,
-            );
-            fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(
-                    new TextEncoder().encode(JSON.stringify(keyShareEnvelope))
-                        .buffer,
-                ) as Response,
-            );
-        };
-
-        mockKeyShareFetch();
-        fetchMock.mockResolvedValueOnce(
-            mockJsonResponse({
-                presigned_url: 'https://s3.example.com/backup1',
-            }) as Response,
-        );
-        fetchMock.mockResolvedValueOnce({ ok: true, status: 200 } as Response);
-        fetchMock.mockResolvedValueOnce(
-            mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+                }) as Response;
+            },
         );
 
-        await fetchMessages(
-            token,
-            userId,
-            recipientKeys.sharing.privateKey,
-            mgr,
-            recipientKeys.backupKey,
-        );
-
-        // Backup upload is fire-and-forget; wait for it.
-        await vi.waitFor(() => {
-            const count = fetchMock.mock.calls.filter(
+        const presignCount = () =>
+            fetchMock.mock.calls.filter(
                 (call) => (call[0] as string) === '/v1/store/presign',
             ).length;
-            if (count !== 1) throw new Error(`presign count=${count}, want 1`);
-        });
 
-        resetFetchMock();
-
-        mockKeyShareFetch();
-        fetchMock.mockResolvedValueOnce(
-            mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
-        );
-
+        // First arrival: new inbound session → exactly one backup presign.
         await fetchMessages(
             token,
             userId,
@@ -1268,13 +1273,26 @@ describe('messaging - key-share backup', () => {
             mgr,
             recipientKeys.backupKey,
         );
-
-        // Give any stray backup a tick to fire before asserting it didn't.
+        await vi.waitFor(() => {
+            if (presignCount() !== 1)
+                throw new Error(`presign count=${presignCount()}, want 1`);
+        });
+        // Let the backup PUT settle so a success isn't mistaken for a failure
+        // queued for retry on the next sync.
         await new Promise((r) => setTimeout(r, 50));
-        const presignCountAfterSecond = fetchMock.mock.calls.filter(
-            (call) => (call[0] as string) === '/v1/store/presign',
-        ).length;
-        expect(presignCountAfterSecond).toBe(0);
+        const afterFirst = presignCount();
+
+        // Second arrival of the SAME key share: the session is already known
+        // (isNew = false) → no new backup, and nothing pending to retry.
+        await fetchMessages(
+            token,
+            userId,
+            recipientKeys.sharing.privateKey,
+            mgr,
+            recipientKeys.backupKey,
+        );
+        await new Promise((r) => setTimeout(r, 50));
+        expect(presignCount() - afterFirst).toBe(0);
 
         sender.free();
         mgr.destroy();

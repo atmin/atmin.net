@@ -8,12 +8,14 @@
  * - 'megolm_inbound' store: Inbound Megolm sessions (one per sender session)
  * - 'megolm_key_shares' store: Track which recipients have the session key
  * - 'sync_cursors' store: Persist sync cursors for incremental inbox fetching
+ * - 'pending_key_backups' store: Session keys whose backup upload failed,
+ *   queued for retry on the next sync (I10 — no silent backup loss)
  */
 
 import { isAmendment } from './payload';
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
 const CONVERSATIONS_STORE = 'conversations';
@@ -23,6 +25,7 @@ const MEGOLM_INBOUND_STORE = 'megolm_inbound';
 const MEGOLM_KEY_SHARES_STORE = 'megolm_key_shares';
 const SYNC_CURSORS_STORE = 'sync_cursors';
 const BACKUP_KEYS_STORE = 'backup_keys_by_version';
+const PENDING_KEY_BACKUPS_STORE = 'pending_key_backups';
 
 export interface StoredOutboundSession {
     id: 'current';
@@ -69,6 +72,17 @@ export interface StoredContact {
 export interface StoredSyncCursor {
     prefix: string;
     cursor: string;
+}
+
+/**
+ * A session key whose backup upload failed (hard error after putWithRetry),
+ * queued for retry on the next sync so the failure is never silent (I10).
+ * Holds the session key material — same exposure class as the inbound-session
+ * pickle already in IDB, and short-lived (deleted on a successful retry).
+ */
+export interface StoredPendingKeyBackup {
+    sessionId: string;
+    sessionKeyB64: string;
 }
 
 function awaitTx(tx: IDBTransaction): Promise<void> {
@@ -193,6 +207,16 @@ async function openDB(): Promise<IDBDatabase> {
             if (!database.objectStoreNames.contains(BACKUP_KEYS_STORE)) {
                 database.createObjectStore(BACKUP_KEYS_STORE);
             }
+
+            // v7: Key backups that failed to upload, queued for retry on the
+            // next sync (I10 — no silent backup loss).
+            if (
+                !database.objectStoreNames.contains(PENDING_KEY_BACKUPS_STORE)
+            ) {
+                database.createObjectStore(PENDING_KEY_BACKUPS_STORE, {
+                    keyPath: 'sessionId',
+                });
+            }
         };
     });
 }
@@ -249,6 +273,45 @@ export async function clearBackupKeys(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(BACKUP_KEYS_STORE, 'readwrite');
     tx.objectStore(BACKUP_KEYS_STORE).clear();
+    return awaitTx(tx);
+}
+
+// ── Pending key backups (I10 retry queue) ──────────────────────────
+
+/** Queue a session key whose backup upload failed, for retry on next sync. */
+export async function enqueuePendingKeyBackup(
+    rec: StoredPendingKeyBackup,
+): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(PENDING_KEY_BACKUPS_STORE, 'readwrite');
+    tx.objectStore(PENDING_KEY_BACKUPS_STORE).put(rec);
+    return awaitTx(tx);
+}
+
+/** All queued key backups awaiting a retry. */
+export async function listPendingKeyBackups(): Promise<
+    StoredPendingKeyBackup[]
+> {
+    const database = await openDB();
+    const tx = database.transaction(PENDING_KEY_BACKUPS_STORE, 'readonly');
+    return awaitReq<StoredPendingKeyBackup[]>(
+        tx.objectStore(PENDING_KEY_BACKUPS_STORE).getAll(),
+    );
+}
+
+/** Drop a queued backup once its retry succeeds. */
+export async function deletePendingKeyBackup(sessionId: string): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(PENDING_KEY_BACKUPS_STORE, 'readwrite');
+    tx.objectStore(PENDING_KEY_BACKUPS_STORE).delete(sessionId);
+    return awaitTx(tx);
+}
+
+/** Drop the whole retry queue (tests). */
+export async function clearPendingKeyBackups(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(PENDING_KEY_BACKUPS_STORE, 'readwrite');
+    tx.objectStore(PENDING_KEY_BACKUPS_STORE).clear();
     return awaitTx(tx);
 }
 

@@ -14,7 +14,13 @@ import {
     eciesEncrypt,
     importSharingPublicKey,
 } from './crypto';
-import { loadSyncCursor, saveSyncCursor } from './db';
+import {
+    deletePendingKeyBackup,
+    enqueuePendingKeyBackup,
+    listPendingKeyBackups,
+    loadSyncCursor,
+    saveSyncCursor,
+} from './db';
 import type { Envelope } from './envelope';
 import { backupSessionKey } from './key-backup';
 import type { SessionManager } from './megolm-session';
@@ -241,14 +247,32 @@ async function processEnvelopes(
                     sessionKeyB64,
                 );
                 if (isNew && token && backupKey) {
+                    const sid = inbound.session_id;
                     backupSessionKey(
                         token,
                         userId,
-                        inbound.session_id,
+                        sid,
                         sessionKeyB64,
                         backupKey,
                         keyVersion ?? 1,
-                    ).catch((err) => console.error('Key backup failed:', err));
+                    ).catch(async (err) => {
+                        // A failed key backup is future history loss — never
+                        // swallow it (I10). Queue the key for retry on the next
+                        // sync instead of dropping it at console.error.
+                        console.error(
+                            `key backup upload failed for session ${sid}; queued for retry:`,
+                            err,
+                        );
+                        await enqueuePendingKeyBackup({
+                            sessionId: sid,
+                            sessionKeyB64,
+                        }).catch((e) =>
+                            console.error(
+                                'failed to queue key backup for retry:',
+                                e,
+                            ),
+                        );
+                    });
                 }
             } catch (error) {
                 // Non-fatal and usually expected: a key share encrypted to a
@@ -460,6 +484,39 @@ export function syncMessages(
     return syncInFlight;
 }
 
+/**
+ * Retry key backups that previously failed to upload (I10). Drains the
+ * pending-backup queue, re-encrypting each under the *current* backup key, and
+ * drops an entry only once its upload succeeds. Best-effort: entries that still
+ * fail stay queued for the next sync.
+ */
+export async function flushPendingKeyBackups(
+    token: string,
+    userId: string,
+    backupKey: CryptoKey,
+    keyVersion: number,
+): Promise<void> {
+    const pending = await listPendingKeyBackups();
+    for (const { sessionId, sessionKeyB64 } of pending) {
+        try {
+            await backupSessionKey(
+                token,
+                userId,
+                sessionId,
+                sessionKeyB64,
+                backupKey,
+                keyVersion,
+            );
+            await deletePendingKeyBackup(sessionId);
+        } catch (err) {
+            console.error(
+                `key backup retry failed for session ${sessionId}; still queued:`,
+                err,
+            );
+        }
+    }
+}
+
 export async function fetchMessages(
     token: string,
     userId: string,
@@ -499,6 +556,14 @@ export async function fetchMessages(
     if (live.lastKey !== undefined) {
         await saveSyncCursor(live.prefix, live.lastKey);
         triggerCompaction(token, userId, live.prefix, live.lastKey);
+    }
+
+    // Retry any key backups that failed on a previous sync (I10). Fire-and-
+    // forget; an empty queue (the common case) is a single cheap IDB read.
+    if (token && backupKey) {
+        flushPendingKeyBackups(token, userId, backupKey, keyVersion ?? 1).catch(
+            (err) => console.error('pending key-backup flush failed:', err),
+        );
     }
 
     return [...live.messages, ...archive.messages].sort(
