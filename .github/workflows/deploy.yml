@@ -2,9 +2,7 @@ name: CI/CD
 
 on:
   push:
-    # TEMP (ADR-0018 cutover): staging tracks the Rust branch so it can be tested
-    # on real infra. Flip back to [master] once the branch merges to master.
-    branches: [rust-port-experiment]
+    branches: [master]
     tags: [v*]
 
 env:
@@ -214,8 +212,7 @@ jobs:
         run: docker logs app || true
 
   deploy-staging:
-    # TEMP (ADR-0018 cutover): flip back to refs/heads/master after the merge.
-    if: github.ref == 'refs/heads/rust-port-experiment'
+    if: github.ref == 'refs/heads/master'
     needs: [lint, test, build]
     runs-on: ubuntu-latest
     steps:
