@@ -18,6 +18,7 @@ so future changes do not require rediscovering the same discussions.
 - [Large media](./large-media.md)
 - [Native apps (Capacitor)](./native-apps.md)
 - [Rich text / markdown editing](./rich-text.md)
+- [Service telemetry and privacy-preserving analytics](./telemetry-and-analytics.md)
 
 ## Guiding principle
 
