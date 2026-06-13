@@ -733,8 +733,9 @@ on each rotation. `kdf.m` is in KiB per the Argon2 spec convention.
 }
 ```
 
-v0.2 adds an optional `push_subscription` field to this record for
-Web Push delivery; see [v0.2.md](v0.2.md).
+No push-subscription field is added here — background (closed-app)
+delivery moves to the native-apps track; Web Push was evaluated and
+dropped. See [v0.2.md](v0.2.md).
 
 ## Error responses
 
@@ -1064,8 +1065,8 @@ Server behavior:
 - write each envelope to the addressed user's inbox prefix
 - notify SSE subscribers for each recipient (`new_message`)
 
-(v0.2 adds a best-effort Web Push fan-out to recipient devices here;
-see [v0.2.md](v0.2.md).)
+(Background delivery to closed apps moves to the native-apps track —
+Web Push was dropped; see [v0.2.md](v0.2.md).)
 
 Send is the only endpoint that writes to other users' prefixes.
 The storage API (below) is restricted to the caller's own prefixes.

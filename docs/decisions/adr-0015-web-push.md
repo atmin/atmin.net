@@ -1,12 +1,40 @@
 # ADR-0015: Web Push for background delivery
 
-Status: Draft
+Status: Deprecated — Web Push is **not being pursued** (2026-06-13). Background delivery moves to native apps; see "Not pursued" below and [evolution/native-apps.md](../evolution/native-apps.md). The design below is retained as the record of the evaluated web-push approach.
 Date: 2026-05-26
 
 Builds on [ADR-0001](adr-0001-sync-first-s3-mailbox.md) (sync-first
 philosophy: realtime is an optimization) and
 [ADR-0004](adr-0004-sse-realtime-notifications.md) (SSE for
 foreground delivery).
+
+## Not pursued (2026-06)
+
+Web Push is **dropped in favour of native apps** for background delivery. The
+deciding factor is the third-party surface: Web Push is *always* a relay through a
+per-browser push service (FCM / Mozilla Autopush / Apple's APNs bridge) on **every**
+platform — there is no web-push path that avoids a vendor — and on iOS it works only
+for installed PWAs (Safari 16.4+) *and still terminates at APNs anyway*. Native
+delivery is strictly better against the no-third-party / EU-resident stance
+([ops.md](../ops.md)), per platform:
+
+- **Desktop (Tauri):** no vendor at all — hold the existing SSE/WebSocket to the
+  server and raise OS notifications locally.
+- **Android:** the vendor is *optional* — a foreground-service persistent connection,
+  or self-hosted **UnifiedPush** (e.g. an `ntfy` distributor on Scaleway), keeps push
+  in-house; FCM stays the low-effort fallback. Cost: battery, OEM background-kill
+  reliability, and store-distribution friction.
+- **iOS:** APNs is unavoidable for background wake-ups (no sanctioned persistent
+  background socket), but a native app talks to **APNs directly** — no browser
+  web-push relay in front — and a **content-free wake-up** payload limits Apple to
+  "ping" metadata, never content.
+
+Push is only the *background-wake-up* mechanism in every case; foreground delivery
+stays on SSE ([ADR-0004](adr-0004-sse-realtime-notifications.md)) with no vendor. The
+per-platform native push design lives in
+[evolution/native-apps.md](../evolution/native-apps.md); a dedicated ADR will record
+it when native apps are committed. Everything below is the retained web-push
+evaluation, not the chosen path.
 
 ## Context
 

@@ -36,9 +36,37 @@ enables privacy-preserving contact discovery:
 Ties into [discovery and identity](./discovery-and-identity.md).
 Protocol design warrants its own ADR when implementation begins.
 
+## Push notifications
+
+Background delivery (app closed/backgrounded) is the main reason Web Push was
+considered ([ADR-0015](../decisions/adr-0015-web-push.md) — **not pursued**). Native
+apps deliver it with a smaller third-party surface. Push is *only* the
+background-wake-up; foreground delivery stays on SSE
+([ADR-0004](../decisions/adr-0004-sse-realtime-notifications.md)) with no vendor.
+
+- **Desktop (Tauri):** no vendor — keep the SSE connection alive and raise OS
+  notifications locally.
+- **Android:** the vendor is optional. A foreground-service persistent connection, or
+  self-hosted **UnifiedPush** (e.g. an `ntfy` distributor on Scaleway), keeps push
+  in-house and EU-resident; **FCM** is the low-effort fallback. Trade-offs: battery
+  (persistent connection + the "app is running" notification), reliability (Doze and
+  aggressive OEM task-killers — the `dontkillmyapp` problem), and Play-Store friction
+  (F-Droid / sideload is the natural home for non-FCM push). Signal-FOSS, Molly,
+  Briar, and Conversations all ship this.
+- **iOS:** **APNs is unavoidable** for waking a backgrounded/killed app — iOS allows
+  no persistent background socket. A native app uses APNs *directly* (no browser
+  web-push relay), and a **content-free wake-up** payload (the push says only "wake
+  up"; the app then pulls the E2E message from the server) limits Apple to timing/size
+  metadata, never content. This is the Signal pattern, and the irreducible
+  third-party: Apple owns iOS background delivery by design.
+
+Where a vendor is unavoidable the payload stays a content-free trigger — keys and
+plaintext never leave the device, consistent with the E2E / no-PII design. A dedicated
+ADR records the chosen per-platform mechanism when push is implemented.
+
 ## Device attestation (deferred)
 
-When PoW + Turnstile ([ADR-0007](../decisions/adr-0007-registration-abuse-prevention.md))
+When the registration proof-of-work ([ADR-0020](../decisions/adr-0020-registration-proof-of-work.md))
 proves insufficient, device attestation is the next layer:
 
 - **iOS**: App Attest — hardware-bound key in Secure Enclave, verified with Apple.
