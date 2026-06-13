@@ -72,6 +72,43 @@ EU-resident.
   any user's cryptography; a compile-time-only bypass would not reach the CI
   prod-image run, where the PoW must also be off.
 
+### Proof construction
+
+The scheme is a **leading-zero-bits search with Argon2id as the hash function**,
+not a single fixed-work Argon2 hash. A fixed-work proof would force the server to
+recompute the full ~30s to verify — a trivial denial-of-service. The search shape
+makes verification **one** hash while the client pays many, so both required
+properties hold at once: defender/attacker asymmetry (client computes ~`2^bits`
+hashes, server computes one) _and_ memory-hardness (every attempt is RAM-bound).
+
+- **Challenge** issues `{ nonce, m, t, p, bits }` — `nonce` is 16 random bytes
+  (base64url); `m`/`t`/`p` are Argon2id parameters chosen so a single hash is cheap
+  (tens of milliseconds, with `m` small enough that the server's per-verify
+  allocation stays modest); `bits` is the required count of leading zero bits.
+- **Client** searches `counter = 0, 1, 2, …` for the first value where
+  `Argon2id(password = counter_le_bytes, salt = nonce, m, t, p)` has at least `bits`
+  leading zero bits. The proof binds to the issued nonce through the salt.
+- **Proof** submitted with registration is `{ nonce, counter }`.
+- **Server** consumes the nonce (single-use, short TTL, in-process) and recomputes
+  that one hash with the **issued** parameters, checking the leading-zero-bits
+  target. `bits = 0` (the disabled switch) makes `counter = 0` solve instantly and
+  any hash pass.
+- **Difficulty** is calibrated so `2^bits × single-hash-time ≈ 30s` on a slow
+  device, while keeping the single per-verify hash cheap.
+
+Three handler-level rules follow from this and are part of the decision:
+
+- **Consume the nonce before verifying the proof.** A failed proof still burns its
+  challenge, so one issued nonce grants no free retries — a fresh challenge must be
+  fetched per attempt.
+- **Verify the proof only after cheap input validation** (malformed body, empty
+  fields, handle charset/reserved, the credential-KDF floor). A bad request must
+  never cost an Argon2 hash; the PoW guards the abuse/expense path, not input
+  validation.
+- **One rejection code for every proof failure** — unknown, expired, reused, or
+  wrong proof all return the same error, so the response is not an oracle for nonce
+  state.
+
 ## Consequences
 
 - Bulk registration pays a memory-hard cost per account; a legitimate client pays a
