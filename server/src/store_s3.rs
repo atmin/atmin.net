@@ -64,8 +64,24 @@ impl S3Store {
     }
 }
 
-/// Box any SDK error as a `StoreError::Backend`.
+/// Box any SDK error as a `StoreError::Backend`, logging the full cause chain.
+///
+/// aws-sdk's `Display` is shallow — a `ServiceError` stringifies to just
+/// `"service error"`, hiding the actual cause (NoSuchBucket, a dispatch failure →
+/// connection refused, MinIO still starting, …). We walk the `source()` chain and
+/// log it here so a resulting 500 is diagnosable from the logs. The client still
+/// gets only the generic Internal message (`error.rs` calls `.to_string()` on the
+/// boxed error), so S3 internals are never leaked in the response body. Only real
+/// failures reach `backend` — the `NotFound` cases are mapped before it.
 fn backend<E: std::error::Error + Send + Sync + 'static>(e: E) -> StoreError {
+    let mut detail = e.to_string();
+    let mut src = e.source();
+    while let Some(s) = src {
+        detail.push_str(": ");
+        detail.push_str(&s.to_string());
+        src = s.source();
+    }
+    log::error!(target: "atmin_server", "msg=s3_error detail={}", crate::logging::logfmt_value(&detail));
     StoreError::Backend(Box::new(e))
 }
 

@@ -91,6 +91,12 @@ web-fmt:
 dev:
 	$(DOCKER) compose up -d
 	@set -a; . ./.env; set +a; \
+	printf 'waiting for MinIO bucket %s …\n' "$$S3_BUCKET"; \
+	for i in $$(seq 1 50); do \
+		code=$$(curl -s -o /dev/null -w '%{http_code}' "$$S3_ENDPOINT/$$S3_BUCKET" 2>/dev/null || echo 000); \
+		case $$code in 200|403) break;; esac; \
+		sleep 0.2; \
+	done; \
 	trap 'kill 0' EXIT; \
 	(cd server && ROCKET_PORT=8080 cargo run) & \
 	(cd web && pnpm dev) & \
