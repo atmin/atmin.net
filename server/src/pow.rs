@@ -28,12 +28,13 @@ use std::time::{Duration, Instant};
 // allocation stays small while each hash is still RAM-bound.
 //
 // CALIBRATION: expected client work is `2^POW_BITS × single-hash-time`, and the
-// geometric tail means some clients pay several× the mean — so keep it low. With
-// a ~19 MiB hash measured at ~15 ms (desktop) / tens of ms (phone), `bits = 6`
-// (~64 hashes) lands at a few seconds: a one-time anti-abuse tax that's still
-// thousands of memory-hard hashes per 1000 accounts for a bulk attacker. Raise
-// `POW_BITS` cautiously — each +1 doubles the client wait *and its tail*. `bits`
-// is issued in the challenge, so tuning it needs no client rebuild.
+// geometric tail means some clients pay several× the mean. Measured per-hash for
+// this ~19 MiB hash: ~15 ms on a fast desktop (M5 Max), ~450 ms on a low-end
+// phone — so `bits = 6` (~64 hashes) lands at ~4 s desktop / ~30 s slow phone,
+// matching ADR-0020's "~30 s on a slow device" aim. The phone's high per-hash
+// cost confirms the hash is RAM-bound (GPU/ASIC-resistant). Raise `POW_BITS`
+// cautiously — each +1 doubles the client wait *and its tail*; `bits` is issued
+// in the challenge, so tuning it needs no client rebuild.
 const POW_M_KIB: u32 = 19_456; // 19 MiB
 const POW_T: u32 = 2;
 const POW_P: u32 = 1;
