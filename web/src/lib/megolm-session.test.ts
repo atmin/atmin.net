@@ -18,6 +18,7 @@ const wasm: WasmModule = {
     MegolmOutbound: MegolmOutbound as unknown as WasmModule['MegolmOutbound'],
     MegolmInbound: MegolmInbound as unknown as WasmModule['MegolmInbound'],
     derive_secret,
+    solve_pow: () => 0, // unused here
 };
 
 beforeEach(() => {

@@ -20,6 +20,7 @@ use crate::paths::{
     key_handle, key_inbox_live, key_profile, key_rotation_record, prefix_inbox, prefix_keys,
     prefix_media, prefix_user, prefix_user_devices,
 };
+use crate::pow::{self, PowChallenge, PowNonceStore, PowProof};
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
 use crate::reserved;
 use crate::store::{SharedStore, StoreError};
@@ -73,13 +74,14 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
     // so the delete path expires the same cached usage.
     let quota: SharedQuota = Arc::new(InProcessMediaQuota::new(store.clone()));
     let app = rocket::build()
-        .attach(crate::logging::RequestLog)
+        .attach(crate::logging::RequestLog::new())
         .manage(store)
         .manage(config)
         .manage(quota)
         .manage(DeviceCache::new())
         .manage(ProfileCache::new())
         .manage(EventHub::new())
+        .manage(PowNonceStore::new())
         .manage(HandleClaimMutex(KeyedMutex::new()))
         .manage(RotationMutex(KeyedMutex::new()))
         .mount(
@@ -87,6 +89,7 @@ pub fn build(store: SharedStore, config: ServerConfig) -> Rocket<Build> {
             routes![
                 healthz,
                 resolve,
+                register_challenge,
                 register,
                 add_device,
                 store_list,
@@ -346,6 +349,8 @@ struct RegisterRequest {
     sharing_public_key: String,
     salt: String,
     kdf: Option<KdfParams>,
+    /// Proof-of-work over the issued challenge (ADR-0020).
+    pow: PowProof,
 }
 
 #[derive(Serialize)]
@@ -356,6 +361,17 @@ struct RegisterResponse {
     handle: String,
 }
 
+/// `GET /v1/register/challenge` — issue a single-use proof-of-work challenge
+/// (ADR-0020). Public; the client must solve it and submit the proof with
+/// `POST /v1/register`.
+#[get("/v1/register/challenge")]
+fn register_challenge(
+    config: &State<ServerConfig>,
+    pow_nonces: &State<PowNonceStore>,
+) -> Json<PowChallenge> {
+    Json(pow::new_challenge(&config.registration_pow, pow_nonces))
+}
+
 /// `POST /v1/register` — create an account: claim a handle, mint ids + token,
 /// write the handle projection + profile + device. Public.
 #[post("/v1/register", data = "<body>")]
@@ -363,6 +379,7 @@ async fn register(
     body: &str,
     store: &State<SharedStore>,
     config: &State<ServerConfig>,
+    pow_nonces: &State<PowNonceStore>,
     handle_mu: &State<HandleClaimMutex>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     // Manual parse so malformed *and* missing-field bodies both yield 400 (matching Go).
@@ -387,6 +404,15 @@ async fn register(
     };
     if req.salt.is_empty() || !valid_kdf_params(&req.salt, kdf) {
         return Err(ApiError::BadRequest);
+    }
+
+    // Proof-of-work (ADR-0020): burn the single-use nonce, then verify the proof
+    // meets the issued difficulty. Placed after the cheap validation above (a bad
+    // request never costs an Argon2 hash) and before the claim lock (the cost
+    // gates the expensive path). Consume runs unconditionally, so a failed proof
+    // still burns its challenge — one nonce grants no retries.
+    if !pow_nonces.consume(&req.pow.nonce) || !pow::verify(&req.pow, &config.registration_pow) {
+        return Err(ApiError::PowInvalid);
     }
 
     // Claim the handle under the per-handle lock (ADR-0013). Held to the end of
@@ -1297,6 +1323,9 @@ mod tests {
     fn config() -> ServerConfig {
         ServerConfig {
             server_secret: TEST_SECRET.to_vec(),
+            // PoW disabled in tests: register still requires a valid single-use
+            // nonce (fetched from the challenge endpoint), but any counter passes.
+            registration_pow: pow::PowConfig::disabled(),
         }
     }
 
@@ -2256,7 +2285,24 @@ mod tests {
         .to_string()
     }
 
-    async fn register(
+    /// Fetch a fresh PoW challenge and return its nonce.
+    async fn challenge_nonce(client: &Client) -> String {
+        let resp = client.get("/v1/register/challenge").dispatch().await;
+        assert_eq!(resp.status(), Status::Ok);
+        let v: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        v["nonce"].as_str().unwrap().to_string()
+    }
+
+    /// Inject a `pow` object into a register body JSON string.
+    fn with_pow(body: String, nonce: &str, counter: u64) -> String {
+        let mut v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        v["pow"] = serde_json::json!({ "nonce": nonce, "counter": counter });
+        v.to_string()
+    }
+
+    /// Post a register body verbatim (no PoW injection) — for the negative tests.
+    async fn register_raw(
         client: &Client,
         body: String,
     ) -> rocket::local::asynchronous::LocalResponse<'_> {
@@ -2266,6 +2312,16 @@ mod tests {
             .body(body)
             .dispatch()
             .await
+    }
+
+    /// Register through the real flow: fetch a challenge, attach the nonce (PoW is
+    /// disabled in tests, so counter 0 satisfies it), then post.
+    async fn register(
+        client: &Client,
+        body: String,
+    ) -> rocket::local::asynchronous::LocalResponse<'_> {
+        let nonce = challenge_nonce(client).await;
+        register_raw(client, with_pow(body, &nonce, 0)).await
     }
 
     #[tokio::test]
@@ -2388,6 +2444,62 @@ mod tests {
         let client = client_with(MemStore::new()).await;
         let resp = register(&client, serde_json::json!({ "handle": "dave" }).to_string()).await;
         assert_eq!(resp.status(), Status::BadRequest);
+    }
+
+    // --- registration proof-of-work (ADR-0020) ---
+
+    #[tokio::test]
+    async fn register_challenge_issues_distinct_nonces() {
+        let client = client_with(MemStore::new()).await;
+        let resp = client.get("/v1/register/challenge").dispatch().await;
+        assert_eq!(resp.status(), Status::Ok);
+        let a: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert!(a["nonce"].as_str().unwrap().len() >= 16);
+        assert_eq!(a["bits"], 0); // disabled in the test config
+
+        let b = challenge_nonce(&client).await;
+        assert_ne!(a["nonce"].as_str().unwrap(), b); // single-use ⇒ never reissued
+    }
+
+    #[tokio::test]
+    async fn register_without_pow_is_403() {
+        let client = client_with(MemStore::new()).await;
+        // register_raw posts the body verbatim — no pow field, so the nonce is empty.
+        let resp = register_raw(&client, register_body("alice")).await;
+        assert_eq!(resp.status(), Status::Forbidden);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "pow_invalid");
+    }
+
+    #[tokio::test]
+    async fn register_unknown_nonce_is_403() {
+        let client = client_with(MemStore::new()).await;
+        // A well-formed nonce that was never issued by the challenge endpoint.
+        let bogus = URL_SAFE_NO_PAD.encode([9u8; 16]);
+        let resp = register_raw(&client, with_pow(register_body("alice"), &bogus, 0)).await;
+        assert_eq!(resp.status(), Status::Forbidden);
+        let body: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "pow_invalid");
+    }
+
+    #[tokio::test]
+    async fn register_replayed_nonce_is_403() {
+        let client = client_with(MemStore::new()).await;
+        let nonce = challenge_nonce(&client).await;
+
+        // First use of the nonce registers fine.
+        let first = register_raw(&client, with_pow(register_body("alice"), &nonce, 0)).await;
+        assert_eq!(first.status(), Status::Ok);
+
+        // Replaying the same (now consumed) nonce is rejected — single-use.
+        let replay = register_raw(&client, with_pow(register_body("bob"), &nonce, 0)).await;
+        assert_eq!(replay.status(), Status::Forbidden);
+        let body: serde_json::Value =
+            serde_json::from_str(&replay.into_string().await.unwrap()).unwrap();
+        assert_eq!(body["error"], "pow_invalid");
     }
 
     // --- add-device / returning device (public; the signed proof is the credential) ---

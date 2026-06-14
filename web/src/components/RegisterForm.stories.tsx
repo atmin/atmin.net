@@ -44,6 +44,9 @@ const meta = {
         onRegister: fn(),
         strength: noStrength,
         availability: idle,
+        powStatus: 'ready',
+        provingMs: 0,
+        powHashes: 0,
     },
 } satisfies Meta<typeof RegisterForm>;
 

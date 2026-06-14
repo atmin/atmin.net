@@ -802,6 +802,22 @@ Error codes used by the server:
 - See [ADR-0012](../decisions/adr-0012-backup-secret-rotation.md)
   for the full rotation mechanism.
 
+### Register challenge (proof-of-work)
+
+`GET /v1/register/challenge`
+
+Public. Issues a single-use proof-of-work challenge that `POST /v1/register`
+requires ([ADR-0020](../decisions/adr-0020-registration-proof-of-work.md)).
+
+Output: `{ nonce, m, t, p, bits }` — `nonce` is 16 random bytes (base64url,
+single-use, short TTL); `m`/`t`/`p` are Argon2id parameters; `bits` is the
+required leading-zero-bit target. The client searches for a `counter` whose
+`Argon2id(counter_le, salt = nonce)` output has at least `bits` leading zero
+bits, then submits `{ nonce, counter }` as the `pow` field below. `bits = 0`
+means the proof-of-work is disabled (the test/e2e switch) and any counter
+passes. See ADR-0020 § Proof construction for why this is a leading-zero-bits
+*search* (one verify hash, ~`2^bits` client hashes) rather than fixed work.
+
 ### Register (first device)
 
 `POST /v1/register`
@@ -814,6 +830,8 @@ Input:
 - `sharing_public_key` (base64url P-256 uncompressed SEC1)
 - `salt` (base64url, 16 bytes — required)
 - `kdf` (object `{ type, m, t, p }` — required)
+- `pow` (object `{ nonce, counter }` — proof for a challenge from
+  `GET /v1/register/challenge`; required, ADR-0020)
 
 The client generates a random `salt`, runs Argon2id over the user's
 password, and derives the auth and sharing keypairs from the resulting
@@ -835,29 +853,38 @@ full design):
 1. Server validates `handle` against the charset/length rules.
    Reject `400 handle_invalid` on format violations or
    `400 handle_reserved` on reserved-list matches.
-2. Server acquires the per-handle in-server mutex (short timeout;
+2. Server consumes the `pow.nonce` (single-use) and verifies the proof
+   meets the issued difficulty ([ADR-0020](../decisions/adr-0020-registration-proof-of-work.md)).
+   Any failure — missing, malformed, expired, replayed, or wrong proof —
+   is rejected `403 pow_invalid` (one code, never an oracle for nonce
+   state). This runs *after* the cheap validation above (a bad request
+   never costs an Argon2 hash) and *before* the mutex (the cost gates the
+   expensive path). The consume runs unconditionally, so a failed proof
+   still burns its nonce — one challenge grants no retries.
+3. Server acquires the per-handle in-server mutex (short timeout;
    on timeout return `503 registration_unavailable`).
-3. Server `GET handles/{handle}.json`:
+4. Server `GET handles/{handle}.json`:
    - `404` → handle is free.
    - `200` with live projection → reject `409 handle_taken`.
    - `200` with `released_at` in the future → reject
      `409 handle_in_cooldown` (body includes `released_at`).
    - `200` with `released_at` in the past → `DeleteObject` the
      stale tombstone, continue.
-4. Server generates `user_id`, `device_id`, `token`.
-5. Server writes `handles/{handle}.json` (unconditional; the mutex
+5. Server generates `user_id`, `device_id`, `token`.
+6. Server writes `handles/{handle}.json` (unconditional; the mutex
    makes the GET+PUT effectively atomic for this handle).
-6. Server writes `users/{user_id}/profile.json` and
+7. Server writes `users/{user_id}/profile.json` and
    `users/{user_id}/devices/{device_id}.json`. If either fails,
    best-effort `DeleteObject` the handle projection to release
    the handle.
-7. Server releases the mutex.
+8. Server releases the mutex.
 
 Output:
 
 - `user_id`, `device_id`, `token`, `handle`
 
-This is the only unauthenticated endpoint (no existing token to present).
+Register and its challenge are unauthenticated (no existing token to present),
+as is `GET /v1/resolve/{handle}`.
 
 ### Auth proof
 

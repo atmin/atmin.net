@@ -91,6 +91,21 @@ async function request<T>(
 
 // --- Types ---
 
+// Registration proof-of-work (ADR-0020). The server issues a challenge; the
+// client solves it and submits the proof with register.
+export interface PowChallenge {
+    nonce: string; // single-use, base64url; also the Argon2 salt
+    m: number; // Argon2id memory cost, KiB
+    t: number; // iterations
+    p: number; // parallelism
+    bits: number; // required leading zero bits; 0 ⇒ disabled (test/e2e)
+}
+
+export interface PowProof {
+    nonce: string;
+    counter: number;
+}
+
 export interface RegisterRequest {
     handle: string;
     device_label: string;
@@ -99,6 +114,8 @@ export interface RegisterRequest {
     // v2 accounts send both; v1 (legacy mnemonic) omits both.
     salt?: string;
     kdf?: KdfParams;
+    // Proof-of-work over a server-issued challenge (ADR-0020).
+    pow: PowProof;
 }
 
 export interface RegisterResponse {
@@ -204,6 +221,10 @@ export interface DeviceInfo {
 }
 
 // --- API functions ---
+
+export function getRegisterChallenge(): Promise<PowChallenge> {
+    return request('GET', '/v1/register/challenge');
+}
 
 export function register(req: RegisterRequest): Promise<RegisterResponse> {
     return request('POST', '/v1/register', { body: req });

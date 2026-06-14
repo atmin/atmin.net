@@ -8,6 +8,13 @@ vi.mock('@/lib/api', async () => {
     return {
         ...actual,
         register: vi.fn(),
+        getRegisterChallenge: vi.fn().mockResolvedValue({
+            nonce: 'pow-nonce',
+            m: 1,
+            t: 1,
+            p: 1,
+            bits: 0,
+        }),
     };
 });
 
@@ -17,6 +24,7 @@ vi.mock('@/lib/auth', () => ({
 
 vi.mock('@/lib/argon2-worker.client', () => ({
     argonStretch: vi.fn().mockResolvedValue(new Uint8Array(16).fill(5)),
+    solvePow: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('@/lib/crypto', () => ({
@@ -52,6 +60,23 @@ describe('useRegister', () => {
         expect(result.current.step).toBe('enter');
         expect(result.current.password).toBe('');
         expect(result.current.acknowledged).toBe(false);
+
+        await act(async () => {}); // let the mount prefetch settle
+    });
+
+    it('prefetches and solves the proof-of-work on mount', async () => {
+        const { getRegisterChallenge } = await import('@/lib/api');
+        const { solvePow } = await import('@/lib/argon2-worker.client');
+        const { useRegister } = await import('./useRegister');
+        const { result } = renderHook(() => useRegister(vi.fn()));
+
+        await act(async () => {}); // flush the prefetch
+
+        // Solved in the background before any submit — overlaps the typing window.
+        expect(getRegisterChallenge).toHaveBeenCalledTimes(1);
+        expect(solvePow).toHaveBeenCalledTimes(1);
+        expect(result.current.powStatus).toBe('ready');
+        expect(result.current.powHashes).toBe(1); // counter 0 + 1
     });
 
     it('stretches the password through Argon2id and registers with salt + kdf', async () => {
@@ -92,6 +117,8 @@ describe('useRegister', () => {
         });
         expect(payload.auth_public_key).toBeDefined();
         expect(payload.sharing_public_key).toBeDefined();
+        // Proof-of-work attached: the issued nonce + the solved counter (ADR-0020).
+        expect(payload.pow).toEqual({ nonce: 'pow-nonce', counter: 0 });
 
         expect(saveSession).toHaveBeenCalled();
         expect(onSuccess).toHaveBeenCalled();

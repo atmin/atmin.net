@@ -14,7 +14,7 @@
 //! default 127.0.0.1:8000).
 
 use atmin_server::cleanup::{run_cleanup, CleanupOpts};
-use atmin_server::config::{S3Config, ServerConfig};
+use atmin_server::config::{registration_pow_from_env, S3Config, ServerConfig};
 use atmin_server::logging;
 use atmin_server::routes;
 use atmin_server::store::SharedStore;
@@ -66,7 +66,21 @@ fn build_server() -> Rocket<Build> {
         }
     };
 
-    routes::build(store, ServerConfig { server_secret })
+    let registration_pow = registration_pow_from_env();
+    if registration_pow.bits == 0 {
+        log::warn!(
+            target: "atmin_server",
+            "registration proof-of-work DISABLED via DANGEROUSLY_DISABLE_REGISTRATION_POW — test/e2e only, never production"
+        );
+    }
+
+    routes::build(
+        store,
+        ServerConfig {
+            server_secret,
+            registration_pow,
+        },
+    )
 }
 
 /// Run the retention sweep against S3. Dry-run unless `--apply` is passed. Reads

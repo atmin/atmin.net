@@ -41,6 +41,10 @@ pub enum ApiError {
         available_at: String,
     },
     RegistrationUnavailable,
+    /// 403 when registration's proof-of-work is missing, malformed, expired,
+    /// replayed, or wrong (ADR-0020). One code for every failure mode — never an
+    /// oracle for nonce state.
+    PowInvalid,
     QuotaExceeded,
     TooLarge,
     /// 500 with an ad-hoc context message for one-off internal failures.
@@ -53,7 +57,7 @@ impl ApiError {
         match self {
             BadRequest | HandleInvalid | HandleReserved => Status::BadRequest,
             Unauthorized | KeyVersionStale { .. } => Status::Unauthorized,
-            DeviceRevoked | BadContinuity | Forbidden => Status::Forbidden,
+            DeviceRevoked | BadContinuity | Forbidden | PowInvalid => Status::Forbidden,
             NotFound => Status::NotFound,
             HandleTaken | HandleInCooldown { .. } => Status::Conflict,
             HandleReleased { .. } => Status::Gone,
@@ -79,6 +83,7 @@ impl ApiError {
             HandleInCooldown { .. } => "handle_in_cooldown",
             HandleReleased { .. } => "released",
             RegistrationUnavailable => "registration_unavailable",
+            PowInvalid => "pow_invalid",
             QuotaExceeded => "quota_exceeded",
             TooLarge => "too_large",
             Internal(_) => "internal",
@@ -101,6 +106,7 @@ impl ApiError {
             HandleInCooldown { .. } => "Handle is in 30-day cooldown after deletion",
             HandleReleased { .. } => "Handle was deleted; in cooldown",
             RegistrationUnavailable => "Registration is temporarily unavailable for this handle",
+            PowInvalid => "Registration proof-of-work missing or invalid",
             QuotaExceeded => "Storage quota exceeded",
             TooLarge => "Payload exceeds size limit",
             Internal(msg) => msg,
@@ -207,6 +213,7 @@ mod tests {
                 503,
                 "registration_unavailable",
             ),
+            (ApiError::PowInvalid, 403, "pow_invalid"),
             (ApiError::QuotaExceeded, 413, "quota_exceeded"),
             (ApiError::TooLarge, 413, "too_large"),
             (ApiError::Internal("boom".into()), 500, "internal"),

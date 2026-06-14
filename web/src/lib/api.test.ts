@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     APIError,
+    getRegisterChallenge,
     KeyVersionStaleError,
     onAuthEvent,
     type RegisterRequest,
@@ -180,6 +181,7 @@ describe('api - register()', () => {
             device_label: 'My Phone',
             auth_public_key: 'auth-key-base64url',
             sharing_public_key: 'sharing-key-base64url',
+            pow: { nonce: 'test-nonce', counter: 0 },
         };
 
         const result = await register(request);
@@ -221,6 +223,7 @@ describe('api - register()', () => {
             device_label: '',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
+            pow: { nonce: 'test-nonce', counter: 0 },
         };
 
         await expect(register(invalidRequest)).rejects.toMatchObject({
@@ -246,6 +249,7 @@ describe('api - register()', () => {
             device_label: 'My Device',
             auth_public_key: 'not-valid-base64url!!!',
             sharing_public_key: 'also-invalid!!!',
+            pow: { nonce: 'test-nonce', counter: 0 },
         };
 
         await expect(register(invalidRequest)).rejects.toMatchObject({
@@ -271,6 +275,7 @@ describe('api - register()', () => {
             device_label: 'My Device',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
+            pow: { nonce: 'test-nonce', counter: 0 },
         };
 
         await expect(register(request)).rejects.toMatchObject({
@@ -294,6 +299,7 @@ describe('api - register()', () => {
             device_label: 'My Device',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
+            pow: { nonce: 'test-nonce', counter: 0 },
         };
 
         await expect(register(request)).rejects.toMatchObject({
@@ -319,6 +325,7 @@ describe('api - register()', () => {
             device_label: 'My Device',
             auth_public_key: 'auth-key',
             sharing_public_key: 'sharing-key',
+            pow: { nonce: 'test-nonce', counter: 0 },
         };
 
         await expect(register(request)).rejects.toMatchObject({
@@ -326,6 +333,33 @@ describe('api - register()', () => {
             code: 'rate_limit',
             message: 'Too many registration attempts',
         });
+    });
+});
+
+describe('api - getRegisterChallenge()', () => {
+    beforeEach(() => {
+        resetFetchMock();
+    });
+
+    it('GETs the challenge endpoint and returns the parsed challenge', async () => {
+        const challenge = {
+            nonce: 'abc123',
+            m: 19456,
+            t: 2,
+            p: 1,
+            bits: 10,
+        };
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse(challenge) as Response,
+        );
+
+        const result = await getRegisterChallenge();
+
+        expect(fetchMock).toHaveBeenCalledWith(
+            '/v1/register/challenge',
+            expect.objectContaining({ method: 'GET' }),
+        );
+        expect(result).toEqual(challenge);
     });
 });
 

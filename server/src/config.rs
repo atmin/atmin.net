@@ -1,14 +1,32 @@
 //! Server configuration, held as Rocket-managed state.
 //!
-//! Config is split by audience: handlers/guards only ever read the HMAC secret,
-//! so [`ServerConfig`] carries just that. The S3 credentials live in
-//! [`S3Config`], consumed once by `main.rs` to build the store and never seen by a
-//! handler — the store encapsulates them.
+//! Config is split by audience: handlers/guards read the HMAC secret and the
+//! registration PoW difficulty, so [`ServerConfig`] carries those. The S3
+//! credentials live in [`S3Config`], consumed once by `main.rs` to build the
+//! store and never seen by a handler — the store encapsulates them.
+
+use crate::pow::PowConfig;
 
 /// Configuration available to guards and handlers.
 pub struct ServerConfig {
     /// HMAC secret for device tokens (`token::generate` / `token::parse`).
     pub server_secret: Vec<u8>,
+    /// Registration proof-of-work difficulty (ADR-0020). `bits == 0` ⇒ disabled.
+    pub registration_pow: PowConfig,
+}
+
+/// The exact value of `DANGEROUSLY_DISABLE_REGISTRATION_POW` that turns the
+/// registration proof-of-work off (ADR-0020). Any other value — or unset —
+/// leaves it on: the switch is fail-closed, so a typo can't silently disable it.
+pub const POW_DISABLE_TOKEN: &str = "yes-i-am-the-e2e-suite";
+
+/// Read the registration PoW difficulty from the environment. Fail-closed: the
+/// PoW is on unless the disable switch holds exactly [`POW_DISABLE_TOKEN`].
+pub fn registration_pow_from_env() -> PowConfig {
+    match env_opt("DANGEROUSLY_DISABLE_REGISTRATION_POW") {
+        Some(v) if v == POW_DISABLE_TOKEN => PowConfig::disabled(),
+        _ => PowConfig::enabled(),
+    }
 }
 
 /// S3 connection settings, loaded from the `S3_*` environment variables.

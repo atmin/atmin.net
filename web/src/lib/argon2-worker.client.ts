@@ -8,8 +8,9 @@
  * retries) don't cross their results.
  */
 
+import type { PowChallenge } from './api';
 import type { Argon2Request, Argon2Response } from './argon2-worker';
-import type { KdfParams } from './crypto';
+import { base64UrlDecode, type KdfParams } from './crypto';
 
 const IDLE_SHUTDOWN_MS = 10_000;
 
@@ -40,28 +41,63 @@ function scheduleShutdown(): void {
 }
 
 /**
+ * Post a job to the worker and resolve with its success response, correlated by
+ * `id`. Rejects on a worker error. The caller picks `secret` / `counter` off the
+ * resolved response.
+ */
+function runWorker(
+    req: Argon2Request,
+): Promise<Extract<Argon2Response, { ok: true }>> {
+    const w = getWorker();
+    return new Promise((resolve, reject) => {
+        const onMessage = (e: MessageEvent<Argon2Response>) => {
+            if (e.data.id !== req.id) return;
+            w.removeEventListener('message', onMessage);
+            scheduleShutdown();
+            if (e.data.ok) resolve(e.data);
+            else reject(new Error(e.data.error));
+        };
+        w.addEventListener('message', onMessage);
+        w.postMessage(req);
+    });
+}
+
+/**
  * Stretch a UTF-8 password into a 16-byte secret via Argon2id in a
  * worker. Resolves with the secret or rejects with the worker error.
  */
-export function argonStretch(
+export async function argonStretch(
     password: string,
     salt: Uint8Array,
     kdf: KdfParams,
 ): Promise<Uint8Array> {
-    const w = getWorker();
-    const id = nextId++;
     const passwordBytes = new TextEncoder().encode(password);
-
-    return new Promise<Uint8Array>((resolve, reject) => {
-        const onMessage = (e: MessageEvent<Argon2Response>) => {
-            if (e.data.id !== id) return;
-            w.removeEventListener('message', onMessage);
-            scheduleShutdown();
-            if (e.data.ok) resolve(e.data.secret);
-            else reject(new Error(e.data.error));
-        };
-        w.addEventListener('message', onMessage);
-        const req: Argon2Request = { id, password: passwordBytes, salt, kdf };
-        w.postMessage(req);
+    const res = await runWorker({
+        id: nextId++,
+        kind: 'derive',
+        password: passwordBytes,
+        salt,
+        kdf,
     });
+    if (!('secret' in res)) throw new Error('unexpected worker response');
+    return res.secret;
+}
+
+/**
+ * Solve a registration proof-of-work challenge (ADR-0020) in the worker.
+ * Resolves with the counter satisfying the issued difficulty; `bits === 0`
+ * resolves with 0 immediately.
+ */
+export async function solvePow(challenge: PowChallenge): Promise<number> {
+    const res = await runWorker({
+        id: nextId++,
+        kind: 'pow',
+        nonce: base64UrlDecode(challenge.nonce),
+        m: challenge.m,
+        t: challenge.t,
+        p: challenge.p,
+        bits: challenge.bits,
+    });
+    if (!('counter' in res)) throw new Error('unexpected worker response');
+    return res.counter;
 }

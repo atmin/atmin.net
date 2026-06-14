@@ -18,13 +18,17 @@
 //! filter and lets everything through for troubleshooting.
 
 use std::borrow::Cow;
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::time::Instant;
 
 use rocket::fairing::{Fairing, Info, Kind};
-use rocket::http::Header;
+use rocket::http::{ContentType, Header};
 use rocket::{Data, Request, Response};
 use ulid::Ulid;
+
+/// How many body bytes to log (the rest is elided). Dev debugging aid, not an
+/// audit log — a preview is enough to see a request/response shape.
+const BODY_LOG_CAP: usize = 4096;
 
 /// The authenticated user id for the current request, stashed by the `AuthedUser`
 /// guard so the request-log fairing can read it in `on_response` (which runs after
@@ -119,7 +123,35 @@ pub fn init() {
 /// `msg=request request_id=… method=… path=… status=… dur_ms=… ip=… user_id=…`.
 /// The same id is echoed in the `X-Request-Id` response header so a client can
 /// quote it when reporting an error — the handle into these logs.
-pub struct RequestLog;
+///
+/// When `log_bodies` is set (the `LOG_BODIES` env, dev only), it also logs the
+/// request and response **bodies** of `/v1/` calls — a debugging aid for seeing
+/// exactly what a client sent and got back. Off by default; never enable in
+/// production (bodies carry request payloads and are unbounded noise).
+pub struct RequestLog {
+    log_bodies: bool,
+}
+
+impl RequestLog {
+    /// Construct from the environment. `LOG_BODIES=1` (or `true`) turns on
+    /// request/response body logging for `/v1/` routes.
+    pub fn new() -> RequestLog {
+        let log_bodies = matches!(std::env::var("LOG_BODIES").as_deref(), Ok("1") | Ok("true"));
+        RequestLog { log_bodies }
+    }
+}
+
+impl Default for RequestLog {
+    fn default() -> RequestLog {
+        RequestLog::new()
+    }
+}
+
+/// A one-line, newline-stripped preview of a body for a logfmt `body=` field.
+fn body_preview(bytes: &[u8]) -> String {
+    let slice = &bytes[..bytes.len().min(BODY_LOG_CAP)];
+    String::from_utf8_lossy(slice).replace(['\n', '\r'], " ")
+}
 
 #[rocket::async_trait]
 impl Fairing for RequestLog {
@@ -130,10 +162,25 @@ impl Fairing for RequestLog {
         }
     }
 
-    async fn on_request(&self, req: &mut Request<'_>, _data: &mut Data<'_>) {
+    async fn on_request(&self, req: &mut Request<'_>, data: &mut Data<'_>) {
         // Init-once per type. Set the timer and the request id here; never
         // RequestUserId (the guard owns that — pre-empting it with None loses it).
         let id = request_id_from(req);
+
+        // Body logging (dev only): peek is non-destructive — the handler still
+        // reads the full body. Scoped to /v1/ so SPA/static fetches don't spam.
+        if self.log_bodies && req.uri().path().as_str().starts_with("/v1/") {
+            let peeked = data.peek(BODY_LOG_CAP).await;
+            if !peeked.is_empty() {
+                let preview = body_preview(peeked);
+                log::info!(
+                    "msg=request_body request_id={id} bytes={} body={}",
+                    peeked.len(),
+                    logfmt_value(&preview)
+                );
+            }
+        }
+
         req.local_cache(|| StartTime(Instant::now()));
         req.local_cache(|| RequestId(id));
     }
@@ -164,7 +211,32 @@ impl Fairing for RequestLog {
         );
 
         // Echo the id so the client can quote it when reporting an error.
-        res.set_header(Header::new("X-Request-Id", request_id.to_owned()));
+        let request_id = request_id.to_owned();
+        res.set_header(Header::new("X-Request-Id", request_id.clone()));
+
+        // Body logging (dev only): buffer the response body, log a preview, and
+        // re-inject it. Scoped to /v1/; skip `text/event-stream` (SSE is an
+        // unbounded stream — reading it to the end would hang the response).
+        if self.log_bodies
+            && req.uri().path().as_str().starts_with("/v1/")
+            && res.content_type() != Some(ContentType::EventStream)
+        {
+            match res.body_mut().to_bytes().await {
+                Ok(bytes) => {
+                    log::info!(
+                        "msg=response_body request_id={request_id} bytes={} body={}",
+                        bytes.len(),
+                        logfmt_value(&body_preview(&bytes))
+                    );
+                    let len = bytes.len();
+                    res.set_sized_body(len, Cursor::new(bytes));
+                }
+                Err(e) => log::info!(
+                    "msg=response_body request_id={request_id} error={}",
+                    logfmt_value(&e.to_string())
+                ),
+            }
+        }
     }
 }
 

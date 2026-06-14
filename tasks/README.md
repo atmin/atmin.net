@@ -12,15 +12,10 @@ message-amendments ([ADR-0014](../docs/decisions/adr-0014-message-amendments.md)
 draft persistence (`useDraft`), the storage indicator (`GET /v1/store/usage`),
 data-retention cleanup (`cleanup` subcommand, [ADR-0006](../docs/decisions/adr-0006-data-retention.md)),
 and account deletion (Settings → Danger zone, `DELETE /v1/profile`, invariant
-[I7](../docs/scenarios/invariants/i7-deletion-races.md)).
-
-## Hardening (live v0.1 surface)
-
-1. **[registration-pow](registration-pow.md)** — Memory-hard Argon2id
-   proof-of-work on `POST /v1/register` ([ADR-0020](../docs/decisions/adr-0020-registration-proof-of-work.md),
-   supersedes ADR-0007). Server-issued challenge + leading-zero-bits search, a
-   fail-closed runtime disable switch for the e2e suite. Closes the uncapped
-   free-account hole without a CAPTCHA, third party, or PII. **Next up.**
+[I7](../docs/scenarios/invariants/i7-deletion-races.md)). Registration is
+guarded by a memory-hard proof-of-work
+([ADR-0020](../docs/decisions/adr-0020-registration-proof-of-work.md),
+supersedes ADR-0007).
 
 ## MVP v0.2 — group chats & reach
 

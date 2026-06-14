@@ -122,6 +122,7 @@ e2e: web-build
 		--add-host=host.docker.internal:host-gateway \
 		--add-host=host.containers.internal:host-gateway \
 		-e SERVER_SECRET=e2e-test-secret \
+		-e DANGEROUSLY_DISABLE_REGISTRATION_POW=yes-i-am-the-e2e-suite \
 		-e S3_ENDPOINT=http://host.containers.internal:9000 \
 		-e S3_PUBLIC_ENDPOINT=http://localhost:9000 \
 		-e S3_BUCKET=atmin-e2e-local \
@@ -147,6 +148,7 @@ e2e-local: server-build
 	$(DOCKER) compose up -d
 	@BUCKET=atmin-e2e-local-$$$$; \
 	export SERVER_SECRET=e2e-test-secret; \
+	export DANGEROUSLY_DISABLE_REGISTRATION_POW=yes-i-am-the-e2e-suite; \
 	export S3_ENDPOINT=http://localhost:9000; \
 	export S3_PUBLIC_ENDPOINT=http://localhost:9000; \
 	export S3_BUCKET=$$BUCKET; \

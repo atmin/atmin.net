@@ -22,6 +22,9 @@ export default function RegisterRoute({ onSuccess }: Props) {
             confirm={reg.confirm}
             acknowledged={reg.acknowledged}
             error={reg.error}
+            powStatus={reg.powStatus}
+            provingMs={reg.provingMs}
+            powHashes={reg.powHashes}
             strength={strength}
             availability={availability}
             onHandleChange={reg.setHandle}

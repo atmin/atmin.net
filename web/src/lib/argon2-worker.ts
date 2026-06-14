@@ -1,26 +1,40 @@
 /**
- * Argon2id derivation worker.
+ * Argon2id worker — runs both memory-hard jobs off the main thread so a
+ * multi-second synchronous WASM call never freezes the UI:
+ *  - `derive`: credential stretch → 16-byte secret (ADR-0011).
+ *  - `pow`: registration proof-of-work search → counter (ADR-0020).
  *
- * Runs the memory-hard stretch off the main thread (ADR-0011): a ~3-4s
- * synchronous WASM call would freeze the strength-meter UI and any
- * derivation-time animation. Receives {id, password, salt, kdf}, posts
- * back {id, ok, secret} or {id, ok, error}. The worker holds no
- * long-lived state — the WASM module is loaded lazily and cached by
- * `loadWasm`.
+ * Requests are tagged by `kind`; responses are correlated by `id` and carry
+ * `secret` (derive) or `counter` (pow). The worker holds no long-lived state —
+ * the WASM module is loaded lazily and cached by `loadWasm`.
  */
 
 import type { KdfParams } from './crypto';
 import { loadWasm } from './wasm';
 
-export interface Argon2Request {
+export interface DeriveRequest {
     id: number;
+    kind: 'derive';
     password: Uint8Array;
     salt: Uint8Array;
     kdf: KdfParams;
 }
 
+export interface PowRequest {
+    id: number;
+    kind: 'pow';
+    nonce: Uint8Array;
+    m: number;
+    t: number;
+    p: number;
+    bits: number;
+}
+
+export type Argon2Request = DeriveRequest | PowRequest;
+
 export type Argon2Response =
     | { id: number; ok: true; secret: Uint8Array }
+    | { id: number; ok: true; counter: number }
     | { id: number; ok: false; error: string };
 
 // `self` is the worker global. The DOM lib types it as `Window`, whose
@@ -36,14 +50,37 @@ const ctx = self as unknown as {
 };
 
 ctx.addEventListener('message', async (e) => {
-    const { id, password, salt, kdf } = e.data;
+    const req = e.data;
     try {
         const wasm = await loadWasm();
-        const secret = wasm.derive_secret(password, salt, kdf.m, kdf.t, kdf.p);
-        ctx.postMessage({ id, ok: true, secret });
+        if (req.kind === 'pow') {
+            // Timing aids PoW calibration (ADR-0020) — attempts ≈ counter + 1.
+            const t0 = performance.now();
+            const counter = wasm.solve_pow(
+                req.nonce,
+                req.m,
+                req.t,
+                req.p,
+                req.bits,
+            );
+            const ms = performance.now() - t0;
+            console.info(
+                `[pow] bits=${req.bits} m=${req.m} solved counter=${counter} in ${ms.toFixed(0)}ms (~${(ms / (counter + 1)).toFixed(1)}ms/hash)`,
+            );
+            ctx.postMessage({ id: req.id, ok: true, counter });
+        } else {
+            const secret = wasm.derive_secret(
+                req.password,
+                req.salt,
+                req.kdf.m,
+                req.kdf.t,
+                req.kdf.p,
+            );
+            ctx.postMessage({ id: req.id, ok: true, secret });
+        }
     } catch (err) {
         ctx.postMessage({
-            id,
+            id: req.id,
             ok: false,
             error: err instanceof Error ? err.message : String(err),
         });

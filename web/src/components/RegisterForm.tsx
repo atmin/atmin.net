@@ -12,7 +12,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import type { HandleAvailability } from '@/hooks/useHandleAvailability';
 import type { PasswordStrength } from '@/hooks/usePasswordStrength';
-import type { RegisterStep } from '@/hooks/useRegister';
+import type { PowStatus, RegisterStep } from '@/hooks/useRegister';
 
 interface Props {
     step: RegisterStep;
@@ -21,6 +21,9 @@ interface Props {
     confirm: string;
     acknowledged: boolean;
     error: string;
+    powStatus: PowStatus;
+    provingMs: number;
+    powHashes: number;
     strength: PasswordStrength;
     availability: HandleAvailability;
     onHandleChange: (value: string) => void;
@@ -48,6 +51,9 @@ export default function RegisterForm({
     confirm,
     acknowledged,
     error,
+    powStatus,
+    provingMs,
+    powHashes,
     strength,
     availability,
     onHandleChange,
@@ -63,7 +69,30 @@ export default function RegisterForm({
         password === confirm &&
         acknowledged;
 
-    if (step === 'deriving') {
+    // PoW calibration readout (ADR-0020): grind time, attempts, per-hash cost.
+    const powReadout =
+        powHashes > 0 ? (
+            <p className="mt-2 text-center font-mono text-xs tabular-nums text-muted-foreground">
+                PoW: {(provingMs / 1000).toFixed(1)}s · {powHashes} hashes · ~
+                {(provingMs / powHashes).toFixed(1)} ms/hash
+            </p>
+        ) : null;
+
+    // Background-PoW status on the form, with the calibration numbers once ready.
+    // Failed → nothing; the submit path solves inline.
+    const powStatusLine =
+        powStatus === 'failed' ? null : (
+            <p className="mt-4 text-center text-xs tabular-nums text-muted-foreground">
+                {powStatus === 'ready'
+                    ? '🔒 Secure registration ready'
+                    : `🔒 Preparing secure registration… ${(provingMs / 1000).toFixed(0)}s`}
+                {powStatus === 'ready' &&
+                    powHashes > 0 &&
+                    ` · ${powHashes} hashes · ~${(provingMs / powHashes).toFixed(1)} ms/hash`}
+            </p>
+        );
+
+    if (step === 'deriving' || step === 'proving') {
         return (
             <div className="flex min-h-screen items-center justify-center bg-background p-8">
                 <div className="text-center">
@@ -72,11 +101,20 @@ export default function RegisterForm({
                         <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.15s]" />
                         <span className="size-3 animate-pulse rounded-full bg-primary" />
                     </div>
-                    <p className="text-lg font-medium">Deriving your keys…</p>
+                    <p className="text-lg font-medium">
+                        {step === 'deriving'
+                            ? 'Deriving your keys…'
+                            : 'Verifying your device…'}
+                    </p>
                     <p className="mt-2 text-sm text-muted-foreground">
                         This takes a few seconds and runs entirely on your
                         device.
                     </p>
+                    {step === 'proving' && (
+                        <p className="mt-2 font-mono text-sm tabular-nums text-muted-foreground">
+                            {(provingMs / 1000).toFixed(1)}s
+                        </p>
+                    )}
                 </div>
             </div>
         );
@@ -222,6 +260,8 @@ export default function RegisterForm({
                         >
                             Register
                         </Button>
+
+                        {powStatusLine}
                     </>
                 )}
 
@@ -231,6 +271,7 @@ export default function RegisterForm({
                             <p className="text-center text-muted-foreground">
                                 Creating your account…
                             </p>
+                            {powReadout}
                         </CardContent>
                     </Card>
                 )}
@@ -244,6 +285,7 @@ export default function RegisterForm({
                             <p className="text-center text-sm text-muted-foreground">
                                 Redirecting…
                             </p>
+                            {powReadout}
                         </CardContent>
                     </Card>
                 )}

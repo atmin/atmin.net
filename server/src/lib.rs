@@ -20,6 +20,7 @@ pub mod logging;
 pub mod media_quota;
 pub mod model;
 pub mod paths;
+pub mod pow;
 pub mod profile;
 pub mod reserved;
 pub mod routes;

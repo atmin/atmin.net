@@ -119,6 +119,7 @@ staging and production):
 |----------|-------------|
 | `ROCKET_ADDRESS` / `ROCKET_PORT` | bind address/port — baked to `0.0.0.0:8080` in the image (Dockerfile); override only if the platform routes to a different port |
 | `ROCKET_LOG_LEVEL` | optional log verbosity: `off` \| `critical` (warn+) \| `normal` (default — request access log + warnings) \| `debug` (also Rocket routing + dependency logs, for tracing a request) |
+| `LOG_BODIES` | **dev/debug only — never production.** When `1`/`true`, logs request and response **bodies** of `/v1/` calls (`msg=request_body` / `msg=response_body`, capped, SSE skipped). Off by default. Handy with `make dev`: `LOG_BODIES=1 make dev`. |
 | `SERVER_SECRET` | HMAC secret for token signing |
 | `S3_ENDPOINT` | S3-compatible endpoint URL |
 | `S3_PUBLIC_ENDPOINT` | optional override for presigned-URL host |
@@ -127,6 +128,7 @@ staging and production):
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | bucket credentials |
 | `CLEANUP_INACTIVE_DAYS` | cleanup job only — inactive-user deletion threshold (default `180`) |
 | `CLEANUP_BATCH_SIZE` | cleanup job only — max users deleted per run (default `100`) |
+| `DANGEROUSLY_DISABLE_REGISTRATION_POW` | **test/e2e only — never production.** Disables the registration proof-of-work ([ADR-0020](decisions/adr-0020-registration-proof-of-work.md)) only when set to the exact magic value `yes-i-am-the-e2e-suite`; any other value or unset leaves it on (fail-closed). Boot logs a loud warning when off. |
 
 ## Deployment
 
