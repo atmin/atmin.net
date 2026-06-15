@@ -27,6 +27,8 @@ which gets its own task/ADR when native is committed.
 
 1. **[archive-ingest-cache](archive-ingest-cache.md)** — Stop re-downloading and re-decrypting the full message archive on every refresh. The archive sync cursor goes stale on every compaction, so the common path is a cold re-download of history already materialized in IndexedDB — the dominant cold-start cost on slow connections. Client-only; no protocol change. Correctness boundary (don't drop late-keyed messages) is the careful part.
 
-2. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+2. **[lazy-load-media](lazy-load-media.md)** — Fetch chat attachments on scroll-into-view instead of all-at-once on chat open. Client-only, no new dependency; the cheap half of the slow-chat-open problem (the other half — full-res-only images — is a separate preview/thumbnail task). Pairs naturally with the open-at-bottom scroll behaviour.
 
-3. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+3. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+
+4. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
