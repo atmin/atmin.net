@@ -10,12 +10,15 @@
  * - 'sync_cursors' store: Persist sync cursors for incremental inbox fetching
  * - 'pending_key_backups' store: Session keys whose backup upload failed,
  *   queued for retry on the next sync (I10 — no silent backup loss)
+ * - 'ingested_archives' store: Full S3 keys of inbox archives whose every
+ *   message is durably materialized in IndexedDB — safe to skip re-downloading
+ *   on the next sync (archive-ingest cache)
  */
 
 import { isAmendment } from './payload';
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
 const CONVERSATIONS_STORE = 'conversations';
@@ -26,6 +29,7 @@ const MEGOLM_KEY_SHARES_STORE = 'megolm_key_shares';
 const SYNC_CURSORS_STORE = 'sync_cursors';
 const BACKUP_KEYS_STORE = 'backup_keys_by_version';
 const PENDING_KEY_BACKUPS_STORE = 'pending_key_backups';
+const INGESTED_ARCHIVES_STORE = 'ingested_archives';
 
 export interface StoredOutboundSession {
     id: 'current';
@@ -83,6 +87,17 @@ export interface StoredSyncCursor {
 export interface StoredPendingKeyBackup {
     sessionId: string;
     sessionKeyB64: string;
+}
+
+/**
+ * An inbox archive whose every envelope is durably materialized in IndexedDB
+ * (or is a non-message). Its presence here means the next sync may skip
+ * downloading + decrypting that archive entirely. Keyed by the full S3 key,
+ * which already contains the `{uid}` segment — no userId namespacing needed.
+ */
+export interface StoredIngestedArchive {
+    key: string; // full S3 key, e.g. "inbox/U1/archive/2026-06-14-01HW…"
+    ingestedAt: number; // ms epoch — for optional pruning, not correctness
 }
 
 function awaitTx(tx: IDBTransaction): Promise<void> {
@@ -215,6 +230,16 @@ async function openDB(): Promise<IDBDatabase> {
             ) {
                 database.createObjectStore(PENDING_KEY_BACKUPS_STORE, {
                     keyPath: 'sessionId',
+                });
+            }
+
+            // v8: Inbox archives fully materialized in IDB — skip re-fetching
+            // them on the next sync (archive-ingest cache). Empty after the
+            // upgrade, so the first post-upgrade sync re-downloads the full
+            // archive once to populate it.
+            if (!database.objectStoreNames.contains(INGESTED_ARCHIVES_STORE)) {
+                database.createObjectStore(INGESTED_ARCHIVES_STORE, {
+                    keyPath: 'key',
                 });
             }
         };
@@ -435,6 +460,22 @@ export async function loadMessages(userId: string): Promise<StoredMessage[]> {
         [userId, Number.MAX_SAFE_INTEGER],
     );
     return awaitReq<StoredMessage[]>(index.getAll(range));
+}
+
+/**
+ * The set of msg_ids already stored for a user, read keys-only via the
+ * `userId` index — does not deserialize message bodies. Used to seed the
+ * sync dedup set so already-materialized messages are neither re-decrypted
+ * nor counted as "missing" when their archive is (re-)downloaded.
+ */
+export async function loadMessageIds(userId: string): Promise<Set<string>> {
+    const database = await openDB();
+    const tx = database.transaction(MESSAGES_STORE, 'readonly');
+    const index = tx.objectStore(MESSAGES_STORE).index('userId');
+    const ids = await awaitReq<IDBValidKey[]>(
+        index.getAllKeys(IDBKeyRange.only(userId)),
+    );
+    return new Set(ids as string[]);
 }
 
 export async function getLatestTimestamp(userId: string): Promise<number> {
@@ -681,5 +722,40 @@ export async function clearSyncCursors(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(SYNC_CURSORS_STORE, 'readwrite');
     tx.objectStore(SYNC_CURSORS_STORE).clear();
+    return awaitTx(tx);
+}
+
+// ── Ingested archives (archive-ingest cache) ──────────────────────
+
+/**
+ * Mark an inbox archive as fully materialized. The caller must only invoke
+ * this *after* the archive's messages are durably persisted (saveMessages),
+ * and only when no envelope was skipped for a recoverable reason — otherwise
+ * a not-yet-decryptable message would be lost forever to the skip.
+ */
+export async function markArchiveIngested(key: string): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(INGESTED_ARCHIVES_STORE, 'readwrite');
+    tx.objectStore(INGESTED_ARCHIVES_STORE).put({
+        key,
+        ingestedAt: Date.now(),
+    } satisfies StoredIngestedArchive);
+    return awaitTx(tx);
+}
+
+/** Full S3 keys of every archive recorded as ingested. */
+export async function loadIngestedArchiveKeys(): Promise<Set<string>> {
+    const database = await openDB();
+    const tx = database.transaction(INGESTED_ARCHIVES_STORE, 'readonly');
+    const keys = await awaitReq<IDBValidKey[]>(
+        tx.objectStore(INGESTED_ARCHIVES_STORE).getAllKeys(),
+    );
+    return new Set(keys as string[]);
+}
+
+export async function clearIngestedArchives(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(INGESTED_ARCHIVES_STORE, 'readwrite');
+    tx.objectStore(INGESTED_ARCHIVES_STORE).clear();
     return awaitTx(tx);
 }

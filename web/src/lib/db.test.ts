@@ -2,6 +2,7 @@ import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
     clearInboundSessions,
+    clearIngestedArchives,
     clearKeyShares,
     clearMessages,
     clearOutboundSession,
@@ -13,9 +14,12 @@ import {
     loadAllContacts,
     loadConversations,
     loadInboundSession,
+    loadIngestedArchiveKeys,
+    loadMessageIds,
     loadMessages,
     loadOutboundSession,
     loadSyncCursor,
+    markArchiveIngested,
     recordKeyShare,
     saveContact,
     saveInboundSession,
@@ -558,6 +562,82 @@ describe('db - Sync cursors', () => {
 
         expect(await loadSyncCursor('inbox/user1/live/')).toBeUndefined();
         expect(await loadSyncCursor('inbox/user2/live/')).toBeUndefined();
+    });
+});
+
+describe('db - loadMessageIds', () => {
+    const userId = '01TEST123USER456';
+    const mk = (id: string) => ({
+        id,
+        conversationId: `self:${userId}`,
+        fromUser: userId,
+        fromDevice: 'device-001',
+        text: `body ${id}`,
+        timestamp: new Date('2024-01-01T10:00:00Z'),
+    });
+
+    it('returns the set of stored msg_ids for a user', async () => {
+        await saveMessages(userId, [mk('msg-a'), mk('msg-b'), mk('msg-c')]);
+
+        const ids = await loadMessageIds(userId);
+        expect(ids).toBeInstanceOf(Set);
+        expect([...ids].sort()).toEqual(['msg-a', 'msg-b', 'msg-c']);
+    });
+
+    it('is scoped per user and empty for an unknown user', async () => {
+        await saveMessages(userId, [mk('msg-a')]);
+        await saveMessages('other-user', [
+            {
+                id: 'msg-z',
+                conversationId: 'self:other-user',
+                fromUser: 'other-user',
+                fromDevice: 'd',
+                text: 'z',
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+        ]);
+
+        expect([...(await loadMessageIds(userId))]).toEqual(['msg-a']);
+        expect([...(await loadMessageIds('other-user'))]).toEqual(['msg-z']);
+        expect((await loadMessageIds('nobody')).size).toBe(0);
+    });
+});
+
+describe('db - Ingested archives', () => {
+    const k1 = 'inbox/U1/archive/2026-06-14-01HWAAA';
+    const k2 = 'inbox/U1/archive/2026-06-15-01HWBBB';
+
+    it('marks and loads ingested archive keys', async () => {
+        await markArchiveIngested(k1);
+        await markArchiveIngested(k2);
+
+        const keys = await loadIngestedArchiveKeys();
+        expect(keys).toBeInstanceOf(Set);
+        expect(keys.has(k1)).toBe(true);
+        expect(keys.has(k2)).toBe(true);
+        expect(keys.size).toBe(2);
+    });
+
+    it('is idempotent — re-marking the same key does not duplicate', async () => {
+        await markArchiveIngested(k1);
+        await markArchiveIngested(k1);
+
+        const keys = await loadIngestedArchiveKeys();
+        expect(keys.size).toBe(1);
+        expect(keys.has(k1)).toBe(true);
+    });
+
+    it('returns an empty set before anything is ingested', async () => {
+        expect((await loadIngestedArchiveKeys()).size).toBe(0);
+    });
+
+    it('clears all ingested archives', async () => {
+        await markArchiveIngested(k1);
+        await markArchiveIngested(k2);
+
+        await clearIngestedArchives();
+
+        expect((await loadIngestedArchiveKeys()).size).toBe(0);
     });
 });
 

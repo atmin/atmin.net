@@ -359,6 +359,27 @@ export function storeList(
     return request('GET', `/v1/store/list?${params}`, { token });
 }
 
+/**
+ * List **every** key under a prefix, paging through all result pages.
+ * `storeList` returns at most one server page (`STORE_LIST_LIMIT` keys) plus a
+ * `next_cursor`; loop, passing the cursor back as S3 `start-after`, until the
+ * server reports no more pages (empty `next_cursor`). The cursor is the last
+ * key of each page, so it strictly advances — the loop always terminates.
+ */
+export async function storeListAll(
+    token: string,
+    prefix: string,
+): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor: string | undefined;
+    do {
+        const page = await storeList(token, prefix, cursor);
+        keys.push(...page.keys);
+        cursor = page.next_cursor || undefined;
+    } while (cursor);
+    return keys;
+}
+
 export async function storeGet(
     token: string,
     key: string,

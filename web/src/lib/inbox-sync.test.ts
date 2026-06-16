@@ -5,9 +5,10 @@ vi.mock('./messaging', () => ({
 }));
 vi.mock('./db', () => ({
     saveMessages: vi.fn(),
+    markArchiveIngested: vi.fn(),
 }));
 
-import { saveMessages } from './db';
+import { markArchiveIngested, saveMessages } from './db';
 import {
     _resetInboxListeners,
     onInboxUpdated,
@@ -17,6 +18,15 @@ import { syncMessages } from './messaging';
 
 const syncMessagesMock = vi.mocked(syncMessages);
 const saveMessagesMock = vi.mocked(saveMessages);
+const markArchiveIngestedMock = vi.mocked(markArchiveIngested);
+
+// Build the SyncResult shape syncMessages now resolves to.
+function syncResult(
+    messages: Awaited<ReturnType<typeof syncMessages>>['messages'] = [],
+    ingestedCandidates: string[] = [],
+) {
+    return { messages, ingestedCandidates };
+}
 
 // Minimal Session stub; only fields syncAndPublish forwards into syncMessages.
 const fakeSession = {
@@ -35,6 +45,8 @@ beforeEach(() => {
     _resetInboxListeners();
     syncMessagesMock.mockReset();
     saveMessagesMock.mockReset();
+    markArchiveIngestedMock.mockReset();
+    markArchiveIngestedMock.mockResolvedValue(undefined);
 });
 afterEach(() => {
     _resetInboxListeners();
@@ -50,7 +62,7 @@ describe('syncAndPublish', () => {
             text: 'hi',
             timestamp: new Date(0),
         };
-        syncMessagesMock.mockResolvedValue([msg]);
+        syncMessagesMock.mockResolvedValue(syncResult([msg]));
         saveMessagesMock.mockResolvedValue(undefined);
 
         const listener = vi.fn();
@@ -70,8 +82,50 @@ describe('syncAndPublish', () => {
         expect(listener).toHaveBeenCalledTimes(1);
     });
 
+    it('marks ingested candidates after messages are persisted', async () => {
+        const msg = {
+            id: 'm1',
+            conversationId: 'dm:a:b',
+            fromUser: 'a',
+            fromDevice: 'd',
+            text: 'hi',
+            timestamp: new Date(0),
+        };
+        const k1 = 'inbox/u/archive/2025-01-10-01A';
+        const k2 = 'inbox/u/archive/2025-01-15-01B';
+        syncMessagesMock.mockResolvedValue(syncResult([msg], [k1, k2]));
+
+        const order: string[] = [];
+        saveMessagesMock.mockImplementation(async () => {
+            order.push('save');
+        });
+        markArchiveIngestedMock.mockImplementation(async (key: string) => {
+            order.push(`mark:${key}`);
+        });
+
+        await syncAndPublish(fakeSession, fakeSessionManager);
+
+        expect(markArchiveIngestedMock).toHaveBeenCalledTimes(2);
+        expect(markArchiveIngestedMock).toHaveBeenCalledWith(k1);
+        expect(markArchiveIngestedMock).toHaveBeenCalledWith(k2);
+        // Persist must happen before any mark.
+        expect(order).toEqual(['save', `mark:${k1}`, `mark:${k2}`]);
+    });
+
+    it('marks candidates even when there are no new messages (save skipped)', async () => {
+        const k1 = 'inbox/u/archive/2025-01-10-01A';
+        // An archive whose every message is already materialized in IDB yields
+        // zero new messages but is still a valid ingested candidate.
+        syncMessagesMock.mockResolvedValue(syncResult([], [k1]));
+
+        await syncAndPublish(fakeSession, fakeSessionManager);
+
+        expect(saveMessagesMock).not.toHaveBeenCalled();
+        expect(markArchiveIngestedMock).toHaveBeenCalledWith(k1);
+    });
+
     it('notifies even when sync returns no new messages (skips save)', async () => {
-        syncMessagesMock.mockResolvedValue([]);
+        syncMessagesMock.mockResolvedValue(syncResult());
         const listener = vi.fn();
         onInboxUpdated(listener);
 
@@ -91,20 +145,26 @@ describe('syncAndPublish', () => {
         ).resolves.toBeUndefined();
 
         expect(saveMessagesMock).not.toHaveBeenCalled();
+        expect(markArchiveIngestedMock).not.toHaveBeenCalled();
         expect(listener).not.toHaveBeenCalled();
     });
 
     it('swallows save errors and does NOT notify (stale notify would mislead)', async () => {
-        syncMessagesMock.mockResolvedValue([
-            {
-                id: 'm1',
-                conversationId: 'dm:a:b',
-                fromUser: 'a',
-                fromDevice: 'd',
-                text: 'hi',
-                timestamp: new Date(0),
-            },
-        ]);
+        syncMessagesMock.mockResolvedValue(
+            syncResult(
+                [
+                    {
+                        id: 'm1',
+                        conversationId: 'dm:a:b',
+                        fromUser: 'a',
+                        fromDevice: 'd',
+                        text: 'hi',
+                        timestamp: new Date(0),
+                    },
+                ],
+                ['inbox/u/archive/2025-01-15-01ARCHIVE'],
+            ),
+        );
         saveMessagesMock.mockRejectedValue(new Error('idb down'));
         const listener = vi.fn();
         onInboxUpdated(listener);
@@ -112,10 +172,13 @@ describe('syncAndPublish', () => {
         await syncAndPublish(fakeSession, fakeSessionManager);
 
         expect(listener).not.toHaveBeenCalled();
+        // Save failed → the archive must NOT be recorded as ingested, else its
+        // messages would be skipped forever despite never landing.
+        expect(markArchiveIngestedMock).not.toHaveBeenCalled();
     });
 
     it('isolates a throwing listener so others still receive the notification', async () => {
-        syncMessagesMock.mockResolvedValue([]);
+        syncMessagesMock.mockResolvedValue(syncResult());
         const bad = vi.fn(() => {
             throw new Error('listener boom');
         });
@@ -132,7 +195,7 @@ describe('syncAndPublish', () => {
 
 describe('onInboxUpdated', () => {
     it('returns an unsubscribe function that stops further notifications', async () => {
-        syncMessagesMock.mockResolvedValue([]);
+        syncMessagesMock.mockResolvedValue(syncResult());
         const listener = vi.fn();
         const unsubscribe = onInboxUpdated(listener);
 

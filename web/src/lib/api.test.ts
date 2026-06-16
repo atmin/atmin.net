@@ -12,6 +12,7 @@ import {
     send,
     storeDelete,
     storeGet,
+    storeListAll,
     updateProfile,
 } from './api';
 import type { Envelope } from './envelope';
@@ -660,6 +661,59 @@ describe('api - storeDelete()', () => {
         await expect(
             storeDelete('tok', 'media/U2/01HWQA'),
         ).rejects.toMatchObject({ status: 403 });
+    });
+});
+
+describe('api - storeListAll()', () => {
+    beforeEach(() => {
+        resetFetchMock();
+    });
+
+    it('returns a single page when not truncated', async () => {
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({ keys: ['a', 'b'], next_cursor: '' }) as Response,
+        );
+
+        const keys = await storeListAll('tok', 'inbox/U1/archive/');
+
+        expect(keys).toEqual(['a', 'b']);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock.mock.calls[0][0]).not.toContain('cursor=');
+    });
+
+    it('pages through every result page, threading next_cursor as start-after', async () => {
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({
+                keys: ['a', 'b'],
+                next_cursor: 'b',
+            }) as Response,
+        );
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({
+                keys: ['c', 'd'],
+                next_cursor: 'd',
+            }) as Response,
+        );
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({ keys: ['e'], next_cursor: '' }) as Response,
+        );
+
+        const keys = await storeListAll('tok', 'inbox/U1/archive/');
+
+        expect(keys).toEqual(['a', 'b', 'c', 'd', 'e']);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock.mock.calls[0][0]).not.toContain('cursor=');
+        expect(fetchMock.mock.calls[1][0]).toContain('cursor=b');
+        expect(fetchMock.mock.calls[2][0]).toContain('cursor=d');
+    });
+
+    it('returns an empty list for an empty prefix', async () => {
+        fetchMock.mockResolvedValueOnce(
+            mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+        );
+
+        expect(await storeListAll('tok', 'inbox/U1/archive/')).toEqual([]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 });
 

@@ -6,6 +6,7 @@ import {
     storeCompact,
     storeGet,
     storeList,
+    storeListAll,
 } from './api';
 import {
     base64UrlDecode,
@@ -18,6 +19,8 @@ import {
     deletePendingKeyBackup,
     enqueuePendingKeyBackup,
     listPendingKeyBackups,
+    loadIngestedArchiveKeys,
+    loadMessageIds,
     loadSyncCursor,
     saveSyncCursor,
 } from './db';
@@ -214,6 +217,14 @@ export interface DecryptedMessage {
     timestamp: Date;
 }
 
+export interface SyncResult {
+    messages: DecryptedMessage[];
+    // Archive S3 keys whose every message is now materialized. The caller must
+    // mark these ingested ONLY after `messages` are durably persisted — see
+    // syncAndPublish in inbox-sync.ts.
+    ingestedCandidates: string[];
+}
+
 async function processEnvelopes(
     envelopes: Array<{ key: string; envelope: Envelope }>,
     userId: string,
@@ -223,7 +234,17 @@ async function processEnvelopes(
     token?: string,
     backupKey?: CryptoKey,
     keyVersion?: number,
-): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
+): Promise<{
+    messages: DecryptedMessage[];
+    advancedInbounds: Set<string>;
+    // Count of envelopes skipped because their Megolm session is not yet known
+    // (the key may arrive later via the backup chain — ADR-0012 / I6 / I9).
+    // A caller deciding whether an archive is fully materialized must treat a
+    // non-zero count as "not yet" — re-fetch next sync. A *decrypt failure* on
+    // a known session does NOT count here: it is recovered via the key-backup
+    // chain, not via a re-download, so it must not block ingestion.
+    recoverableSkips: number;
+}> {
     if (sessionManager) {
         for (const { key, envelope } of envelopes) {
             if (envelope.content_type !== 'megolm.key_share') continue;
@@ -290,6 +311,7 @@ async function processEnvelopes(
 
     const messages: DecryptedMessage[] = [];
     const advancedInbounds = new Set<string>();
+    let recoverableSkips = 0;
     for (const { key, envelope } of envelopes) {
         try {
             if (envelope.content_type === 'megolm.key_share') continue;
@@ -302,6 +324,10 @@ async function processEnvelopes(
                     console.warn(
                         `Unknown Megolm session ${sessionId} for ${key}`,
                     );
+                    // Recoverable: the session key may arrive later via the
+                    // backup chain. Flag it so the archive is not yet treated
+                    // as ingested and gets re-fetched once the key is restored.
+                    recoverableSkips++;
                     continue;
                 }
                 const text = inbound.decrypt(envelope.payload.ciphertext);
@@ -319,11 +345,15 @@ async function processEnvelopes(
                 seenMsgIds.add(envelope.msg_id);
             }
         } catch (error) {
+            // Decrypt failure on a *known* session — the I6/I9 belt-and-
+            // suspenders path. Recovered via the key-backup chain, not a
+            // re-download, so it must NOT count as a recoverable skip and must
+            // NOT block the archive from being marked ingested.
             console.error(`Failed to decrypt message ${key}:`, error);
         }
     }
 
-    return { messages, advancedInbounds };
+    return { messages, advancedInbounds, recoverableSkips };
 }
 
 // Fetch and decrypt new live inbox messages. Returns decrypted messages,
@@ -383,8 +413,12 @@ export async function syncLive(
     return { ...result, lastKey, prefix };
 }
 
-// Fetch and decrypt messages from CBOR archive blobs, deduplicating against
-// already-seen live message IDs. Manages its own archive cursor.
+// Fetch and decrypt messages from CBOR archive blobs, per-archive, skipping
+// any archive already recorded as fully ingested (no GET at all). For each
+// archive that is downloaded, decides whether it is now fully materialized and
+// returns it as an *ingested candidate* — the caller marks it ingested only
+// after the messages are durably persisted (see inbox-sync.ts). Lists the full
+// prefix rather than trusting the (compaction-fragile) high-water cursor.
 export async function syncArchive(
     token: string,
     userId: string,
@@ -393,51 +427,66 @@ export async function syncArchive(
     seenMsgIds: Set<string>,
     backupKey?: CryptoKey,
     keyVersion?: number,
-): Promise<{ messages: DecryptedMessage[]; advancedInbounds: Set<string> }> {
+): Promise<{
+    messages: DecryptedMessage[];
+    advancedInbounds: Set<string>;
+    ingestedCandidates: string[];
+}> {
     const archivePrefix = path.inboxArchive(userId);
-    const storedCursor = await loadSyncCursor(archivePrefix);
+    const ingested = await loadIngestedArchiveKeys();
 
-    let listRes: StoreListResponse;
+    let keys: string[];
     try {
-        listRes = await storeList(token, archivePrefix, storedCursor);
-    } catch {
-        try {
-            listRes = await storeList(token, archivePrefix);
-        } catch {
-            return { messages: [], advancedInbounds: new Set() };
-        }
+        keys = await storeListAll(token, archivePrefix);
+    } catch (error) {
+        console.error('Failed to list archive prefix:', error);
+        return {
+            messages: [],
+            advancedInbounds: new Set(),
+            ingestedCandidates: [],
+        };
     }
 
-    if (!listRes?.keys?.length) {
-        return { messages: [], advancedInbounds: new Set() };
-    }
+    const messages: DecryptedMessage[] = [];
+    const advancedInbounds = new Set<string>();
+    const ingestedCandidates: string[] = [];
 
-    const allEnvelopes: Array<{ key: string; envelope: Envelope }> = [];
-    for (const key of listRes.keys) {
+    // Process in listing (chronological) order so a key_share archived before
+    // the message it unlocks is applied first — processEnvelopes also does a
+    // key-shares-first pass within each archive.
+    for (const key of keys) {
+        if (ingested.has(key)) continue; // already materialized — skip the GET
+
+        let decoded: Envelope[];
         try {
             const blob = await storeGet(token, key);
-            const decoded = cborDecode(new Uint8Array(blob)) as Envelope[];
-            for (const envelope of decoded) {
-                allEnvelopes.push({ key, envelope });
-            }
+            decoded = cborDecode(new Uint8Array(blob)) as Envelope[];
         } catch (error) {
+            // Download/decode failed → not a candidate; re-fetched next sync.
             console.error(`Failed to fetch/decode archive ${key}:`, error);
+            continue;
         }
+
+        const result = await processEnvelopes(
+            decoded.map((envelope) => ({ key, envelope })),
+            userId,
+            sharingPrivateKey,
+            sessionManager,
+            seenMsgIds,
+            token,
+            backupKey,
+            keyVersion,
+        );
+        messages.push(...result.messages);
+        for (const sid of result.advancedInbounds) advancedInbounds.add(sid);
+
+        // Candidate only if every envelope is materialized or a non-message
+        // (corollary 1 + 2). A recoverable skip (unknown session) means a key
+        // may still arrive — leave it un-ingested so it is re-fetched.
+        if (result.recoverableSkips === 0) ingestedCandidates.push(key);
     }
 
-    const lastKey = listRes.keys[listRes.keys.length - 1];
-    await saveSyncCursor(archivePrefix, lastKey);
-
-    return processEnvelopes(
-        allEnvelopes,
-        userId,
-        sharingPrivateKey,
-        sessionManager,
-        seenMsgIds,
-        token,
-        backupKey,
-        keyVersion,
-    );
+    return { messages, advancedInbounds, ingestedCandidates };
 }
 
 export async function persistInbounds(
@@ -460,7 +509,7 @@ function triggerCompaction(
     storeCompact(token, path.keysLive(userId), '~').catch(console.error);
 }
 
-let syncInFlight: Promise<DecryptedMessage[]> | null = null;
+let syncInFlight: Promise<SyncResult> | null = null;
 
 export function syncMessages(
     token: string,
@@ -469,7 +518,7 @@ export function syncMessages(
     sessionManager?: SessionManager,
     backupKey?: CryptoKey,
     keyVersion?: number,
-): Promise<DecryptedMessage[]> {
+): Promise<SyncResult> {
     if (syncInFlight) return syncInFlight;
     syncInFlight = fetchMessages(
         token,
@@ -524,7 +573,7 @@ export async function fetchMessages(
     sessionManager?: SessionManager,
     backupKey?: CryptoKey,
     keyVersion?: number,
-): Promise<DecryptedMessage[]> {
+): Promise<SyncResult> {
     const live = await syncLive(
         token,
         userId,
@@ -534,7 +583,13 @@ export async function fetchMessages(
         keyVersion,
     );
 
-    const seenMsgIds = new Set(live.messages.map((m) => m.id));
+    // Seed dedup from messages already in IDB (keys-only read), then add this
+    // sync's live IDs. This skips re-decrypting any already-stored message
+    // inside a re-downloaded (compacted/merged) archive, and makes the
+    // per-archive "fully materialized" check meaningful — an envelope whose
+    // msg_id is already stored counts as materialized, not as a skip.
+    const seenMsgIds = await loadMessageIds(userId);
+    for (const m of live.messages) seenMsgIds.add(m.id);
     const archive = await syncArchive(
         token,
         userId,
@@ -566,7 +621,10 @@ export async function fetchMessages(
         );
     }
 
-    return [...live.messages, ...archive.messages].sort(
-        (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
-    );
+    return {
+        messages: [...live.messages, ...archive.messages].sort(
+            (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+        ),
+        ingestedCandidates: archive.ingestedCandidates,
+    };
 }

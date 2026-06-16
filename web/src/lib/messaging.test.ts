@@ -13,11 +13,15 @@ import {
 } from './crypto';
 import {
     clearInboundSessions,
+    clearIngestedArchives,
     clearKeyShares,
+    clearMessages,
     clearOutboundSession,
     clearPendingKeyBackups,
     clearSyncCursors,
     loadSyncCursor,
+    markArchiveIngested,
+    saveMessages,
     saveSyncCursor,
 } from './db';
 import { createSessionManager } from './megolm-session';
@@ -89,6 +93,8 @@ describe('messaging - Megolm send/receive', () => {
         await clearKeyShares();
         await clearSyncCursors();
         await clearPendingKeyBackups();
+        await clearIngestedArchives();
+        await clearMessages();
     });
 
     describe('sendTextMessage', () => {
@@ -247,7 +253,7 @@ describe('messaging - Megolm send/receive', () => {
                     ) as Response,
                 );
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -292,7 +298,7 @@ describe('messaging - Megolm send/receive', () => {
                 ) as Response,
             );
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -448,7 +454,7 @@ describe('messaging - Megolm send/receive', () => {
                     ) as Response,
                 );
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -570,7 +576,7 @@ describe('messaging - Megolm send/receive', () => {
                     ) as Response,
                 );
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -681,7 +687,7 @@ describe('messaging - Megolm send/receive', () => {
                 mockArrayBufferResponse(archiveCbor) as Response,
             );
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -779,7 +785,7 @@ describe('messaging - Megolm send/receive', () => {
                 mockArrayBufferResponse(archiveCbor) as Response,
             );
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -815,7 +821,7 @@ describe('messaging - Megolm send/receive', () => {
                 }),
             } as unknown as Response);
 
-            const messages = await fetchMessages(
+            const { messages } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
@@ -826,11 +832,270 @@ describe('messaging - Megolm send/receive', () => {
             mgr.destroy();
         });
 
-        it('persists archive cursor after fetching archives', async () => {
+        it('skips downloading an archive already recorded as ingested', async () => {
             const { encode: cborEncode } = await import('cbor-x');
             const mgr = await createSessionManager(wasm);
             const archivePrefix = `inbox/${toUserId}/archive/`;
-            const archiveKey = `${archivePrefix}2026-01-15-01ARCHIVEID1`;
+            const ingestedKey = `${archivePrefix}2025-01-10-01INGESTED`;
+            const freshKey = `${archivePrefix}2025-01-15-01FRESH`;
+
+            // Pre-record the older archive as already fully materialized.
+            await markArchiveIngested(ingestedKey);
+
+            // Live: empty.
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+            );
+            // Archive listing returns both keys.
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [ingestedKey, freshKey],
+                    next_cursor: '',
+                }) as Response,
+            );
+            // Only the fresh archive should be GET'd. Empty CBOR is fine.
+            const emptyCbor = new Uint8Array(cborEncode([])).buffer;
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(emptyCbor) as Response,
+            );
+
+            const { ingestedCandidates } = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            const objectCalls = fetchMock.mock.calls.filter((c) =>
+                String(c[0]).includes('/v1/store/object'),
+            );
+            expect(
+                objectCalls.some((c) =>
+                    String(c[0]).includes(encodeURIComponent(ingestedKey)),
+                ),
+            ).toBe(false);
+            expect(
+                objectCalls.some((c) =>
+                    String(c[0]).includes(encodeURIComponent(freshKey)),
+                ),
+            ).toBe(true);
+            // The freshly-downloaded archive has no recoverable skips → candidate.
+            expect(ingestedCandidates).toContain(freshKey);
+            expect(ingestedCandidates).not.toContain(ingestedKey);
+
+            mgr.destroy();
+        });
+
+        it('enumerates an archive prefix spanning multiple list pages', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+            const archivePrefix = `inbox/${toUserId}/archive/`;
+            const key1 = `${archivePrefix}2025-01-10-01PAGE1`;
+            const key2 = `${archivePrefix}2025-01-15-01PAGE2`;
+
+            // Live: empty.
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+            );
+            // Archive listing page 1 (truncated: next_cursor set) then page 2.
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [key1],
+                    next_cursor: key1,
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [key2], next_cursor: '' }) as Response,
+            );
+            const emptyCbor = new Uint8Array(cborEncode([])).buffer;
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(emptyCbor) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(emptyCbor) as Response,
+            );
+
+            const { ingestedCandidates } = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            const objectCalls = fetchMock.mock.calls.filter((c) =>
+                String(c[0]).includes('/v1/store/object'),
+            );
+            // Both archives across both pages were fetched.
+            expect(
+                objectCalls.some((c) =>
+                    String(c[0]).includes(encodeURIComponent(key1)),
+                ),
+            ).toBe(true);
+            expect(
+                objectCalls.some((c) =>
+                    String(c[0]).includes(encodeURIComponent(key2)),
+                ),
+            ).toBe(true);
+            // The second list page carried the page-1 cursor (S3 start-after).
+            const listCalls = fetchMock.mock.calls.filter((c) =>
+                String(c[0]).includes('/v1/store/list'),
+            );
+            expect(
+                listCalls.some((c) =>
+                    String(c[0]).includes(`cursor=${encodeURIComponent(key1)}`),
+                ),
+            ).toBe(true);
+            expect(ingestedCandidates).toEqual(
+                expect.arrayContaining([key1, key2]),
+            );
+
+            mgr.destroy();
+        });
+
+        it('does not mark an archive ingested while its session is unknown, then does once it is known', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+            const archivePrefix = `inbox/${toUserId}/archive/`;
+            const archiveKey = `${archivePrefix}2025-01-15-01UNKNOWNSESS`;
+
+            const sender = new MegolmOutbound();
+            const sessionKey = sender.session_key();
+            const { eciesEncrypt } = await import('./crypto');
+            const encryptedKey = await eciesEncrypt(
+                recipientKeys.sharing.publicKey,
+                new TextEncoder().encode(sessionKey),
+            );
+
+            const msgEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-unknown-sess',
+                content_type: 'megolm.message',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Locked until key arrives'),
+                },
+            };
+            const archiveCbor = new Uint8Array(cborEncode([msgEnvelope]))
+                .buffer;
+
+            // --- Sync 1: the session is unknown (no key share yet) ---
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [archiveKey],
+                    next_cursor: '',
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(archiveCbor) as Response,
+            );
+
+            const first = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            expect(first.messages).toHaveLength(0); // can't decrypt yet
+            expect(first.ingestedCandidates).not.toContain(archiveKey);
+
+            // --- Provide the session via a live key share, then sync again ---
+            const keyShareEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: 'msg-ks-late',
+                content_type: 'megolm.key_share',
+                sent_at: new Date(Date.now() - 1000).toISOString(),
+                payload: {
+                    ephemeral_key: base64UrlEncode(encryptedKey.ephemeralKey),
+                    iv: base64UrlEncode(encryptedKey.iv),
+                    ciphertext: base64UrlEncode(encryptedKey.ciphertext),
+                },
+            };
+
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [`inbox/${toUserId}/live/msg-ks-late`],
+                    next_cursor: '',
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(
+                    new TextEncoder().encode(JSON.stringify(keyShareEnvelope))
+                        .buffer,
+                ) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockJsonResponse({
+                    keys: [archiveKey],
+                    next_cursor: '',
+                }) as Response,
+            );
+            fetchMock.mockResolvedValueOnce(
+                mockArrayBufferResponse(archiveCbor) as Response,
+            );
+
+            const second = await fetchMessages(
+                token,
+                toUserId,
+                recipientKeys.sharing.privateKey,
+                mgr,
+            );
+
+            expect(second.messages.map((m) => m.text)).toContain(
+                'Locked until key arrives',
+            );
+            expect(second.ingestedCandidates).toContain(archiveKey);
+
+            sender.free();
+            mgr.destroy();
+        });
+
+        it('treats an already-stored msg_id as materialized even when its session is unknown', async () => {
+            const { encode: cborEncode } = await import('cbor-x');
+            const mgr = await createSessionManager(wasm);
+            const archivePrefix = `inbox/${toUserId}/archive/`;
+            const archiveKey = `${archivePrefix}2025-01-15-01STORED`;
+            const storedId = 'msg-already-stored';
+
+            // The message is already durable in IDB (decrypted on a prior run).
+            await saveMessages(toUserId, [
+                {
+                    id: storedId,
+                    conversationId: `dm:${fromUserId}:${toUserId}`,
+                    fromUser: fromUserId,
+                    fromDevice: fromDeviceId,
+                    text: 'Already stored',
+                    timestamp: new Date(),
+                },
+            ]);
+
+            // The archive re-includes that msg_id under a session we do NOT know.
+            const sender = new MegolmOutbound();
+            const msgEnvelope = {
+                v: 1,
+                to_user: toUserId,
+                from_user: fromUserId,
+                from_device: fromDeviceId,
+                msg_id: storedId,
+                content_type: 'megolm.message',
+                sent_at: new Date().toISOString(),
+                payload: {
+                    session_id: sender.session_id,
+                    ciphertext: sender.encrypt('Already stored'),
+                },
+            };
+            const archiveCbor = new Uint8Array(cborEncode([msgEnvelope]))
+                .buffer;
 
             fetchMock.mockResolvedValueOnce(
                 mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
@@ -841,95 +1106,24 @@ describe('messaging - Megolm send/receive', () => {
                     next_cursor: '',
                 }) as Response,
             );
-            const emptyCbor = new Uint8Array(cborEncode([])).buffer;
             fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(emptyCbor) as Response,
+                mockArrayBufferResponse(archiveCbor) as Response,
             );
 
-            await fetchMessages(
+            const { messages, ingestedCandidates } = await fetchMessages(
                 token,
                 toUserId,
                 recipientKeys.sharing.privateKey,
                 mgr,
             );
 
-            const cursor = await loadSyncCursor(archivePrefix);
-            expect(cursor).toBe(archiveKey);
+            // The stored msg_id is skipped at the dedup gate before the session
+            // check — so it is NOT a recoverable skip. The archive counts as
+            // fully materialized (candidate) and the message is not re-emitted.
+            expect(messages).toHaveLength(0);
+            expect(ingestedCandidates).toContain(archiveKey);
 
-            mgr.destroy();
-        });
-
-        it('passes stored archive cursor to storeList on subsequent syncs', async () => {
-            const mgr = await createSessionManager(wasm);
-            const archivePrefix = `inbox/${toUserId}/archive/`;
-            const priorArchiveKey = `${archivePrefix}2026-01-14-01ARCHIVEID0`;
-
-            await saveSyncCursor(archivePrefix, priorArchiveKey);
-
-            fetchMock.mockResolvedValueOnce(
-                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
-            );
-
-            await fetchMessages(
-                token,
-                toUserId,
-                recipientKeys.sharing.privateKey,
-                mgr,
-            );
-
-            expect(fetchMock.mock.calls[1][0]).toContain(
-                `cursor=${encodeURIComponent(priorArchiveKey)}`,
-            );
-
-            mgr.destroy();
-        });
-
-        it('falls back to full archive fetch when archive cursor is stale', async () => {
-            const { encode: cborEncode } = await import('cbor-x');
-            const mgr = await createSessionManager(wasm);
-            const archivePrefix = `inbox/${toUserId}/archive/`;
-            const staleKey = `${archivePrefix}2026-01-01-01STALEID`;
-            const freshArchiveKey = `${archivePrefix}2026-01-15-01ARCHIVEID1`;
-
-            await saveSyncCursor(archivePrefix, staleKey);
-
-            fetchMock.mockResolvedValueOnce(
-                mockJsonResponse({ keys: [], next_cursor: '' }) as Response,
-            );
-            fetchMock.mockResolvedValueOnce({
-                ok: false,
-                status: 500,
-                statusText: 'Internal Server Error',
-                headers: { get: () => 'application/json' },
-                json: async () => ({
-                    error: 'internal',
-                    message: 'Stale cursor',
-                }),
-            } as unknown as Response);
-            fetchMock.mockResolvedValueOnce(
-                mockJsonResponse({
-                    keys: [freshArchiveKey],
-                    next_cursor: '',
-                }) as Response,
-            );
-            const emptyCbor = new Uint8Array(cborEncode([])).buffer;
-            fetchMock.mockResolvedValueOnce(
-                mockArrayBufferResponse(emptyCbor) as Response,
-            );
-
-            await fetchMessages(
-                token,
-                toUserId,
-                recipientKeys.sharing.privateKey,
-                mgr,
-            );
-
-            expect(fetchMock.mock.calls[1][0]).toContain('cursor=');
-            expect(fetchMock.mock.calls[2][0]).not.toContain('cursor=');
-
-            const cursor = await loadSyncCursor(archivePrefix);
-            expect(cursor).toBe(freshArchiveKey);
-
+            sender.free();
             mgr.destroy();
         });
     });
@@ -1076,6 +1270,8 @@ describe('messaging - key-share backup', () => {
         await clearKeyShares();
         await clearSyncCursors();
         await clearPendingKeyBackups();
+        await clearIngestedArchives();
+        await clearMessages();
     });
 
     it('backs up received session key via storePresign on first key-share arrival', async () => {

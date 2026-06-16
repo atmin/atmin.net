@@ -14,7 +14,7 @@
 // notified.
 
 import type { Session } from './auth';
-import { saveMessages } from './db';
+import { markArchiveIngested, saveMessages } from './db';
 import type { SessionManager } from './megolm-session';
 import { syncMessages } from './messaging';
 
@@ -59,12 +59,25 @@ export async function syncAndPublish(
         return;
     }
 
-    if (synced.length > 0) {
+    if (synced.messages.length > 0) {
         try {
-            await saveMessages(session.userId, synced);
+            await saveMessages(session.userId, synced.messages);
         } catch (err) {
             console.error('Saving synced messages failed:', err);
             return;
+        }
+    }
+
+    // Messages are now durably persisted — only now is it safe to record their
+    // archives as ingested so the next sync skips re-downloading them. Marking
+    // before this point (or on a saveMessages failure) would risk skipping an
+    // archive whose messages never landed. Best-effort: a failure here costs
+    // only a future re-download, never a lost message.
+    for (const key of synced.ingestedCandidates) {
+        try {
+            await markArchiveIngested(key);
+        } catch (err) {
+            console.error(`Failed to mark archive ingested ${key}:`, err);
         }
     }
 
