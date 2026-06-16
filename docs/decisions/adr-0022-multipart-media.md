@@ -62,7 +62,9 @@ others as download chips).
 
 ### 2. Clean-break migration — no back-compat mirror
 
-A new client writes `attachments` and **does not** write a legacy `file`. This
+This break is a **Phase-2 (album) event** — Phase 1 stays additive on the single
+`file` and is fully backward-compatible (§8). When albums land, a new client
+writes `attachments` and **does not** write a legacy `file`. This
 is safe because **parsing happens at render time, not at store time**: the
 materializer decrypts the inner payload and persists it to IndexedDB as the raw
 string; `parseInner` ([payload.ts](../../web/src/lib/payload.ts)) runs only when
@@ -218,6 +220,32 @@ there. The device is trusted; the threat model is the server/network
 One property worth stating: a cached preview lets locally-retained history
 survive **after** the server purges the original under retention — the device's
 copy outlives server-side retention, by design.
+
+### 8. Rollout — additive Phase 1, clean break only with albums
+
+The album schema (§1) is the end state, but it is reached in two phases, and the
+**clean break (§2) is a Phase-2 event**, not paid up front:
+
+- **Phase 1 — single-image quality, fully additive.** Previews, optimized send,
+  metadata stripping, and dimensions all ship as **optional fields on the v0.1
+  single `file`** (`mime`, `width`, `height`, `optimized`, `preview`). No clean
+  break: an un-upgraded client ignores the new fields and renders the full image
+  exactly as before, so Phase 1 is **backward-compatible — nothing vanishes**.
+  Single images need no array, so none is introduced.
+- **Phase 2 — albums.** `file` → `attachments[]` (the §2 break) lands **together
+  with** the multi-select composer / per-image captions / grid that justify it.
+  The break is paid once, when the album payoff arrives — not for a lone image.
+- **No throwaway.** The legacy `file` reader (kept indefinitely, §2) reads the
+  Phase-1 additive fields too; Phase 2 lifts those same per-image fields into each
+  `attachments[]` entry. Each increment's code is reused by the next (the
+  downscale primitive, the multi-object delete, the media cache), so the staging
+  is cumulative, not scaffolding.
+
+Phase 1 itself is incremental — optimized+strip send, then conditional
+preview + preview-first display, then the local preview cache — each shippable
+on its own. Schema-free media wins (lazy-load + non-image chip, archive-ingest
+cache) are independent of all of the above and can land in any order. The
+detailed steps live in `tasks/`.
 
 ## Consequences
 

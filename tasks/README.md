@@ -27,8 +27,20 @@ which gets its own task/ADR when native is committed.
 
 1. **[archive-ingest-cache](archive-ingest-cache.md)** — Stop re-downloading and re-decrypting the full message archive on every refresh. The archive sync cursor goes stale on every compaction, so the common path is a cold re-download of history already materialized in IndexedDB — the dominant cold-start cost on slow connections. Client-only; no protocol change. Correctness boundary (don't drop late-keyed messages) is the careful part.
 
-2. **[lazy-load-media](lazy-load-media.md)** — Fetch chat attachments on scroll-into-view instead of all-at-once on chat open. Client-only, no new dependency; the cheap half of the slow-chat-open problem (the other half — full-res-only images — is a separate preview/thumbnail task). Pairs naturally with the open-at-bottom scroll behaviour.
+2. **[lazy-load-media](lazy-load-media.md)** — Fetch chat attachments on scroll-into-view instead of all-at-once on chat open. Client-only, no new dependency; the cheap half of the slow-chat-open problem (the in-chat-thumbnail half is the media Phase-1 set below). Pairs naturally with the open-at-bottom scroll behaviour.
 
-3. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+### Media Phase 1 ([ADR-0022](../docs/decisions/adr-0022-multipart-media.md))
 
-4. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+Single-image quality, shipped **additively on the v0.1 single `file`** — no
+schema break (that is Phase 2, with albums). Do in order; each is shippable and
+its code is reused by the next.
+
+3. **[media-optimized-send](media-optimized-send.md)** (P1a) — Downscale + re-encode + EXIF-strip photos by default (≈10× smaller, metadata-clean), with an original-quality opt-out. Introduces the canvas re-encode primitive the next two reuse.
+
+4. **[media-preview](media-preview.md)** (P1b) — Conditional ~50 KB encrypted preview shown immediately, full fetched on tap; delete sweeps both objects. The "small in-chat preview" win.
+
+5. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
+
+6. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+
+7. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
