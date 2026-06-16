@@ -25,7 +25,12 @@ v0.2 item** — Web Push was dropped ([ADR-0015](../docs/decisions/adr-0015-web-
 Deprecated) and delivery moves to the native-apps track ([evolution/native-apps.md](../docs/evolution/native-apps.md)),
 which gets its own task/ADR when native is committed.
 
-1. **[lazy-load-media](lazy-load-media.md)** — Fetch chat attachments on scroll-into-view instead of all-at-once on chat open. Client-only, no new dependency; the cheap half of the slow-chat-open problem (the in-chat-thumbnail half is the media Phase-1 set below). Pairs naturally with the open-at-bottom scroll behaviour.
+Lazy-load of chat attachments has **landed**: images fetch + decrypt on
+scroll-into-view (`IntersectionObserver`, `rootMargin: 200px`) rather than
+all-at-once on open, and non-images render a click-to-fetch metadata chip
+instead of eagerly downloading (`useMedia` + `MediaAttachment`). The
+in-chat-thumbnail half of the slow-chat-open problem is the Media Phase 1 set
+below.
 
 ### Media Phase 1 ([ADR-0022](../docs/decisions/adr-0022-multipart-media.md))
 
@@ -33,12 +38,12 @@ Single-image quality, shipped **additively on the v0.1 single `file`** — no
 schema break (that is Phase 2, with albums). Do in order; each is shippable and
 its code is reused by the next.
 
-2. **[media-optimized-send](media-optimized-send.md)** (P1a) — Downscale + re-encode + EXIF-strip photos by default (≈10× smaller, metadata-clean), with an original-quality opt-out. Introduces the canvas re-encode primitive the next two reuse.
+1. **[media-optimized-send](media-optimized-send.md)** (P1a) — Downscale + re-encode + EXIF-strip photos by default (≈10× smaller, metadata-clean), with an original-quality opt-out. Introduces the canvas re-encode primitive the next two reuse.
 
-3. **[media-preview](media-preview.md)** (P1b) — Conditional ~50 KB encrypted preview shown immediately, full fetched on tap; delete sweeps both objects. The "small in-chat preview" win.
+2. **[media-preview](media-preview.md)** (P1b) — Conditional ~50 KB encrypted preview shown immediately, full fetched on tap; delete sweeps both objects. The "small in-chat preview" win. Supplies the real dimensions that turn lazy-load's fixed placeholder into zero-layout-shift sizing.
 
-4. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
+3. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
 
-5. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+4. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
 
-6. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place.
+5. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.

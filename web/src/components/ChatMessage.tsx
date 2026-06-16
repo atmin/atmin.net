@@ -10,7 +10,10 @@ interface Props {
     sent: boolean;
     media?: MediaFile;
     mediaState?: MediaState;
-    onMediaRetry?: (url: string) => void;
+    // Force-load a url (non-image chip click + network-error retry).
+    onMediaRequest?: (url: string) => void;
+    // Lazy-load observe wiring for images; curried to the url at the leaf.
+    mediaObserve?: (url: string, el: HTMLElement | null) => void;
     // Amendment state (set by the materializer).
     editedAt?: Date;
     deleted?: boolean;
@@ -136,7 +139,8 @@ export default function ChatMessage({
     sent,
     media,
     mediaState,
-    onMediaRetry,
+    onMediaRequest,
+    mediaObserve,
     editedAt,
     deleted,
     editing,
@@ -187,13 +191,18 @@ export default function ChatMessage({
             {showActions && (
                 <MessageActions onEdit={onStartEdit} onDelete={onDelete} />
             )}
-            {media && mediaState && onMediaRetry && (
+            {media && onMediaRequest && (
                 <div className="mb-1">
                     <MediaAttachment
                         state={mediaState}
                         name={media.name}
                         size={media.size}
-                        onRetry={() => onMediaRetry(media.url)}
+                        onRequest={() => onMediaRequest(media.url)}
+                        observe={
+                            mediaObserve
+                                ? (el) => mediaObserve(media.url, el)
+                                : undefined
+                        }
                     />
                 </div>
             )}

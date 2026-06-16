@@ -58,7 +58,7 @@ export const MediaImage: Story = {
             blobUrl: null,
             mime: null,
         }),
-        onMediaRetry: noop,
+        onMediaRequest: noop,
     },
 };
 
@@ -73,7 +73,7 @@ export const MediaDownload: Story = {
             blobUrl: null,
             mime: null,
         }),
-        onMediaRetry: noop,
+        onMediaRequest: noop,
     },
 };
 
@@ -84,7 +84,7 @@ export const MediaCorrupt: Story = {
         sent: false,
         media: fakeMedia,
         mediaState: state({ status: 'corrupt', blobUrl: null, mime: null }),
-        onMediaRetry: noop,
+        onMediaRequest: noop,
     },
 };
 
@@ -99,7 +99,7 @@ export const MediaUnavailable: Story = {
             blobUrl: null,
             mime: null,
         }),
-        onMediaRetry: noop,
+        onMediaRequest: noop,
     },
 };
 
@@ -110,7 +110,7 @@ export const MediaLoading: Story = {
         sent: false,
         media: fakeMedia,
         mediaState: state({ status: 'loading', blobUrl: null, mime: null }),
-        onMediaRetry: noop,
+        onMediaRequest: noop,
     },
 };
 

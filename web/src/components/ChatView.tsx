@@ -16,7 +16,8 @@ interface Props {
     online: boolean;
     encryptionReady: boolean;
     mediaStates?: Record<string, MediaState>;
-    onMediaRetry?: (url: string) => void;
+    onMediaRequest?: (url: string) => void;
+    mediaObserve?: (url: string, el: HTMLElement | null) => void;
     onSend: (text: string) => void;
     onSendMedia?: (file: File) => void;
     // Controlled draft input — persisted across reloads by useDraft in the
@@ -41,7 +42,8 @@ export default function ChatView({
     online,
     encryptionReady,
     mediaStates = {},
-    onMediaRetry = () => {},
+    onMediaRequest = () => {},
+    mediaObserve,
     onSend,
     onSendMedia,
     inputValue,
@@ -125,7 +127,8 @@ export default function ChatView({
                                                     ? mediaStates[msg.media.url]
                                                     : undefined
                                             }
-                                            onMediaRetry={onMediaRetry}
+                                            onMediaRequest={onMediaRequest}
+                                            mediaObserve={mediaObserve}
                                             editedAt={msg.editedAt}
                                             deleted={msg.deleted}
                                             editing={editingId === msg.id}

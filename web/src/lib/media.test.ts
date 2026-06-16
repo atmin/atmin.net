@@ -3,6 +3,7 @@ import {
     decryptMedia,
     encryptMedia,
     FileTooLargeError,
+    isLikelyImage,
     MAX_MEDIA_BYTES,
     MediaCorruptError,
     sanitizeDownloadFilename,
@@ -140,6 +141,43 @@ describe('sniffInlineImageMime', () => {
     });
     it('returns null for input shorter than 12 bytes', () => {
         expect(sniffInlineImageMime(new Uint8Array(5))).toBeNull();
+    });
+});
+
+describe('isLikelyImage', () => {
+    it('returns true for known image extensions (any case)', () => {
+        for (const name of [
+            'a.jpg',
+            'a.jpeg',
+            'A.JPG',
+            'photo.PNG',
+            'anim.gif',
+            'pic.webp',
+            'next.avif',
+            'old.bmp',
+            'cover.JpEg',
+        ]) {
+            expect(isLikelyImage(name)).toBe(true);
+        }
+    });
+    it('returns false for non-image extensions, missing extensions, bare names', () => {
+        for (const name of [
+            'doc.pdf',
+            'notes.txt',
+            'archive.zip',
+            'clip.mp4',
+            'noext', // no dot
+            'image', // bare name
+            'jpg', // extension-shaped but no dot
+            'trailing.jpg.exe', // image ext is not the final one
+            '', // empty
+        ]) {
+            expect(isLikelyImage(name)).toBe(false);
+        }
+    });
+    it('matches only the final extension', () => {
+        expect(isLikelyImage('photo.png.txt')).toBe(false);
+        expect(isLikelyImage('photo.txt.png')).toBe(true);
     });
 });
 

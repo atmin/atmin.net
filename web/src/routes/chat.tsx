@@ -48,10 +48,11 @@ export default function ChatRoute({
         () => messages.flatMap((m) => (m.media ? [m.media] : [])),
         [messages],
     );
-    const { states: mediaStates, retry: onMediaRetry } = useMedia(
-        mediaFiles,
-        session.token,
-    );
+    const {
+        states: mediaStates,
+        observe: mediaObserve,
+        request: onMediaRequest,
+    } = useMedia(mediaFiles, session.token);
 
     const scroll = useChatScroll(messages, handle);
     const [inputValue, setInputValue] = useDraft(handle ?? '');
@@ -67,7 +68,8 @@ export default function ChatRoute({
             online={online}
             encryptionReady={encryptionReady}
             mediaStates={mediaStates}
-            onMediaRetry={onMediaRetry}
+            onMediaRequest={onMediaRequest}
+            mediaObserve={mediaObserve}
             onSend={sendMessage}
             onSendMedia={sendMedia}
             inputValue={inputValue}

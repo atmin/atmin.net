@@ -10,7 +10,7 @@ import {
     PutObjectCommand,
     S3Client,
 } from '@aws-sdk/client-s3';
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import {
     loginUser,
     openChat,
@@ -20,6 +20,24 @@ import {
     waitForMediaDownload,
     waitForMediaImage,
 } from './helpers';
+
+// Send a long-but-bounded message: ~1800 chars wraps to several hundred px in a
+// narrow viewport while staying well under the server's 8 KiB `&str` body limit
+// on POST /v1/send (a 6 KB+ envelope is rejected with "data limit exceeded").
+// A few of these sandwiching an image keep it off-screen at any open scroll
+// position — far fewer round-trips than dozens of short sends. Waits on the
+// message count, not the long text body.
+async function sendTallMessage(page: Page, tag: string): Promise<void> {
+    const messages = page.locator('[data-testid="message"]');
+    const before = await messages.count();
+    await page
+        .getByPlaceholder('Type a message...')
+        .fill(`${tag} ${'wrap '.repeat(360)}`);
+    const send = page.getByRole('button', { name: 'Send' });
+    await expect(send).toBeEnabled({ timeout: 15_000 });
+    await send.click();
+    await expect(messages).toHaveCount(before + 1, { timeout: 15_000 });
+}
 
 const PHOTO = join(__dirname, 'fixtures/photo.png');
 const BLOB = join(__dirname, 'fixtures/blob.bin');
@@ -106,7 +124,9 @@ test.describe('Media', () => {
         await bobCtx.close();
     });
 
-    test('download variant for non-image', async ({ browser }) => {
+    test('non-image renders a chip and fetches only on click', async ({
+        browser,
+    }) => {
         const aliceCtx = await browser.newContext();
         const bobCtx = await browser.newContext();
         const alice = await aliceCtx.newPage();
@@ -118,14 +138,105 @@ test.describe('Media', () => {
         await openChat(alice, bobHandle);
         await sendMedia(alice, BLOB);
 
-        await openChat(bob, aliceHandle);
-        await waitForMediaDownload(bob);
+        // A non-image is never auto-downloaded — count uncached media GETs.
+        const cdp = await bob.context().newCDPSession(bob);
+        await cdp.send('Network.enable');
+        let mediaHits = 0;
+        cdp.on('Network.responseReceived', (e) => {
+            if (
+                e.response.url.includes('/v1/store/object') &&
+                e.response.url.includes('key=media') &&
+                !e.response.fromDiskCache &&
+                !e.response.fromPrefetchCache
+            ) {
+                mediaHits++;
+            }
+        });
 
+        await openChat(bob, aliceHandle);
+
+        // The chip shows the filename + size straight from the payload — no
+        // image, no download link, and crucially no fetch.
+        const chip = bob.locator('[data-testid="media-chip"]').first();
+        await expect(chip).toBeVisible({ timeout: 15_000 });
+        await expect(bob.locator('[data-testid="media-image"]')).toHaveCount(0);
         await expect(
-            bob.locator('[data-testid="media-image"]'),
+            bob.locator('[data-testid="media-download"]'),
         ).toHaveCount(0);
+        expect(mediaHits, 'chip does not auto-fetch').toBe(0);
+
+        // Clicking the chip fetches + decrypts on demand.
+        await chip.click();
+        await waitForMediaDownload(bob);
         const link = bob.locator('[data-testid="media-download"]').first();
         await expect(link).toHaveAttribute('download', /.+/);
+        expect(mediaHits, 'click fetched exactly once').toBe(1);
+
+        await aliceCtx.close();
+        await bobCtx.close();
+    });
+
+    test('lazy-loads images on scroll — off-screen stays idle until approached', async ({
+        browser,
+    }) => {
+        const aliceCtx = await browser.newContext();
+        const bobCtx = await browser.newContext();
+        const alice = await aliceCtx.newPage();
+        const bob = await bobCtx.newPage();
+
+        const aliceHandle = await registerUser(alice);
+        const bobHandle = await registerUser(bob);
+
+        await openChat(alice, bobHandle);
+        // Sandwich one image between tall filler blocks so it is off-screen at
+        // EVERY open scroll position — whether the chat lands at the top or
+        // auto-scrolls to the bottom. This removes the open-time race between
+        // auto-scroll-to-bottom and the IntersectionObserver's first pass, so
+        // we can assert the lazy gate deterministically by driving the scroll
+        // ourselves. Two tall sends per side keep the round-trip count low.
+        await sendTallMessage(alice, 'top-filler-a');
+        await sendTallMessage(alice, 'top-filler-b');
+        await sendMedia(alice, PHOTO);
+        await sendTallMessage(alice, 'bottom-filler-a');
+        await sendTallMessage(alice, 'bottom-filler-b');
+
+        // A small viewport keeps each filler block far taller than the observed
+        // region (viewport + 200px rootMargin), so the image between them
+        // cannot be reached from either end without scrolling.
+        await bob.setViewportSize({ width: 500, height: 400 });
+
+        // Count uncached media object GETs to prove the off-screen image is not
+        // fetched until it nears the viewport.
+        const cdp = await bob.context().newCDPSession(bob);
+        await cdp.send('Network.enable');
+        let mediaHits = 0;
+        cdp.on('Network.responseReceived', (e) => {
+            if (
+                e.response.url.includes('/v1/store/object') &&
+                e.response.url.includes('key=media') &&
+                !e.response.fromDiskCache &&
+                !e.response.fromPrefetchCache
+            ) {
+                mediaHits++;
+            }
+        });
+
+        await openChat(bob, aliceHandle);
+
+        const image = bob.locator('[data-testid="media-attachment"]');
+        await expect(image).toHaveCount(1, { timeout: 15_000 });
+
+        // On open the image is off-screen (only filler is in view) → idle and
+        // never fetched.
+        await expect(image).toHaveAttribute('data-status', 'idle');
+        expect(mediaHits, 'off-screen image is not fetched on open').toBe(0);
+
+        // Scrolling it toward the viewport triggers the lazy fetch.
+        await image.scrollIntoViewIfNeeded();
+        await expect(image).toHaveAttribute('data-status', 'ready', {
+            timeout: 15_000,
+        });
+        expect(mediaHits, 'approaching the image fetched it once').toBe(1);
 
         await aliceCtx.close();
         await bobCtx.close();

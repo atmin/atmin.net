@@ -148,6 +148,17 @@ export function sniffInlineImageMime(plaintext: Uint8Array): InlineMime | null {
 }
 
 /**
+ * Best-effort, pre-fetch image guess from the filename. The authoritative
+ * check stays {@link sniffInlineImageMime} (post-decrypt); this only decides
+ * whether to lazy-observe (likely image) or render a click-to-fetch chip
+ * (everything else). A real content-type in the payload is the ADR-0022/preview
+ * task's job.
+ */
+export function isLikelyImage(name: string): boolean {
+    return /\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(name);
+}
+
+/**
  * Strips path separators, NUL, control chars, leading dots; truncates to 255
  * bytes; falls back to "download" on empty input.
  */
