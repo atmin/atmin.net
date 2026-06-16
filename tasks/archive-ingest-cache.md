@@ -79,21 +79,29 @@ worth calling out in the PR.
 
 Restructure so the ingested decision is local to each archive (today the code
 flattens all archives into one `allEnvelopes` list, which makes a per-archive
-decision impossible):
+decision impossible). `syncArchive` must **not** mark anything itself — it only
+*decides* which keys are fully materialized and returns them; the actual
+`markArchiveIngested` happens after persistence (see "Marking layer" below):
 
 ```
 ingested = await loadIngestedArchiveKeys()
 keys = full archive listing            // see §3 — page through; do NOT rely on
                                         // the stale high-water cursor
+ingestedCandidates = []
 for key in keys:
     if ingested.has(key): continue      // ← the bandwidth win: no GET at all
-    blob   = await storeGet(token, key)
-    envs   = cborDecode(blob)
+    try:
+        blob = await storeGet(token, key)
+        envs = cborDecode(blob)
+    catch:
+        continue                        // download/decode failed → NOT a
+                                        // candidate; re-fetched next sync
     result = await processEnvelopes(envs, …, seenMsgIds, …)
-    // mark ingested ONLY if fully materialized (corollary 1 + 2)
+    // candidate ONLY if fully materialized (corollary 1 + 2)
     if result.recoverableSkips === 0:
-        await markArchiveIngested(key)
+        ingestedCandidates.push(key)
     messages.push(...result.messages)
+return { messages, advancedInbounds, ingestedCandidates }
 ```
 
 `processEnvelopes` must report whether it skipped any envelope for a
@@ -103,7 +111,21 @@ its return type. A *decrypt failure* on a known session
 ([catch at 321-323](../web/src/lib/messaging.ts#L321-L323)) is the I6/I9
 "belt-and-suspenders" path and is **not** recoverable-by-waiting → it should not
 block ingestion (the message is recovered via the key-backup chain, not via a
-re-download).
+re-download). It must **not** count toward `recoverableSkips`.
+
+**Marking layer — mark after persist, not inside `syncArchive`.** This is the
+crux of corollary 1, and it constrains *where* the mark happens.
+[`fetchMessages`](../web/src/lib/messaging.ts#L520-L572) does **not** persist —
+it returns messages, and the caller [`syncAndPublish`](../web/src/lib/inbox-sync.ts#L43-L78)
+is what calls [`saveMessages`](../web/src/lib/db.ts#L338) (and bails on its
+failure). So marking inside `syncArchive`'s loop would mark archives ingested
+*before* persistence, and even when persistence fails — the "skipped forever
+with messages missing" bug. Instead, thread `ingestedCandidates` up through
+`fetchMessages`'s return value to `syncAndPublish`, and call
+`markArchiveIngested(key)` for each candidate **only after** `saveMessages`
+resolves successfully. If `saveMessages` throws (the early `return` at
+[inbox-sync.ts:65-68](../web/src/lib/inbox-sync.ts#L65-L68)), mark nothing — the
+archives are re-fetched next sync.
 
 ### 3. Drop the archive high-water cursor; list the full prefix
 
@@ -111,13 +133,14 @@ The `sync_cursors` archive entry was the source of the staleness bug and is no
 longer the source of truth — the `ingested_archives` set is. List the full
 `inbox/{uid}/archive/` prefix and filter against the set.
 
-- **Verify whether `storeList` paginates** ([api.ts:352-360](../web/src/lib/api.ts#L352-L360)
-  and the server `GET /v1/store/list?<prefix>&<cursor>` handler). The `cursor`
-  param is S3 `start-after` semantics — used today as *both* high-water mark and
-  page cursor. For a complete listing we must page through **all** keys
-  (loop on the response's truncation/next-cursor) rather than trusting a single
-  call. Confirm the response shape exposes truncation; if not, that is a small
-  server-side addition to surface here.
+- **Page through the full listing — no server change needed.** The server
+  already returns `next_cursor` ([routes.rs:159-164](../server/src/routes.rs#L159-L164):
+  empty string = last page), and the TS `StoreListResponse` already carries it
+  ([api.ts:160-163](../web/src/lib/api.ts#L160-L163)). `storeList`
+  ([api.ts:352-360](../web/src/lib/api.ts#L352-L360)) takes a `cursor`
+  (S3 `start-after` semantics) but exposes only a single call. For a complete
+  listing, loop: pass `next_cursor` back as the `cursor` until it comes back
+  empty, accumulating `keys`. This is purely client-side.
 - Leave `syncLive`'s cursor as-is — live sync is already correct and efficient.
 - Leftover `sync_cursors` archive rows are harmless; no migration needed to
   remove them.
@@ -140,9 +163,11 @@ keys only — do not deserialize full messages). This:
 
 - The ordering of §1+§2 matters: **store the messages, then mark the archive
   ingested.** If marking happened first and the message write failed, the
-  archive would be skipped forever with messages missing. Persist in the same
-  flow `fetchMessages` already uses (`saveMessages`), and only mark after it
-  resolves.
+  archive would be skipped forever with messages missing. Note `fetchMessages`
+  does **not** persist — `saveMessages` is called one layer up in
+  `syncAndPublish` ([inbox-sync.ts:43-78](../web/src/lib/inbox-sync.ts#L43-L78)),
+  so the mark must happen there, after `saveMessages` resolves. See the
+  "Marking layer" paragraph in §2.
 - Stale entries accumulate in `ingested_archives` (compaction deletes old keys;
   their set entries never match a future listing again). They are tiny strings;
   pruning is optional. If added: drop set entries not present in the latest full
@@ -189,5 +214,5 @@ keys only — do not deserialize full messages). This:
   slow-chat-open problem.
 - **Two-way infinite scroll / archive pagination in the UI** — see
   [message-virtualization.md](message-virtualization.md) "Out of scope".
-- **Server-side listing changes** beyond surfacing truncation/next-cursor if §3
-  finds it missing.
+- **Server-side listing changes.** None needed — `next_cursor` is already
+  surfaced (§3); this task is entirely client-side.
