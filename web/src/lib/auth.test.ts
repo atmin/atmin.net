@@ -1,5 +1,6 @@
 import { IDBKeyRange as FakeIDBKeyRange, IDBFactory } from 'fake-indexeddb';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { memoryStorage } from '@/test/storage';
 import {
     clearSession,
     clearToken,
@@ -9,43 +10,20 @@ import {
 } from './auth';
 import { deriveKeys, generateBackupSecret } from './crypto';
 
-// Mock localStorage
-const localStorageMock: { [key: string]: string } = {};
-
 beforeEach(() => {
     // Setup fake IndexedDB
     globalThis.indexedDB = new IDBFactory();
     globalThis.IDBKeyRange = FakeIDBKeyRange;
 
-    // Setup localStorage mock. configurable so the test environment can be
-    // torn down / overridden between files — without it the property leaks
-    // into sibling test files in a reused worker (caused a CI-only failure in
-    // useDraft.test.ts, which expects happy-dom's own localStorage).
-    Object.defineProperty(globalThis, 'localStorage', {
-        value: {
-            getItem: (key: string) => localStorageMock[key] || null,
-            setItem: (key: string, value: string) => {
-                localStorageMock[key] = value;
-            },
-            removeItem: (key: string) => {
-                delete localStorageMock[key];
-            },
-            clear: () => {
-                Object.keys(localStorageMock).forEach((key) => {
-                    delete localStorageMock[key];
-                });
-            },
-        },
-        writable: true,
-        configurable: true,
-    });
+    // Fresh in-memory localStorage per test. stubGlobal + unstubAllGlobals
+    // RESTORES the ambient global after each test, so this never leaks a
+    // partial Storage into sibling files in a reused CI worker (see
+    // src/test/storage.ts).
+    vi.stubGlobal('localStorage', memoryStorage());
 });
 
 afterEach(() => {
-    // Clear localStorage
-    Object.keys(localStorageMock).forEach((key) => {
-        delete localStorageMock[key];
-    });
+    vi.unstubAllGlobals();
 });
 
 describe('session - Session management', () => {

@@ -1,5 +1,5 @@
-// @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { memoryStorage } from '@/test/storage';
 import {
     getPhotoQuality,
     PHOTO_QUALITY_KEY,
@@ -8,7 +8,11 @@ import {
 
 describe('photo-quality preference', () => {
     beforeEach(() => {
-        localStorage.clear();
+        vi.stubGlobal('localStorage', memoryStorage());
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it('defaults to optimized when nothing is stored', () => {
