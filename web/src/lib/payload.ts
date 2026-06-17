@@ -1,15 +1,23 @@
 // Inner-plaintext parsing for the chat materializer.
 //
-// Kept dependency-free (a leaf module) so both the materializer (hooks/useChat)
-// and the storage-summary logic (lib/db) can import it without creating an
-// import cycle through messaging.ts (which itself imports db.ts).
+// Free of runtime dependencies (a leaf module) so both the materializer
+// (hooks/useChat) and the storage-summary logic (lib/db) can import it without
+// creating an import cycle through messaging.ts (which itself imports db.ts).
+// The single import below is type-only (erased at build), so the property holds.
 //
 // The wire format is a self-describing JSON object discriminated by `type`
 // (see docs/specs/mvp-v0.1.md "Payload by content type" and ADR-0014). For
 // backward compatibility this parser also accepts a legacy bare string (the
 // pre-typed-envelope text format) and treats it as a text body.
 
-export interface ParsedMediaFile {
+import type { MediaFileExtras } from './media';
+
+// The canonical wire media-file shape: key/iv as base64url strings (vs the
+// decoded bytes in lib/media's MediaFile). The five required fields stay the
+// parse gate; the additive ADR-0022 fields ride along via MediaFileExtras and
+// are read best-effort. Shared with the outbound MediaPayload (lib/messaging) —
+// send and parse of the same JSON stay in lockstep by construction.
+export interface ParsedMediaFile extends MediaFileExtras {
     url: string;
     key: string;
     iv: string;
@@ -54,17 +62,20 @@ export function parseInner(text: string): ParsedInner {
             typeof f.name === 'string' &&
             typeof f.size === 'number'
         ) {
-            return {
-                kind: 'media',
-                body: o.body,
-                file: {
-                    url: f.url,
-                    key: f.key,
-                    iv: f.iv,
-                    name: f.name,
-                    size: f.size,
-                },
+            const file: ParsedMediaFile = {
+                url: f.url,
+                key: f.key,
+                iv: f.iv,
+                name: f.name,
+                size: f.size,
             };
+            // Additive fields are best-effort: read each only when well-typed,
+            // leave absent otherwise (a legacy `file` carries none).
+            if (typeof f.mime === 'string') file.mime = f.mime;
+            if (typeof f.width === 'number') file.width = f.width;
+            if (typeof f.height === 'number') file.height = f.height;
+            if (typeof f.optimized === 'boolean') file.optimized = f.optimized;
+            return { kind: 'media', body: o.body, file };
         }
     }
 

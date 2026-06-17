@@ -35,6 +35,49 @@ describe('parseInner', () => {
         ).toEqual({ kind: 'media', body: 'cap', file });
     });
 
+    it('parses the additive optional file fields when present (ADR-0022)', () => {
+        const file = {
+            url: 'media/u/01',
+            key: 'k',
+            iv: 'iv',
+            name: 'p.jpg',
+            size: 5,
+            mime: 'image/jpeg',
+            width: 2048,
+            height: 1536,
+            optimized: true,
+        };
+        expect(
+            parseInner(JSON.stringify({ type: 'media', body: 'cap', file })),
+        ).toEqual({ kind: 'media', body: 'cap', file });
+    });
+
+    it('ignores additive fields of the wrong type, keeping the five-field core', () => {
+        const file = {
+            url: 'media/u/01',
+            key: 'k',
+            iv: 'iv',
+            name: 'p.jpg',
+            size: 5,
+            mime: 42, // wrong type → dropped
+            width: '2048', // wrong type → dropped
+            optimized: 'yes', // wrong type → dropped
+        };
+        expect(
+            parseInner(JSON.stringify({ type: 'media', body: 'cap', file })),
+        ).toEqual({
+            kind: 'media',
+            body: 'cap',
+            file: {
+                url: 'media/u/01',
+                key: 'k',
+                iv: 'iv',
+                name: 'p.jpg',
+                size: 5,
+            },
+        });
+    });
+
     it('parses an amendment, carrying an unknown action through verbatim', () => {
         expect(
             parseInner(

@@ -137,6 +137,22 @@ export async function resyncChat(
 }
 
 /**
+ * Force the global photo-send quality preference (ADR-0022). Optimized is the
+ * app default (downscale + re-encode + strip EXIF); tests that assert a
+ * byte-exact round-trip or an exact ciphertext length set 'original' so the
+ * stored bytes equal the source fixture. Read at send time, so set before
+ * sendMedia.
+ */
+export async function setPhotoQuality(
+    page: Page,
+    quality: 'optimized' | 'original',
+): Promise<void> {
+    await page.evaluate((q) => {
+        localStorage.setItem('atmin:photo-quality', q);
+    }, quality);
+}
+
+/**
  * Attach a file via the chat's hidden file input and wait for send to settle.
  */
 export async function sendMedia(page: Page, filePath: string): Promise<void> {

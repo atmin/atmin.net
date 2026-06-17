@@ -73,6 +73,13 @@ function toMessages(
                 iv: base64UrlDecode(p.file.iv),
                 name: p.file.name,
                 size: p.file.size,
+                // Optional fields carried through verbatim (absent on legacy).
+                ...(p.file.mime !== undefined && { mime: p.file.mime }),
+                ...(p.file.width !== undefined && { width: p.file.width }),
+                ...(p.file.height !== undefined && { height: p.file.height }),
+                ...(p.file.optimized !== undefined && {
+                    optimized: p.file.optimized,
+                }),
             };
         }
 

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '@/lib/auth';
 
 vi.mock('@/lib/api', () => ({
@@ -18,12 +18,36 @@ vi.mock('@/lib/inbox-sync', () => ({
 }));
 
 vi.mock('@/lib/media', () => ({
+    MAX_MEDIA_BYTES: 25 * 1024 * 1024,
+    FileTooLargeError: class FileTooLargeError extends Error {
+        constructor() {
+            super('file exceeds MAX_MEDIA_BYTES');
+            this.name = 'FileTooLargeError';
+        }
+    },
     encryptMedia: vi.fn().mockResolvedValue({
         ciphertext: new Uint8Array([1]),
         key: new Uint8Array([2]),
         iv: new Uint8Array([3]),
         plaintextSize: 10,
     }),
+}));
+
+// Keep the pure helpers (isOptimizableImage, fitWithin, constants) real; mock
+// only the canvas-touching functions, which the unit-test DOM can't run.
+vi.mock('@/lib/image', async () => {
+    const actual =
+        await vi.importActual<typeof import('@/lib/image')>('@/lib/image');
+    return {
+        ...actual,
+        reencodeImage: vi.fn(),
+        imageSize: vi.fn(),
+    };
+});
+
+vi.mock('@/lib/photo-quality', () => ({
+    getPhotoQuality: vi.fn(() => 'optimized'),
+    setPhotoQuality: vi.fn(),
 }));
 
 vi.mock('@/lib/messaging', () => ({
@@ -47,6 +71,15 @@ const fakeMgr = { destroy: vi.fn() };
 describe('useChatSend', () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        // Silence the expected catch-path alert/logs and keep window.alert
+        // defined under the test DOM.
+        vi.stubGlobal('alert', vi.fn());
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it('sendText returns immediately when sessionManager is null', async () => {
@@ -261,5 +294,139 @@ describe('useChatSend', () => {
         } finally {
             onLineSpy.mockRestore();
         }
+    });
+
+    // Shared setup for the optimize-path tests: a resolved recipient + a media
+    // upload URL. Returns the captured outbound media payload's `file`.
+    async function sendAndCaptureFile(file: File) {
+        const { resolve, uploadMedia } = await import('@/lib/api');
+        const { sendInnerPayload } = await import('@/lib/messaging');
+        vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
+            user_id: 'peer-user',
+            sharing_public_key: 'peer-key-b64',
+        });
+        vi.mocked(uploadMedia).mockResolvedValue({
+            url: 'media/user1/01ABC',
+            mediaUlid: '01ABC',
+        });
+
+        const { useChatSend } = await import('./useChatSend');
+        const { result } = renderHook(() =>
+            useChatSend('bob', false, fakeSession, fakeMgr as never),
+        );
+        await act(async () => {
+            await result.current.sendMedia(file);
+        });
+        const payload = vi.mocked(sendInnerPayload).mock.calls[0]?.[6];
+        // Narrow the InnerPayload union to the media variant via its `file` key.
+        return payload && 'file' in payload ? payload.file : undefined;
+    }
+
+    it('optimizes a photo by default: re-encodes, sends the JPEG + dimensions', async () => {
+        const { reencodeImage } = await import('@/lib/image');
+        const { encryptMedia } = await import('@/lib/media');
+        const { getPhotoQuality } = await import('@/lib/photo-quality');
+        vi.mocked(getPhotoQuality).mockReturnValue('optimized');
+        const reBlob = new Blob(['jpeg-bytes'], { type: 'image/jpeg' });
+        vi.mocked(reencodeImage).mockResolvedValue({
+            blob: reBlob,
+            width: 2048,
+            height: 1536,
+        });
+
+        const file = new File(['raw'], 'photo.png', { type: 'image/png' });
+        const sent = await sendAndCaptureFile(file);
+
+        // The re-encoded blob is what gets encrypted, not the original file.
+        expect(encryptMedia).toHaveBeenCalledWith(reBlob);
+        expect(sent).toMatchObject({
+            name: 'photo.png',
+            mime: 'image/jpeg',
+            optimized: true,
+            width: 2048,
+            height: 1536,
+            size: 10, // enc.plaintextSize from the media mock
+        });
+    });
+
+    it('original-quality opt-out sends untouched bytes, labelled + dimensioned', async () => {
+        const { reencodeImage, imageSize } = await import('@/lib/image');
+        const { encryptMedia } = await import('@/lib/media');
+        const { getPhotoQuality } = await import('@/lib/photo-quality');
+        vi.mocked(getPhotoQuality).mockReturnValue('original');
+        vi.mocked(imageSize).mockResolvedValue({ width: 4032, height: 3024 });
+
+        const file = new File(['raw'], 'photo.jpg', { type: 'image/jpeg' });
+        const sent = await sendAndCaptureFile(file);
+
+        expect(reencodeImage).not.toHaveBeenCalled();
+        expect(encryptMedia).toHaveBeenCalledWith(file);
+        expect(sent).toMatchObject({
+            mime: 'image/jpeg',
+            optimized: false,
+            width: 4032,
+            height: 3024,
+        });
+    });
+
+    it('never optimizes a GIF — untouched bytes, labelled, no re-encode', async () => {
+        const { reencodeImage, imageSize } = await import('@/lib/image');
+        const { encryptMedia } = await import('@/lib/media');
+        vi.mocked(imageSize).mockResolvedValue({ width: 320, height: 240 });
+
+        const file = new File(['gif'], 'meme.gif', { type: 'image/gif' });
+        const sent = await sendAndCaptureFile(file);
+
+        expect(reencodeImage).not.toHaveBeenCalled();
+        expect(encryptMedia).toHaveBeenCalledWith(file);
+        expect(sent).toMatchObject({
+            mime: 'image/gif',
+            optimized: false,
+            width: 320,
+            height: 240,
+        });
+    });
+
+    it('falls back to the original when re-encode fails', async () => {
+        const { reencodeImage, imageSize } = await import('@/lib/image');
+        const { encryptMedia } = await import('@/lib/media');
+        const { getPhotoQuality } = await import('@/lib/photo-quality');
+        vi.mocked(getPhotoQuality).mockReturnValue('optimized');
+        vi.mocked(reencodeImage).mockRejectedValue(new Error('decode failed'));
+        vi.mocked(imageSize).mockResolvedValue({ width: 100, height: 100 });
+
+        const file = new File(['raw'], 'weird.png', { type: 'image/png' });
+        const sent = await sendAndCaptureFile(file);
+
+        expect(reencodeImage).toHaveBeenCalled();
+        expect(encryptMedia).toHaveBeenCalledWith(file); // original bytes
+        expect(sent).toMatchObject({ optimized: false, mime: 'image/png' });
+    });
+
+    it('rejects an oversize source before re-encoding or uploading', async () => {
+        const { reencodeImage } = await import('@/lib/image');
+        const { encryptMedia } = await import('@/lib/media');
+        const { uploadMedia } = await import('@/lib/api');
+        const { sendInnerPayload } = await import('@/lib/messaging');
+
+        const big = new File(['x'], 'huge.jpg', { type: 'image/jpeg' });
+        Object.defineProperty(big, 'size', {
+            value: 26 * 1024 * 1024,
+            configurable: true,
+        });
+
+        const { useChatSend } = await import('./useChatSend');
+        const { result } = renderHook(() =>
+            useChatSend('bob', false, fakeSession, fakeMgr as never),
+        );
+        await act(async () => {
+            await result.current.sendMedia(big);
+        });
+
+        expect(reencodeImage).not.toHaveBeenCalled();
+        expect(encryptMedia).not.toHaveBeenCalled();
+        expect(uploadMedia).not.toHaveBeenCalled();
+        expect(sendInnerPayload).not.toHaveBeenCalled();
     });
 });

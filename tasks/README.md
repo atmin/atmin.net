@@ -38,12 +38,17 @@ Single-image quality, shipped **additively on the v0.1 single `file`** — no
 schema break (that is Phase 2, with albums). Do in order; each is shippable and
 its code is reused by the next.
 
-1. **[media-optimized-send](media-optimized-send.md)** (P1a) — Downscale + re-encode + EXIF-strip photos by default (≈10× smaller, metadata-clean), with an original-quality opt-out. Introduces the canvas re-encode primitive the next two reuse.
+**P1a — optimized-by-default send + EXIF strip — has landed**: photos are
+downscaled + re-encoded + metadata-stripped by default (≈10× smaller), with an
+original-quality opt-out in Settings, and the additive `file` fields
+(`mime`/`width`/`height`/`optimized`) ship the canvas re-encode primitive
+(`lib/image.ts`) the next two reuse and supply zero-layout-shift dimensions for
+new sends.
 
-2. **[media-preview](media-preview.md)** (P1b) — Conditional ~50 KB encrypted preview shown immediately, full fetched on tap; delete sweeps both objects. The "small in-chat preview" win. Supplies the real dimensions that turn lazy-load's fixed placeholder into zero-layout-shift sizing.
+1. **[media-preview](media-preview.md)** (P1b) — Conditional ~50 KB encrypted preview shown immediately, full fetched on tap; delete sweeps both objects. The "small in-chat preview" win. Reuses the P1a `reencodeImage` primitive.
 
-3. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
+2. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
 
-4. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+3. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
 
-5. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.
+4. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.

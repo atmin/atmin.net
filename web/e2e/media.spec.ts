@@ -17,6 +17,7 @@ import {
     registerUser,
     registerUserWithPassword,
     sendMedia,
+    setPhotoQuality,
     waitForMediaDownload,
     waitForMediaImage,
 } from './helpers';
@@ -79,6 +80,9 @@ test.describe('Media', () => {
         const bobHandle = await registerUser(bob);
 
         await openChat(alice, bobHandle);
+        // Byte-exact round-trip: send the untouched original so the rendered
+        // bytes equal photo.png (the default optimized path re-encodes to JPEG).
+        await setPhotoQuality(alice, 'original');
         await sendMedia(alice, PHOTO);
 
         await openChat(bob, aliceHandle);
@@ -300,6 +304,10 @@ test.describe('Media', () => {
             await registerUserWithPassword(bob);
 
         await openChat(alice, bobHandle);
+        // Send the untouched original so `ciphertextLen` (source bytes + GCM
+        // tag) matches the stored object exactly; the default optimized path
+        // re-encodes to a smaller JPEG of unknown length.
+        await setPhotoQuality(alice, 'original');
 
         // Capture the media key from alice's presign body so we know which
         // blob to overwrite (the bucket may contain keys from earlier tests).

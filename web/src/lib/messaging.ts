@@ -28,6 +28,7 @@ import type { Envelope } from './envelope';
 import { backupSessionKey } from './key-backup';
 import type { SessionManager } from './megolm-session';
 import { path } from './paths';
+import type { ParsedMediaFile } from './payload';
 
 export function conversationId(userA: string, userB: string): string {
     if (userA === userB) return `self:${userA}`;
@@ -48,13 +49,10 @@ export interface TextPayload {
 export interface MediaPayload {
     type: 'media';
     body: string; // caption (defaults to the file name)
-    file: {
-        url: string;
-        key: string;
-        iv: string;
-        name: string;
-        size: number;
-    };
+    // Exactly the parsed wire shape (ADR-0022) — what we send must match what
+    // the materializer parses, so the two share one type. The additive optional
+    // fields ride along; old clients ignore them.
+    file: ParsedMediaFile;
 }
 
 export type AmendmentAction = 'edit' | 'delete';

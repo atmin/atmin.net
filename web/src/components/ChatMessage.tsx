@@ -197,6 +197,8 @@ export default function ChatMessage({
                         state={mediaState}
                         name={media.name}
                         size={media.size}
+                        width={media.width}
+                        height={media.height}
                         onRequest={() => onMediaRequest(media.url)}
                         observe={
                             mediaObserve

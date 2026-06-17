@@ -26,7 +26,25 @@ export class MediaCorruptError extends Error {
     }
 }
 
-export interface MediaFile {
+/**
+ * The additive, optional fields a media file gained in ADR-0022 (§8). Absent on
+ * legacy v0.1 messages, which render exactly as before. `mime` is a layout hint
+ * only — render still sniffs the decrypted bytes; `width`/`height` give
+ * zero-layout-shift sizing; `optimized: false`/absent ⇒ original bytes were
+ * sent. Identical across every representation — the in-memory {@link MediaFile},
+ * the parsed wire form (`ParsedMediaFile`), and the outbound payload — so
+ * defined once here in the media domain and shared.
+ */
+export interface MediaFileExtras {
+    mime?: string;
+    width?: number;
+    height?: number;
+    optimized?: boolean;
+}
+
+// In-memory form: key/iv are decoded to bytes for crypto (the wire form keeps
+// them as base64url strings).
+export interface MediaFile extends MediaFileExtras {
     url: string;
     key: Uint8Array;
     iv: Uint8Array;
@@ -41,7 +59,9 @@ export interface EncryptedMedia {
     plaintextSize: number;
 }
 
-export async function encryptMedia(file: File): Promise<EncryptedMedia> {
+// Accepts any `Blob` (a `File` is one) so the optimized-send path can encrypt a
+// re-encoded canvas blob directly, not just the original picked file.
+export async function encryptMedia(file: Blob): Promise<EncryptedMedia> {
     if (file.size > MAX_MEDIA_BYTES) throw new FileTooLargeError();
 
     const key = crypto.getRandomValues(new Uint8Array(32));

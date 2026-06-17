@@ -36,6 +36,43 @@ export const Loading: Story = {
     },
 };
 
+// With known dimensions (ADR-0022): the placeholder reserves the exact
+// aspect-ratio box the image will fill, so there is no load-time reflow.
+// Verify the box shape in light and dark.
+export const IdlePlaceholderDimensioned: Story = {
+    args: {
+        name: 'sunset.jpg',
+        size: 482_113,
+        width: 2048,
+        height: 1536,
+        state: state({ status: 'idle', blobUrl: null, mime: null }),
+    },
+};
+
+export const LoadingDimensioned: Story = {
+    args: {
+        name: 'sunset.jpg',
+        size: 482_113,
+        width: 2048,
+        height: 1536,
+        state: state({ status: 'loading', blobUrl: null, mime: null }),
+    },
+};
+
+export const ReadyImageDimensioned: Story = {
+    args: {
+        name: 'sunset.png',
+        size: 482_113,
+        width: 800,
+        height: 600,
+        state: state({
+            status: 'ready',
+            blobUrl: PNG_DATA_URL,
+            mime: 'image/png',
+        }),
+    },
+};
+
 export const ReadyImage: Story = {
     args: {
         name: 'sunset.png',

@@ -8,6 +8,11 @@ interface Props {
     state?: MediaState;
     name: string;
     size: number;
+    // Stored-image dimensions (ADR-0022). When both are present the box is sized
+    // by aspect ratio so the image lands at its final footprint with no
+    // load-time reflow. Absent on legacy/non-image attachments → fixed box.
+    width?: number;
+    height?: number;
     // Force-load this attachment now — the non-image chip's click and the
     // network-error retry both call it.
     onRequest: () => void;
@@ -26,6 +31,8 @@ export default function MediaAttachment({
     state,
     name,
     size,
+    width,
+    height,
     onRequest,
     observe,
 }: Props) {
@@ -35,6 +42,23 @@ export default function MediaAttachment({
     const mime = state?.mime ?? null;
     const likelyImage = isLikelyImage(name);
     const unrequested = status === undefined || status === 'idle';
+
+    // Reserve the exact footprint the image will fill (capped like the loaded
+    // <img> below): the placeholder, the loading box, and the image all share
+    // these constraints, so swapping between them causes no layout shift.
+    const hasDims =
+        typeof width === 'number' &&
+        typeof height === 'number' &&
+        width > 0 &&
+        height > 0;
+    const boxStyle = hasDims
+        ? {
+              aspectRatio: `${width} / ${height}`,
+              width,
+              maxWidth: '100%',
+              maxHeight: 400,
+          }
+        : undefined;
 
     return (
         <div
@@ -47,12 +71,20 @@ export default function MediaAttachment({
                 metadata-only chip (zero bytes), fetch on click. */}
             {unrequested &&
                 (likelyImage ? (
-                    <div
-                        data-testid="media-placeholder"
-                        // Fixed modest box until the preview task supplies real
-                        // dimensions for zero-layout-shift sizing.
-                        className="h-40 w-60 max-w-full rounded-lg bg-muted"
-                    />
+                    hasDims ? (
+                        <div
+                            data-testid="media-placeholder"
+                            className="rounded-lg bg-muted"
+                            style={boxStyle}
+                        />
+                    ) : (
+                        <div
+                            data-testid="media-placeholder"
+                            // Fixed modest box when dimensions are unknown
+                            // (legacy v0.1 messages without width/height).
+                            className="h-40 w-60 max-w-full rounded-lg bg-muted"
+                        />
+                    )
                 ) : (
                     <button
                         type="button"
@@ -74,20 +106,33 @@ export default function MediaAttachment({
                         </span>
                     </button>
                 ))}
-            {status === 'loading' && (
-                <span className="text-xs opacity-70">Loading…</span>
-            )}
+            {status === 'loading' &&
+                (hasDims ? (
+                    // Hold the reserved box (animated) so idle→loading→ready
+                    // never reflows.
+                    <div
+                        data-testid="media-placeholder"
+                        className="animate-pulse rounded-lg bg-muted"
+                        style={boxStyle}
+                    />
+                ) : (
+                    <span className="text-xs opacity-70">Loading…</span>
+                ))}
             {status === 'ready' && blobUrl && mime && (
                 <a href={blobUrl} target="_blank" rel="noopener noreferrer">
                     <img
                         data-testid="media-image"
                         src={blobUrl}
                         alt={displayName}
-                        style={{
-                            maxWidth: '100%',
-                            maxHeight: 400,
-                            objectFit: 'contain',
-                        }}
+                        style={
+                            hasDims
+                                ? { ...boxStyle, objectFit: 'contain' }
+                                : {
+                                      maxWidth: '100%',
+                                      maxHeight: 400,
+                                      objectFit: 'contain',
+                                  }
+                        }
                     />
                 </a>
             )}

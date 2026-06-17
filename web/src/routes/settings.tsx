@@ -1,11 +1,13 @@
 import ChangePasswordPanel from '@/components/ChangePasswordPanel';
 import DeleteAccountPanel from '@/components/DeleteAccountPanel';
 import DeviceSettings from '@/components/DeviceSettings';
+import PhotoQualitySetting from '@/components/PhotoQualitySetting';
 import ProfileSettings from '@/components/ProfileSettings';
 import { StorageIndicator } from '@/components/StorageIndicator';
 import { useDeleteAccount } from '@/hooks/useDeleteAccount';
 import { useDevices } from '@/hooks/useDevices';
 import { usePasswordStrength } from '@/hooks/usePasswordStrength';
+import { usePhotoQuality } from '@/hooks/usePhotoQuality';
 import { useRotateKeys } from '@/hooks/useRotateKeys';
 import { useStorageUsage } from '@/hooks/useStorageUsage';
 import type { Session } from '@/lib/auth';
@@ -25,6 +27,7 @@ export default function SettingsRoute({
     const rotate = useRotateKeys(session, onSessionChange);
     const strength = usePasswordStrength(rotate.newPassword);
     const storage = useStorageUsage(session.token);
+    const [photoQuality, setPhotoQuality] = usePhotoQuality();
     const del = useDeleteAccount(session, onDeleted);
 
     return (
@@ -56,6 +59,10 @@ export default function SettingsRoute({
                 onCancelRevoke={() => devicesState.setRevoking(null)}
                 onSecretChange={devicesState.setSecretInput}
                 onConfirmRevoke={devicesState.handleRevoke}
+            />
+            <PhotoQualitySetting
+                value={photoQuality}
+                onChange={setPhotoQuality}
             />
             <DeleteAccountPanel
                 handle={session.handle}
