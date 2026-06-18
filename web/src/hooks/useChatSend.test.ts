@@ -213,6 +213,68 @@ describe('useChatSend', () => {
         expect(syncAndPublish).toHaveBeenCalled();
     });
 
+    it('sendMedia uses the (trimmed) caption as the message body when given', async () => {
+        const { resolve, uploadMedia } = await import('@/lib/api');
+        const { sendInnerPayload } = await import('@/lib/messaging');
+        vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
+            user_id: 'peer-user',
+            sharing_public_key: 'peer-key-b64',
+        });
+        vi.mocked(uploadMedia).mockResolvedValue({
+            url: 'media/user1/01ABC',
+            mediaUlid: '01ABC',
+        });
+
+        const { useChatSend } = await import('./useChatSend');
+        const { result } = renderHook(() =>
+            useChatSend('bob', false, fakeSession, fakeMgr as never),
+        );
+
+        await act(async () => {
+            await result.current.sendMedia(
+                new File(['img'], 'photo.jpg'),
+                '  look at this  ',
+            );
+        });
+
+        const payload = vi.mocked(sendInnerPayload).mock.calls[0][6];
+        expect(payload).toMatchObject({
+            type: 'media',
+            body: 'look at this',
+            file: { name: 'photo.jpg' },
+        });
+    });
+
+    it('sendMedia falls back to the filename when the caption is blank', async () => {
+        const { resolve, uploadMedia } = await import('@/lib/api');
+        const { sendInnerPayload } = await import('@/lib/messaging');
+        vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
+            user_id: 'peer-user',
+            sharing_public_key: 'peer-key-b64',
+        });
+        vi.mocked(uploadMedia).mockResolvedValue({
+            url: 'media/user1/01ABC',
+            mediaUlid: '01ABC',
+        });
+
+        const { useChatSend } = await import('./useChatSend');
+        const { result } = renderHook(() =>
+            useChatSend('bob', false, fakeSession, fakeMgr as never),
+        );
+
+        await act(async () => {
+            await result.current.sendMedia(
+                new File(['img'], 'photo.jpg'),
+                '   ',
+            );
+        });
+
+        const payload = vi.mocked(sendInnerPayload).mock.calls[0][6];
+        expect(payload).toMatchObject({ type: 'media', body: 'photo.jpg' });
+    });
+
     it('second sendText while sending=true is a no-op', async () => {
         const { resolve } = await import('@/lib/api');
         const { sendTextMessage } = await import('@/lib/messaging');

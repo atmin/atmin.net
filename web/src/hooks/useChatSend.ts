@@ -139,7 +139,7 @@ export function useChatSend(
     sending: boolean;
     online: boolean;
     sendText: (text: string) => Promise<void>;
-    sendMedia: (file: File) => Promise<void>;
+    sendMedia: (file: File, caption?: string) => Promise<void>;
 } {
     const [sending, setSending] = useState(false);
     const online = useOnlineStatus();
@@ -169,7 +169,7 @@ export function useChatSend(
         }
     };
 
-    const sendMedia = async (file: File) => {
+    const sendMedia = async (file: File, caption?: string) => {
         if (sending || !sessionManager || !online) return;
         setSending(true);
         try {
@@ -211,7 +211,9 @@ export function useChatSend(
                 session.sharingPublicKeyBytes,
                 {
                     type: 'media',
-                    body: file.name,
+                    // Companion message from the compose tray; the filename is
+                    // the fallback so a caption-less send is unchanged (P1d).
+                    body: caption?.trim() || file.name,
                     file: {
                         url: full.url,
                         key: base64UrlEncode(full.enc.key),

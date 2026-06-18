@@ -153,15 +153,31 @@ export async function setPhotoQuality(
 }
 
 /**
- * Attach a file via the chat's hidden file input and wait for send to settle.
+ * Attach a file via the chat's hidden file input and send it.
+ *
+ * Picking now STAGES the file in the compose tray (P1d) rather than sending
+ * immediately, so we click Send to dispatch and then wait for our own echoed
+ * attachment to render — the only reliable signal that encrypt+upload+send all
+ * succeeded. Pass `caption` to type a companion message before sending.
  */
-export async function sendMedia(page: Page, filePath: string): Promise<void> {
+export async function sendMedia(
+    page: Page,
+    filePath: string,
+    caption?: string,
+): Promise<void> {
     const before = await page
         .locator('[data-testid="media-attachment"]')
         .count();
     await page.locator('input[type="file"]').setInputFiles(filePath);
-    // Wait for our own echoed attachment to render — this is the only
-    // reliable signal that encrypt+upload+send all succeeded.
+    await expect(page.getByTestId('compose-tray')).toBeVisible({
+        timeout: 15_000,
+    });
+    if (caption !== undefined) {
+        await page.getByTestId('message-input').fill(caption);
+    }
+    const send = page.getByRole('button', { name: 'Send' });
+    await expect(send).toBeEnabled({ timeout: 15_000 });
+    await send.click();
     await expect(
         page.locator('[data-testid="media-attachment"]'),
     ).toHaveCount(before + 1, { timeout: 30_000 });

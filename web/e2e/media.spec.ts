@@ -278,7 +278,11 @@ test.describe('Media', () => {
                 d.dismiss().then(resolve);
             });
         });
+        // Picking stages the file (no size check yet); the cap is enforced at
+        // Send, where the oversize alert fires before any presign.
         await alice.locator('input[type="file"]').setInputFiles(huge);
+        await expect(alice.getByTestId('compose-tray')).toBeVisible();
+        await alice.getByRole('button', { name: 'Send' }).click();
         await dialogSeen;
 
         expect(presignHits).toBe(0);
@@ -425,12 +429,9 @@ test.describe('Media', () => {
             d.dismiss();
         });
 
-        await alice.locator('input[type="file"]').setInputFiles(PHOTO);
-
-        // Alice's own echo appears exactly once after the internal retry.
-        await expect(
-            alice.locator('[data-testid="media-attachment"]'),
-        ).toHaveCount(1, { timeout: 30_000 });
+        // Stage + Send; Alice's own echo appears exactly once after the
+        // internal retry (sendMedia waits for that single echoed attachment).
+        await sendMedia(alice, PHOTO);
         expect(sendCalls, 'one 503 then one successful retry').toBe(2);
         expect(dialogFired, 'no error alert on a transient 503').toBe(false);
 

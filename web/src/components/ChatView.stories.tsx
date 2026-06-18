@@ -190,6 +190,76 @@ export const WithAmendments: Story = {
     },
 };
 
+// ── Compose tray (P1d, ADR-0022) ────────────────────────────────────────────
+// A solid-fill SVG data URI stands in for a real object-URL thumbnail (stories
+// can't mint blob: URLs statically); it reads in both light and dark.
+const SAMPLE_THUMB =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Crect width='160' height='160' fill='%2360a5fa'/%3E%3C/svg%3E";
+
+// Shared args turning on the compose affordances (📎 + staging callbacks).
+const composeArgs = {
+    chatTitle: 'copper-falcon',
+    isSaved: false,
+    handle: 'copper-falcon',
+    messages: [],
+    loading: false,
+    sending: false,
+    onSendMedia: fn(),
+    onAttach: fn(),
+    onClearAttachment: fn(),
+};
+
+// Empty compose row with the attach control available — nothing staged yet.
+export const ComposeEmpty: Story = {
+    args: { ...composeArgs },
+};
+
+// Text typed, no attachment — Send dispatches a plain text message (today's path).
+export const ComposeTextOnly: Story = {
+    args: { ...composeArgs, inputValue: 'just a normal message' },
+};
+
+// A staged image: the tray shows its thumbnail with a remove (✕); Send is
+// enabled even with no caption (a caption-less image is a valid send).
+export const ComposeStagedImage: Story = {
+    args: {
+        ...composeArgs,
+        pending: {
+            file: new File(['x'], 'beach.jpg', { type: 'image/jpeg' }),
+            previewUrl: SAMPLE_THUMB,
+            isImage: true,
+        },
+    },
+};
+
+// Staged image plus a typed caption — Send produces one media message whose
+// body is the caption.
+export const ComposeStagedImageWithCaption: Story = {
+    args: {
+        ...composeArgs,
+        inputValue: 'sunset, night one',
+        pending: {
+            file: new File(['x'], 'beach.jpg', { type: 'image/jpeg' }),
+            previewUrl: SAMPLE_THUMB,
+            isImage: true,
+        },
+    },
+};
+
+// A staged non-image renders as a name + size chip (no thumbnail).
+export const ComposeStagedFile: Story = {
+    args: {
+        ...composeArgs,
+        pending: {
+            file: new File([new Uint8Array(204_800)], 'report.pdf', {
+                type: 'application/pdf',
+            }),
+            previewUrl: '',
+            isImage: false,
+        },
+    },
+};
+
 // Confirms the "only one message edits at a time" invariant: bubble 2 is in
 // inline-edit mode (Save/Cancel visible) while the others render normally.
 export const WithOneMessageEditing: Story = {

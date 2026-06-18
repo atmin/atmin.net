@@ -127,7 +127,7 @@ export interface ChatState {
     encryptionReady: boolean;
     chatTitle: string;
     sendMessage: (text: string) => Promise<void>;
-    sendMedia: (file: File) => Promise<void>;
+    sendMedia: (file: File, caption?: string) => Promise<void>;
 }
 
 export function useChat(

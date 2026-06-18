@@ -13,6 +13,7 @@ the resulting S3 state, and is used to generate end-to-end tests.
 - [Profile and contacts](./profile-and-contacts.md) — profile updates, contact management
 - [Session rotation](./session-rotation.md) — Megolm session lifecycle
 - [Media](./media.md) — encrypted file upload and download
+- [Compose tray](./compose.md) — stage an attachment (pick / paste / drop), add a companion message, then explicit send
 - [Message amendments](./message-amendments.md) — editing and deleting sent messages via amendment envelopes
 - [Stolen device](./stolen-device.md) — device compromise and token revocation
 - [Invalid token](./invalid-token.md) — server rejects token (401), history survives

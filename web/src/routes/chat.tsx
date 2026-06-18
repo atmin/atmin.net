@@ -3,6 +3,7 @@ import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
 import { useChatAmendments } from '@/hooks/useChatAmendments';
 import { useChatScroll } from '@/hooks/useChatScroll';
+import { useComposeAttachment } from '@/hooks/useComposeAttachment';
 import { useDraft } from '@/hooks/useDraft';
 import { useMedia } from '@/hooks/useMedia';
 import type { Session } from '@/lib/auth';
@@ -56,6 +57,7 @@ export default function ChatRoute({
 
     const scroll = useChatScroll(messages, handle);
     const [inputValue, setInputValue] = useDraft(handle ?? '');
+    const compose = useComposeAttachment();
 
     return (
         <ChatView
@@ -72,6 +74,9 @@ export default function ChatRoute({
             mediaObserve={mediaObserve}
             onSend={sendMessage}
             onSendMedia={sendMedia}
+            pending={compose.pending}
+            onAttach={compose.attach}
+            onClearAttachment={compose.clear}
             inputValue={inputValue}
             setInputValue={setInputValue}
             onEditMessage={editMessage}
