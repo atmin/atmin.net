@@ -80,6 +80,16 @@ function toMessages(
                 ...(p.file.optimized !== undefined && {
                     optimized: p.file.optimized,
                 }),
+                // Decode the preview's key/iv to bytes, like the full above.
+                ...(p.file.preview && {
+                    preview: {
+                        url: p.file.preview.url,
+                        key: base64UrlDecode(p.file.preview.key),
+                        iv: base64UrlDecode(p.file.preview.iv),
+                        width: p.file.preview.width,
+                        height: p.file.preview.height,
+                    },
+                }),
             };
         }
 

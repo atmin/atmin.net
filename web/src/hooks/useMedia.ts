@@ -37,6 +37,34 @@ export interface MediaLoader {
 const IDLE: MediaState = { status: 'idle', blobUrl: null, mime: null };
 const LOADING: MediaState = { status: 'loading', blobUrl: null, mime: null };
 
+// The unit of fetching: any encrypted object, keyed by its own url. Each media
+// file contributes its full object and, when present, its preview object — both
+// independently keyed (ADR-0022), so the in-chat preview and the on-tap full
+// load and cache separately.
+interface Loadable {
+    url: string;
+    key: Uint8Array;
+    iv: Uint8Array;
+}
+
+function loadables(files: MediaFile[]): Loadable[] {
+    const out: Loadable[] = [];
+    for (const f of files) {
+        out.push({ url: f.url, key: f.key, iv: f.iv });
+        if (f.preview)
+            out.push({
+                url: f.preview.url,
+                key: f.preview.key,
+                iv: f.preview.iv,
+            });
+    }
+    return out;
+}
+
+// What renders in-chat: the preview if there is one (the full is fetched on a
+// tap), else the full is its own display object.
+const displayUrl = (f: MediaFile): string => f.preview?.url ?? f.url;
+
 export function useMedia(
     files: MediaFile[],
     token: string | undefined,
@@ -44,7 +72,7 @@ export function useMedia(
     const [states, setStates] = useState<Record<string, MediaState>>({});
     const controllersRef = useRef<Map<string, AbortController>>(new Map());
     const blobsRef = useRef<Map<string, string>>(new Map());
-    const filesRef = useRef<Map<string, MediaFile>>(new Map());
+    const filesRef = useRef<Map<string, Loadable>>(new Map());
     const tokenRef = useRef<string | undefined>(token);
 
     // Lazy-load wiring. The observer is created on first observe() so the
@@ -58,10 +86,10 @@ export function useMedia(
     // Keep refs fresh so retry()/request()/intersection always see the current
     // file metadata/token. key/iv are fresh Uint8Arrays on every sync, so we
     // key by url only.
-    filesRef.current = new Map(files.map((f) => [f.url, f]));
+    filesRef.current = new Map(loadables(files).map((l) => [l.url, l]));
     tokenRef.current = token;
 
-    const load = useCallback((file: MediaFile, tok: string) => {
+    const load = useCallback((file: Loadable, tok: string) => {
         trackedRef.current.add(file.url);
         controllersRef.current.get(file.url)?.abort();
         const ctl = new AbortController();
@@ -167,7 +195,8 @@ export function useMedia(
 
     useEffect(() => {
         if (!token) return;
-        const current = new Set(files.map((f) => f.url));
+        // Every loadable url (full + preview) is a cleanup candidate.
+        const current = new Set(filesRef.current.keys());
         // No IntersectionObserver (jsdom/SSR): preserve today's eager load so
         // tests and non-browser render paths work without mocking the observer.
         const fallback = typeof IntersectionObserver === 'undefined';
@@ -176,14 +205,19 @@ export function useMedia(
             // Only images are observed/seeded. Non-images render a click-to-
             // fetch chip (§MediaAttachment) and are never auto-downloaded.
             if (!isLikelyImage(f.name)) continue;
+            // Lazy-load the display object (preview if present, else full); the
+            // full of a previewed image loads only on an explicit tap.
+            const url = displayUrl(f);
+            const loadable = filesRef.current.get(url);
+            if (!loadable) continue;
             if (fallback) {
-                if (!controllersRef.current.has(f.url)) load(f, token);
+                if (!controllersRef.current.has(url)) load(loadable, token);
                 continue;
             }
             // Seed 'idle' so the placeholder mounts and becomes observable.
             // Loading waits for intersection — do NOT call load here.
-            trackedRef.current.add(f.url);
-            setStates((s) => (f.url in s ? s : { ...s, [f.url]: IDLE }));
+            trackedRef.current.add(url);
+            setStates((s) => (url in s ? s : { ...s, [url]: IDLE }));
         }
 
         // Teardown for files that left the message list entirely (e.g. a

@@ -410,6 +410,61 @@ describe('useMedia', () => {
         expect(revokeObjectURL).toHaveBeenCalledWith(BLOB_URL);
     });
 
+    it('with a preview, lazy-loads the preview and fetches the full only on request', async () => {
+        const { fetchMedia } = await import('@/lib/api');
+        vi.mocked(fetchMedia).mockResolvedValue(new Uint8Array([10, 20]));
+
+        const { useMedia } = await import('./useMedia');
+        const file: MediaFile = {
+            ...makeFile('media/u1/full'),
+            preview: {
+                url: 'media/u1/prev',
+                key: new Uint8Array([9]),
+                iv: new Uint8Array([8]),
+                width: 320,
+                height: 240,
+            },
+        };
+        const { result } = renderHook(() => useMedia([file], 'tok'));
+
+        await act(async () => {
+            await tick();
+        });
+        // Seeded on the PREVIEW url; the full is untouched until tapped.
+        expect(result.current.states['media/u1/prev']?.status).toBe('idle');
+        expect(result.current.states['media/u1/full']).toBeUndefined();
+
+        const el = document.createElement('div');
+        act(() => {
+            result.current.observe('media/u1/prev', el);
+        });
+        await act(async () => {
+            fireIntersect(el);
+            await tick();
+        });
+
+        expect(fetchMedia).toHaveBeenCalledWith(
+            'tok',
+            'media/u1/prev',
+            expect.any(AbortSignal),
+        );
+        expect(fetchMedia).toHaveBeenCalledTimes(1);
+        expect(result.current.states['media/u1/prev']?.status).toBe('ready');
+
+        // Tap → fetch the full on demand.
+        await act(async () => {
+            result.current.request('media/u1/full');
+            await tick();
+        });
+        expect(fetchMedia).toHaveBeenCalledWith(
+            'tok',
+            'media/u1/full',
+            expect.any(AbortSignal),
+        );
+        expect(result.current.states['media/u1/full']?.status).toBe('ready');
+        expect(fetchMedia).toHaveBeenCalledTimes(2);
+    });
+
     it('removes state and aborts controller when file leaves the list', async () => {
         const { fetchMedia } = await import('@/lib/api');
         vi.mocked(fetchMedia).mockResolvedValue(new Uint8Array([1]));

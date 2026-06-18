@@ -11,14 +11,15 @@ import { useOnlineStatus } from './useOnlineStatus';
 export interface ChatAmendments {
     busy: boolean;
     editMessage: (msgId: string, newBody: string) => Promise<void>;
-    deleteMessage: (msgId: string, mediaUrl?: string) => Promise<void>;
+    deleteMessage: (msgId: string, mediaUrls?: string[]) => Promise<void>;
 }
 
 // Edit/delete actions for the user's own messages. Both send an amendment
 // envelope referencing the original by msg_id (ADR-0014). On delete of a media
-// message the sender additionally drops the underlying S3 blob (best-effort);
-// the recipient's decrypted-blob cache is purged automatically by useMedia once
-// the materializer removes the media reference from the message.
+// message the sender additionally drops the message's full S3 object set — the
+// full and its preview (ADR-0022) — best-effort; the recipient's decrypted-blob
+// cache is purged automatically by useMedia once the materializer removes the
+// media reference from the message.
 export function useChatAmendments(
     handle: string | undefined,
     isSaved: boolean,
@@ -32,7 +33,7 @@ export function useChatAmendments(
         targetMsgId: string,
         action: AmendmentAction,
         body: string | undefined,
-        mediaUrl?: string,
+        mediaUrls?: string[],
     ): Promise<void> {
         if (busy || !sessionManager || !online) return;
         setBusy(true);
@@ -51,13 +52,18 @@ export function useChatAmendments(
                 body,
                 sessionManager,
             );
-            if (action === 'delete' && mediaUrl) {
+            if (action === 'delete' && mediaUrls) {
                 // Best-effort: the amendment alone satisfies user intent, so a
                 // failed blob delete is logged, not surfaced. A future
                 // orphan-media sweep (ADR-0006) catches anything left behind.
-                storeDelete(session.token, mediaUrl).catch((e) =>
-                    console.error('media blob delete failed (best-effort):', e),
-                );
+                for (const url of mediaUrls) {
+                    storeDelete(session.token, url).catch((e) =>
+                        console.error(
+                            'media blob delete failed (best-effort):',
+                            e,
+                        ),
+                    );
+                }
             }
             await syncAndPublish(session, sessionManager);
         } catch (error) {
@@ -71,7 +77,7 @@ export function useChatAmendments(
     return {
         busy,
         editMessage: (msgId, newBody) => amend(msgId, 'edit', newBody),
-        deleteMessage: (msgId, mediaUrl) =>
-            amend(msgId, 'delete', undefined, mediaUrl),
+        deleteMessage: (msgId, mediaUrls) =>
+            amend(msgId, 'delete', undefined, mediaUrls),
     };
 }

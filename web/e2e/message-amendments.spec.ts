@@ -9,6 +9,7 @@ import {
     resyncChat,
     sendMedia,
     sendMessage,
+    setPhotoQuality,
     waitForDeleted,
     waitForEdited,
     waitForMessage,
@@ -212,6 +213,11 @@ test.describe('Message amendments', () => {
                 'base64',
             ),
         );
+        // This test exercises delete, not optimization. Send untouched so it
+        // doesn't route through the canvas re-encode — a degenerate 1x1
+        // transparent PNG isn't JPEG-encodable, and the optimized default fails
+        // closed rather than leak the original (ADR-0022 §5).
+        await setPhotoQuality(alice, 'original');
         await sendMedia(alice, fixture);
 
         await openChat(bob, aliceHandle);

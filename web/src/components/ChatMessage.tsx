@@ -10,7 +10,10 @@ interface Props {
     sent: boolean;
     media?: MediaFile;
     mediaState?: MediaState;
-    // Force-load a url (non-image chip click + network-error retry).
+    // State of the full image, fetched on tap when a preview exists (ADR-0022).
+    mediaFullState?: MediaState;
+    // Force-load a url (non-image chip click + network-error retry, or tap-for-
+    // full). The display vs full url is curried at this leaf.
     onMediaRequest?: (url: string) => void;
     // Lazy-load observe wiring for images; curried to the url at the leaf.
     mediaObserve?: (url: string, el: HTMLElement | null) => void;
@@ -139,6 +142,7 @@ export default function ChatMessage({
     sent,
     media,
     mediaState,
+    mediaFullState,
     onMediaRequest,
     mediaObserve,
     editedAt,
@@ -195,14 +199,25 @@ export default function ChatMessage({
                 <div className="mb-1">
                     <MediaAttachment
                         state={mediaState}
+                        fullState={mediaFullState}
+                        hasPreview={!!media.preview}
                         name={media.name}
                         size={media.size}
                         width={media.width}
                         height={media.height}
-                        onRequest={() => onMediaRequest(media.url)}
+                        // Chip/retry loads the displayed object (preview if any);
+                        // tap loads the full.
+                        onRequest={() =>
+                            onMediaRequest(media.preview?.url ?? media.url)
+                        }
+                        onRequestFull={() => onMediaRequest(media.url)}
                         observe={
                             mediaObserve
-                                ? (el) => mediaObserve(media.url, el)
+                                ? (el) =>
+                                      mediaObserve(
+                                          media.preview?.url ?? media.url,
+                                          el,
+                                      )
                                 : undefined
                         }
                     />

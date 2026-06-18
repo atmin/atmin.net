@@ -42,6 +42,17 @@ export interface MediaFileExtras {
     optimized?: boolean;
 }
 
+// Decrypted/decoded preview reference (key/iv as bytes), mirroring MediaFile's
+// in-memory form. The wire shape (base64url key/iv) is `PreviewRef` in
+// lib/payload; the materializer decodes one into the other.
+export interface DecodedPreviewRef {
+    url: string;
+    key: Uint8Array;
+    iv: Uint8Array;
+    width: number;
+    height: number;
+}
+
 // In-memory form: key/iv are decoded to bytes for crypto (the wire form keeps
 // them as base64url strings).
 export interface MediaFile extends MediaFileExtras {
@@ -50,6 +61,9 @@ export interface MediaFile extends MediaFileExtras {
     iv: Uint8Array;
     name: string;
     size: number;
+    // Optional small thumbnail object (ADR-0022 §3). Present only above the
+    // preview threshold; absent ⇒ the full is its own preview.
+    preview?: DecodedPreviewRef;
 }
 
 export interface EncryptedMedia {

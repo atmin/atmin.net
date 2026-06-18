@@ -73,6 +73,60 @@ export const ReadyImageDimensioned: Story = {
     },
 };
 
+// Preview shown (ADR-0022): a tappable thumbnail; tapping loads the full.
+export const PreviewTappable: Story = {
+    args: {
+        name: 'sunset.jpg',
+        size: 482_113,
+        width: 2048,
+        height: 1536,
+        hasPreview: true,
+        state: state({
+            status: 'ready',
+            blobUrl: PNG_DATA_URL,
+            mime: 'image/jpeg',
+        }),
+    },
+};
+
+// Preview shown, full fetching after a tap — a "Loading…" overlay, no reflow.
+export const FullLoadingOverPreview: Story = {
+    args: {
+        name: 'sunset.jpg',
+        size: 482_113,
+        width: 2048,
+        height: 1536,
+        hasPreview: true,
+        state: state({
+            status: 'ready',
+            blobUrl: PNG_DATA_URL,
+            mime: 'image/jpeg',
+        }),
+        fullState: state({ status: 'loading', blobUrl: null, mime: null }),
+    },
+};
+
+// Full loaded — swaps in over the preview, opens in a new tab on click.
+export const FullShownOverPreview: Story = {
+    args: {
+        name: 'sunset.jpg',
+        size: 482_113,
+        width: 2048,
+        height: 1536,
+        hasPreview: true,
+        state: state({
+            status: 'ready',
+            blobUrl: PNG_DATA_URL,
+            mime: 'image/jpeg',
+        }),
+        fullState: state({
+            status: 'ready',
+            blobUrl: PNG_DATA_URL,
+            mime: 'image/jpeg',
+        }),
+    },
+};
+
 export const ReadyImage: Story = {
     args: {
         name: 'sunset.png',

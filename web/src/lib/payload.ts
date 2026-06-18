@@ -12,6 +12,16 @@
 
 import type { MediaFileExtras } from './media';
 
+// A preview object reference on the wire: key/iv as base64url strings (decoded
+// to bytes as DecodedPreviewRef in lib/media by the materializer).
+export interface PreviewRef {
+    url: string;
+    key: string;
+    iv: string;
+    width: number;
+    height: number;
+}
+
 // The canonical wire media-file shape: key/iv as base64url strings (vs the
 // decoded bytes in lib/media's MediaFile). The five required fields stay the
 // parse gate; the additive ADR-0022 fields ride along via MediaFileExtras and
@@ -23,6 +33,7 @@ export interface ParsedMediaFile extends MediaFileExtras {
     iv: string;
     name: string;
     size: number;
+    preview?: PreviewRef;
 }
 
 export type ParsedInner =
@@ -75,6 +86,26 @@ export function parseInner(text: string): ParsedInner {
             if (typeof f.width === 'number') file.width = f.width;
             if (typeof f.height === 'number') file.height = f.height;
             if (typeof f.optimized === 'boolean') file.optimized = f.optimized;
+            // Preview is read only when fully well-typed; a malformed one is
+            // dropped (the full still renders).
+            if (f.preview && typeof f.preview === 'object') {
+                const p = f.preview as Record<string, unknown>;
+                if (
+                    typeof p.url === 'string' &&
+                    typeof p.key === 'string' &&
+                    typeof p.iv === 'string' &&
+                    typeof p.width === 'number' &&
+                    typeof p.height === 'number'
+                ) {
+                    file.preview = {
+                        url: p.url,
+                        key: p.key,
+                        iv: p.iv,
+                        width: p.width,
+                        height: p.height,
+                    };
+                }
+            }
             return { kind: 'media', body: o.body, file };
         }
     }

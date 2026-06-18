@@ -60,7 +60,7 @@ describe('useChatAmendments', () => {
         expect(syncAndPublish).toHaveBeenCalled();
     });
 
-    it('deleteMessage sends a delete amendment + storeDelete when a mediaUrl is given', async () => {
+    it('deleteMessage sends a delete amendment + storeDelete for each object url', async () => {
         const { sendAmendment } = await import('@/lib/amendments');
         const { storeDelete } = await import('@/lib/api');
         const { useChatAmendments } = await import('./useChatAmendments');
@@ -69,7 +69,9 @@ describe('useChatAmendments', () => {
             useChatAmendments('bob', false, fakeSession, fakeMgr),
         );
         await act(async () => {
-            await result.current.deleteMessage('01TARGET', 'media/user1/01ABC');
+            await result.current.deleteMessage('01TARGET', [
+                'media/user1/01ABC',
+            ]);
         });
 
         const args = vi.mocked(sendAmendment).mock.calls[0];
@@ -78,7 +80,26 @@ describe('useChatAmendments', () => {
         expect(storeDelete).toHaveBeenCalledWith('tok', 'media/user1/01ABC');
     });
 
-    it('deleteMessage without a mediaUrl does not call storeDelete', async () => {
+    it('deleteMessage sweeps the full object set (full + preview)', async () => {
+        const { storeDelete } = await import('@/lib/api');
+        const { useChatAmendments } = await import('./useChatAmendments');
+
+        const { result } = renderHook(() =>
+            useChatAmendments('bob', false, fakeSession, fakeMgr),
+        );
+        await act(async () => {
+            await result.current.deleteMessage('01TARGET', [
+                'media/user1/full',
+                'media/user1/preview',
+            ]);
+        });
+
+        expect(storeDelete).toHaveBeenCalledWith('tok', 'media/user1/full');
+        expect(storeDelete).toHaveBeenCalledWith('tok', 'media/user1/preview');
+        expect(storeDelete).toHaveBeenCalledTimes(2);
+    });
+
+    it('deleteMessage without media urls does not call storeDelete', async () => {
         const { storeDelete } = await import('@/lib/api');
         const { useChatAmendments } = await import('./useChatAmendments');
 
@@ -102,7 +123,9 @@ describe('useChatAmendments', () => {
             useChatAmendments('bob', false, fakeSession, fakeMgr),
         );
         await act(async () => {
-            await result.current.deleteMessage('01TARGET', 'media/user1/01ABC');
+            await result.current.deleteMessage('01TARGET', [
+                'media/user1/01ABC',
+            ]);
         });
 
         // The amendment path completed (synced) despite the blob delete failing.

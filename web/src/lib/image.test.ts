@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { fitWithin, isOptimizableImage, OPTIMIZED_MAX_EDGE } from './image';
+import {
+    fitWithin,
+    isOptimizableImage,
+    needsPreview,
+    OPTIMIZED_MAX_EDGE,
+} from './image';
 
 describe('fitWithin', () => {
     it('never upscales an image already within the cap', () => {
@@ -46,5 +51,22 @@ describe('isOptimizableImage', () => {
         expect(isOptimizableImage('application/pdf')).toBe(false);
         expect(isOptimizableImage('')).toBe(false);
         expect(isOptimizableImage('video/mp4')).toBe(false);
+    });
+});
+
+describe('needsPreview', () => {
+    it('is true over the byte threshold (>100 KB)', () => {
+        expect(needsPreview(101 * 1024, 800, 600)).toBe(true);
+    });
+
+    it('is true over the edge threshold (>1024 px)', () => {
+        expect(needsPreview(20 * 1024, 2048, 1536)).toBe(true);
+        expect(needsPreview(20 * 1024, 600, 1200)).toBe(true); // tall
+    });
+
+    it('is false when small in both bytes and dimensions', () => {
+        expect(needsPreview(50 * 1024, 800, 600)).toBe(false);
+        expect(needsPreview(74, 8, 8)).toBe(false); // the e2e fixture
+        expect(needsPreview(100 * 1024, 1024, 1024)).toBe(false); // exactly at caps
     });
 });

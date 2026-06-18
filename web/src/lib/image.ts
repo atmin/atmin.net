@@ -9,6 +9,16 @@
 export const OPTIMIZED_MAX_EDGE = 2048;
 export const OPTIMIZED_QUALITY = 0.8;
 
+// Preview (ADR-0022 §3): a tiny JPEG thumbnail shown immediately in-chat while
+// the full is fetched only on tap.
+export const PREVIEW_MAX_EDGE = 512;
+const PREVIEW_TARGET_BYTES = 50 * 1024;
+const PREVIEW_THRESHOLD_BYTES = 100 * 1024;
+const PREVIEW_THRESHOLD_EDGE = 1024;
+// Descending quality ladder: take the first result under the size target, else
+// the smallest achieved. A re-encode is cheap and one-time at send.
+const PREVIEW_QUALITY_STEPS = [0.7, 0.5, 0.4];
+
 export interface Reencoded {
     blob: Blob;
     width: number;
@@ -79,6 +89,42 @@ export async function reencodeImage(
     } finally {
         bitmap.close();
     }
+}
+
+/**
+ * Worth shipping a separate preview object only when the stored full is big
+ * enough that a tiny thumbnail saves a meaningful first-paint fetch: over
+ * ~100 KB or ~1024 px on an edge. Below that the full already *is* a fine
+ * preview, so none is made (ADR-0022 §3). Pure — directly testable.
+ */
+export function needsPreview(
+    fullBytes: number,
+    width: number,
+    height: number,
+): boolean {
+    return (
+        fullBytes > PREVIEW_THRESHOLD_BYTES ||
+        Math.max(width, height) > PREVIEW_THRESHOLD_EDGE
+    );
+}
+
+/**
+ * Generate a ~50 KB JPEG preview from the stored full, stepping quality down a
+ * fixed ladder until under the byte target (or returning the smallest achieved).
+ * Rejects like {@link reencodeImage} on an undecodable source / encode failure.
+ */
+export async function makePreview(src: Blob): Promise<Reencoded> {
+    let smallest: Reencoded | null = null;
+    for (const quality of PREVIEW_QUALITY_STEPS) {
+        const r = await reencodeImage(src, {
+            maxEdge: PREVIEW_MAX_EDGE,
+            quality,
+        });
+        if (r.blob.size <= PREVIEW_TARGET_BYTES) return r;
+        if (!smallest || r.blob.size < smallest.blob.size) smallest = r;
+    }
+    // Non-null: the ladder is non-empty, so at least one result was recorded.
+    return smallest as Reencoded;
 }
 
 /**

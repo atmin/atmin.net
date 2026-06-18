@@ -42,6 +42,10 @@ vi.mock('@/lib/image', async () => {
         ...actual,
         reencodeImage: vi.fn(),
         imageSize: vi.fn(),
+        makePreview: vi.fn(),
+        // Default: no preview (undefined ⇒ falsy). Preview tests opt in with
+        // mockReturnValueOnce(true).
+        needsPreview: vi.fn(),
     };
 });
 
@@ -388,20 +392,87 @@ describe('useChatSend', () => {
         });
     });
 
-    it('falls back to the original when re-encode fails', async () => {
-        const { reencodeImage, imageSize } = await import('@/lib/image');
+    it('fails closed when re-encode fails — never silently ships the un-stripped original', async () => {
+        const { reencodeImage } = await import('@/lib/image');
         const { encryptMedia } = await import('@/lib/media');
+        const { resolve, uploadMedia } = await import('@/lib/api');
+        const { sendInnerPayload } = await import('@/lib/messaging');
         const { getPhotoQuality } = await import('@/lib/photo-quality');
         vi.mocked(getPhotoQuality).mockReturnValue('optimized');
         vi.mocked(reencodeImage).mockRejectedValue(new Error('decode failed'));
-        vi.mocked(imageSize).mockResolvedValue({ width: 100, height: 100 });
+        vi.mocked(resolve).mockResolvedValue({
+            status: 'live',
+            user_id: 'peer-user',
+            sharing_public_key: 'peer-key-b64',
+        });
 
+        const { useChatSend } = await import('./useChatSend');
+        const { result } = renderHook(() =>
+            useChatSend('bob', false, fakeSession, fakeMgr as never),
+        );
         const file = new File(['raw'], 'weird.png', { type: 'image/png' });
+        await act(async () => {
+            await result.current.sendMedia(file);
+        });
+
+        // The original bytes (and their EXIF) are never encrypted, uploaded, or
+        // referenced in an envelope.
+        expect(reencodeImage).toHaveBeenCalled();
+        expect(encryptMedia).not.toHaveBeenCalled();
+        expect(uploadMedia).not.toHaveBeenCalled();
+        expect(sendInnerPayload).not.toHaveBeenCalled();
+    });
+
+    it('generates a preview above the threshold: uploads full + preview and sets file.preview', async () => {
+        const { reencodeImage, makePreview, needsPreview } = await import(
+            '@/lib/image'
+        );
+        const { uploadMedia } = await import('@/lib/api');
+        const { getPhotoQuality } = await import('@/lib/photo-quality');
+        vi.mocked(getPhotoQuality).mockReturnValue('optimized');
+        vi.mocked(reencodeImage).mockResolvedValue({
+            blob: new Blob(['full']),
+            width: 2048,
+            height: 1536,
+        });
+        vi.mocked(needsPreview).mockReturnValueOnce(true);
+        vi.mocked(makePreview).mockResolvedValue({
+            blob: new Blob(['prev']),
+            width: 320,
+            height: 240,
+        });
+
+        const file = new File(['raw'], 'photo.jpg', { type: 'image/jpeg' });
         const sent = await sendAndCaptureFile(file);
 
-        expect(reencodeImage).toHaveBeenCalled();
-        expect(encryptMedia).toHaveBeenCalledWith(file); // original bytes
-        expect(sent).toMatchObject({ optimized: false, mime: 'image/png' });
+        expect(makePreview).toHaveBeenCalled();
+        expect(uploadMedia).toHaveBeenCalledTimes(2); // full + preview
+        expect(sent).toMatchObject({
+            optimized: true,
+            preview: { width: 320, height: 240 },
+        });
+    });
+
+    it('skips the preview below the threshold: a single upload, no preview field', async () => {
+        const { reencodeImage, makePreview, needsPreview } = await import(
+            '@/lib/image'
+        );
+        const { uploadMedia } = await import('@/lib/api');
+        const { getPhotoQuality } = await import('@/lib/photo-quality');
+        vi.mocked(getPhotoQuality).mockReturnValue('optimized');
+        vi.mocked(reencodeImage).mockResolvedValue({
+            blob: new Blob(['full']),
+            width: 800,
+            height: 600,
+        });
+        vi.mocked(needsPreview).mockReturnValue(false);
+
+        const file = new File(['raw'], 'small.jpg', { type: 'image/jpeg' });
+        const sent = await sendAndCaptureFile(file);
+
+        expect(makePreview).not.toHaveBeenCalled();
+        expect(uploadMedia).toHaveBeenCalledTimes(1);
+        expect(sent?.preview).toBeUndefined();
     });
 
     it('rejects an oversize source before re-encoding or uploading', async () => {

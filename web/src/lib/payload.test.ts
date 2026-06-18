@@ -78,6 +78,55 @@ describe('parseInner', () => {
         });
     });
 
+    it('parses the optional preview descriptor when well-formed (ADR-0022)', () => {
+        const file = {
+            url: 'media/u/full',
+            key: 'k',
+            iv: 'iv',
+            name: 'p.jpg',
+            size: 500_000,
+            mime: 'image/jpeg',
+            width: 2048,
+            height: 1536,
+            optimized: true,
+            preview: {
+                url: 'media/u/prev',
+                key: 'pk',
+                iv: 'piv',
+                width: 320,
+                height: 240,
+            },
+        };
+        expect(
+            parseInner(JSON.stringify({ type: 'media', body: 'cap', file })),
+        ).toEqual({ kind: 'media', body: 'cap', file });
+    });
+
+    it('drops a malformed preview, keeping the rest of the file', () => {
+        const file = {
+            url: 'media/u/full',
+            key: 'k',
+            iv: 'iv',
+            name: 'p.jpg',
+            size: 5,
+            preview: { url: 'media/u/prev', key: 'pk' }, // missing iv/width/height
+        };
+        const out = parseInner(
+            JSON.stringify({ type: 'media', body: 'cap', file }),
+        );
+        expect(out).toEqual({
+            kind: 'media',
+            body: 'cap',
+            file: {
+                url: 'media/u/full',
+                key: 'k',
+                iv: 'iv',
+                name: 'p.jpg',
+                size: 5,
+            },
+        });
+    });
+
     it('parses an amendment, carrying an unknown action through verbatim', () => {
         expect(
             parseInner(

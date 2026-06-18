@@ -26,7 +26,7 @@ interface Props {
     inputValue: string;
     setInputValue: (v: string) => void;
     onEditMessage?: (id: string, newBody: string) => void;
-    onDeleteMessage?: (id: string, mediaUrl?: string) => void;
+    onDeleteMessage?: (id: string, mediaUrls?: string[]) => void;
     scrollContainerRef?: (el: HTMLDivElement | null) => void;
     showJumpToBottom?: boolean;
     onJumpToBottom?: () => void;
@@ -124,6 +124,15 @@ export default function ChatView({
                                             media={msg.media}
                                             mediaState={
                                                 msg.media
+                                                    ? mediaStates[
+                                                          msg.media.preview
+                                                              ?.url ??
+                                                              msg.media.url
+                                                      ]
+                                                    : undefined
+                                            }
+                                            mediaFullState={
+                                                msg.media
                                                     ? mediaStates[msg.media.url]
                                                     : undefined
                                             }
@@ -156,7 +165,22 @@ export default function ChatView({
                                                     ? () =>
                                                           onDeleteMessage(
                                                               msg.id,
-                                                              msg.media?.url,
+                                                              msg.media
+                                                                  ? [
+                                                                        msg
+                                                                            .media
+                                                                            .url,
+                                                                        msg
+                                                                            .media
+                                                                            .preview
+                                                                            ?.url,
+                                                                    ].filter(
+                                                                        (
+                                                                            u,
+                                                                        ): u is string =>
+                                                                            !!u,
+                                                                    )
+                                                                  : undefined,
                                                           )
                                                     : undefined
                                             }
