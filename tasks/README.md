@@ -51,8 +51,10 @@ preview (`file.preview`) shown immediately in-chat; the full is fetched only on
 tap (`useMedia` dual-load), and delete sweeps the full object set (full +
 preview). Reuses the P1a re-encode primitive (`makePreview`).
 
-1. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
+1. **[media-compose-tray](media-compose-tray.md)** (P1d) — Replace immediate-send-on-pick with a compose tray: stage one attachment (picker / **paste** / drag-drop), add a companion message, then explicit Send. Additive on the single `file` (only populates the existing message-level `body`); independent of the P1a–c image pipeline, and the same tray Phase 2 generalizes to multi-select. Closes the "no companion message, can't paste" gap felt today.
 
-2. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+2. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
 
-3. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.
+3. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+
+4. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.

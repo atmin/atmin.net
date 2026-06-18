@@ -243,9 +243,15 @@ The album schema (§1) is the end state, but it is reached in two phases, and th
 
 Phase 1 itself is incremental — optimized+strip send, then conditional
 preview + preview-first display, then the local preview cache — each shippable
-on its own. Schema-free media wins (lazy-load + non-image chip, archive-ingest
-cache) are independent of all of the above and can land in any order. The
-detailed steps live in `tasks/`.
+on its own. A **compose tray** — staging one attachment (file picker, **clipboard
+paste**, or drag-drop) alongside a companion message, sent on an explicit Send
+rather than immediately on pick — is another additive, schema-free increment: it
+only populates the message-level `body` that already exists in the shape above,
+so it needs no wire change, and the same tray is what the Phase-2 multi-select
+composer generalizes to several attachments. Schema-free media wins (lazy-load +
+non-image chip, archive-ingest cache, the compose tray) are independent of the
+image-pipeline steps and can land in any order. The detailed steps live in
+`tasks/`.
 
 ## Consequences
 
