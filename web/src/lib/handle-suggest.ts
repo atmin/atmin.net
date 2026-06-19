@@ -11,7 +11,7 @@ export function suggestHandle(): string {
     return `${wordlist[i[0] % 2048]}-${wordlist[i[1] % 2048]}`;
 }
 
-// Mirrors the server-side regex in server/handle.go. Keeping the two in
+// Mirrors the server-side regex in server/src/model.rs. Keeping the two in
 // sync is a deliberate duplication: the client uses this for instant
 // feedback while typing, the server uses its copy as the authoritative
 // gate. A handle test on both sides pins each definition.

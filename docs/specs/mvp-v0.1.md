@@ -1,9 +1,8 @@
 # MVP v0.1 Spec
 
-Status: scope frozen — the v0.1 surface is fixed and nearly complete
-(remaining work in [tasks/](../../tasks/README.md)). New surface area
-(starting with background delivery) lives in
-[v0.2.md](v0.2.md), not here.
+Status: scope frozen — the v0.1 surface is fixed and complete. New surface
+area (starting with background delivery) lives in [v0.2.md](v0.2.md), not
+here; remaining forward work is tracked in [tasks/](../../tasks/README.md).
 
 ## Goals
 
@@ -15,6 +14,7 @@ Status: scope frozen — the v0.1 surface is fixed and nearly complete
 - User-chosen handles with reserved-list + cooldown semantics (ADR-0013).
 - Message edit and delete via amendment envelopes (ADR-0014).
 - Self-service account deletion, plus server-side cleanup of abandoned data and storage-usage visibility.
+- Registration gated by a memory-hard proof-of-work (ADR-0020, supersedes ADR-0007).
 
 ## Non-goals
 
@@ -36,11 +36,11 @@ See [vision non-goals](../vision.md#non-goals). Additionally: perfect realtime d
     - HTTP control plane
     - SSE for realtime new-message hints
 
-### Server (Go)
+### Server (Rust)
 
-- Stateless HTTP API + in-memory SSE hub.
-- S3 client (S3-compatible endpoint).
-- Minimal auth (device token).
+- Single Rust crate on Rocket 0.5; stateless HTTP API + in-memory SSE hub.
+- S3 client (S3-compatible endpoint) — all durable state lives in S3.
+- Bearer-token (HMAC) auth via request guards.
 
 ### Storage (S3-compatible)
 

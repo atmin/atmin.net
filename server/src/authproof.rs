@@ -51,7 +51,7 @@ pub fn verify(
         .map_err(|_| AuthProofError::VerifyFailed)
 }
 
-/// Max age of an auth proof's timestamp (the ±5-minute freshness window, auth.go).
+/// Max age of an auth proof's timestamp (the ±5-minute freshness window).
 pub const AUTH_PROOF_MAX_AGE_SECS: i64 = 300;
 
 /// A signed auth proof as sent on the wire: a `payload` object plus a base64url

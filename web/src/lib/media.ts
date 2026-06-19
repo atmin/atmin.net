@@ -10,7 +10,7 @@
 export const MAX_MEDIA_BYTES = 25 * 1024 * 1024;
 
 type Bytes = Uint8Array<ArrayBuffer>;
-const buf = (data: Uint8Array): Bytes => data as Bytes; // keep in sync with server/media_quota.go
+const buf = (data: Uint8Array): Bytes => data as Bytes; // keep in sync with server/src/media_quota.rs
 
 export class FileTooLargeError extends Error {
     constructor() {
