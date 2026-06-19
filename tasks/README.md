@@ -59,8 +59,16 @@ the typed text (filename fallback when empty). Additive on the single `file`
 (only populates the existing message-level `body`); the same tray is what Phase 2
 generalizes to multi-select. Scenario: [compose](../docs/scenarios/compose.md).
 
-1. **[media-preview-cache](media-preview-cache.md)** (P1c) — Persist decrypted previews in IndexedDB so media history browses offline and survives refresh; receiver-side thumbnail for preview-less images. Best-effort cache (miss re-fetches).
+**P1c — local media cache — has landed**: decrypted previews (and
+below-threshold smalls) are cached in IndexedDB (`media_cache` store, keyed by
+S3 URL — write-once, never stale) on first fetch and served from there
+afterward, so media history browses offline and survives refresh with no
+re-download (`useMedia` read-through). A preview-less image leaves a
+receiver-derived ~512 px thumbnail after its one full download. Best-effort: a
+miss/eviction re-fetches; the cache is purged on delete and on a server 404,
+and `navigator.storage.persist()` is requested once. Full originals are not
+cached (deferred v2).
 
-2. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
+1. **[ios-install-hint](ios-install-hint.md)** — Dismissible banner on iOS Safari pointing users toward "Add to Home Screen." Low effort; iOS has no native install prompt, so without this the PWA is effectively undiscoverable on the platform. (Originally a push-on-iOS prerequisite; that rationale is moot now, but PWA installability has standalone value.)
 
-3. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.
+2. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.

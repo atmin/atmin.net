@@ -11,6 +11,10 @@ vi.mock('@/lib/api', () => ({
     storeDelete: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@/lib/db', () => ({
+    deleteMediaBlob: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@/lib/inbox-sync', () => ({
     syncAndPublish: vi.fn().mockResolvedValue(undefined),
 }));
@@ -99,8 +103,28 @@ describe('useChatAmendments', () => {
         expect(storeDelete).toHaveBeenCalledTimes(2);
     });
 
-    it('deleteMessage without media urls does not call storeDelete', async () => {
+    it('deleteMessage evicts each swept url from the local media cache', async () => {
+        const { deleteMediaBlob } = await import('@/lib/db');
+        const { useChatAmendments } = await import('./useChatAmendments');
+
+        const { result } = renderHook(() =>
+            useChatAmendments('bob', false, fakeSession, fakeMgr),
+        );
+        await act(async () => {
+            await result.current.deleteMessage('01TARGET', [
+                'media/user1/full',
+                'media/user1/preview',
+            ]);
+        });
+
+        expect(deleteMediaBlob).toHaveBeenCalledWith('media/user1/full');
+        expect(deleteMediaBlob).toHaveBeenCalledWith('media/user1/preview');
+        expect(deleteMediaBlob).toHaveBeenCalledTimes(2);
+    });
+
+    it('deleteMessage without media urls does not call storeDelete or evict', async () => {
         const { storeDelete } = await import('@/lib/api');
+        const { deleteMediaBlob } = await import('@/lib/db');
         const { useChatAmendments } = await import('./useChatAmendments');
 
         const { result } = renderHook(() =>
@@ -111,6 +135,7 @@ describe('useChatAmendments', () => {
         });
 
         expect(storeDelete).not.toHaveBeenCalled();
+        expect(deleteMediaBlob).not.toHaveBeenCalled();
     });
 
     it('deleteMessage still succeeds when storeDelete fails (best-effort)', async () => {

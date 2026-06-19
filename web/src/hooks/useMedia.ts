@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchMedia, NotFoundError } from '@/lib/api';
 import {
+    deleteMediaBlob,
+    getMediaBlob,
+    putMediaBlob,
+    type StoredMediaBlob,
+} from '@/lib/db';
+import { imageSize, makePreview, needsPreview } from '@/lib/image';
+import {
     decryptMedia,
     type InlineMime,
     isLikelyImage,
@@ -37,6 +44,15 @@ export interface MediaLoader {
 const IDLE: MediaState = { status: 'idle', blobUrl: null, mime: null };
 const LOADING: MediaState = { status: 'loading', blobUrl: null, mime: null };
 
+// How a fetched object is persisted for offline browsing (ADR-0022 §7):
+//   'preview' — a preview object → cache the decrypted bytes verbatim (tiny);
+//   'derive'  — a preview-less image's in-chat display object → cache a small
+//               one verbatim, downscale a larger one to a local thumbnail (a
+//               full original is never persisted — that is deferred v2);
+//   'none'    — the on-tap full of a previewed image (a full original) → not
+//               cached.
+type CachePolicy = 'preview' | 'derive' | 'none';
+
 // The unit of fetching: any encrypted object, keyed by its own url. Each media
 // file contributes its full object and, when present, its preview object — both
 // independently keyed (ADR-0022), so the in-chat preview and the on-tap full
@@ -45,17 +61,26 @@ interface Loadable {
     url: string;
     key: Uint8Array;
     iv: Uint8Array;
+    cache: CachePolicy;
 }
 
 function loadables(files: MediaFile[]): Loadable[] {
     const out: Loadable[] = [];
     for (const f of files) {
-        out.push({ url: f.url, key: f.key, iv: f.iv });
+        // A previewed image's full is the on-tap original (not cached); a
+        // preview-less image's full IS its in-chat display object (cached).
+        out.push({
+            url: f.url,
+            key: f.key,
+            iv: f.iv,
+            cache: f.preview ? 'none' : 'derive',
+        });
         if (f.preview)
             out.push({
                 url: f.preview.url,
                 key: f.preview.key,
                 iv: f.preview.iv,
+                cache: 'preview',
             });
     }
     return out;
@@ -64,6 +89,71 @@ function loadables(files: MediaFile[]): Loadable[] {
 // What renders in-chat: the preview if there is one (the full is fetched on a
 // tap), else the full is its own display object.
 const displayUrl = (f: MediaFile): string => f.preview?.url ?? f.url;
+
+const toPart = (u: Uint8Array): BlobPart => u as unknown as BlobPart;
+
+// Copy out an exact ArrayBuffer (a decrypted view may be a subarray of a larger
+// buffer) for the durable record.
+function toEntry(
+    url: string,
+    bytes: Uint8Array,
+    mime: InlineMime | null,
+): StoredMediaBlob {
+    return {
+        url,
+        bytes: bytes.slice().buffer as ArrayBuffer,
+        mime: mime ?? 'application/octet-stream',
+        cachedAt: Date.now(),
+    };
+}
+
+// Best-effort write-through of a decrypted object to the offline cache. Never
+// throws — any decode / canvas / IDB failure simply leaves no entry and a later
+// view re-fetches. A full original is never persisted (ADR-0022 §7 — deferred
+// v2): preview-less images are cached small-verbatim or downscaled-to-thumbnail.
+async function cacheAfterLoad(
+    file: Loadable,
+    plaintext: Uint8Array,
+): Promise<void> {
+    try {
+        if (file.cache === 'none') return;
+        const mime = sniffInlineImageMime(plaintext);
+        if (file.cache === 'preview') {
+            await putMediaBlob(toEntry(file.url, plaintext, mime));
+            return;
+        }
+        // 'derive': a preview-less image's display object. A non-image is a full
+        // original → never cached.
+        if (!mime) return;
+        const blob = new Blob([toPart(plaintext)], { type: mime });
+        const { width, height } = await imageSize(blob);
+        if (!needsPreview(plaintext.byteLength, width, height)) {
+            // Below threshold: the full IS a fine preview — cache it verbatim.
+            await putMediaBlob(toEntry(file.url, plaintext, mime));
+            return;
+        }
+        // Larger: downscale to a local ~512px thumbnail and cache that, so the
+        // full original is not persisted yet later browsing stays offline.
+        const thumb = await makePreview(blob);
+        const bytes = new Uint8Array(await thumb.blob.arrayBuffer());
+        await putMediaBlob(toEntry(file.url, bytes, 'image/jpeg'));
+    } catch {
+        // Best-effort — leave the cache untouched on any failure.
+    }
+}
+
+// Ask the browser to keep our storage under pressure (ADR-0022 §7). One-shot
+// across the whole app; never depended on — a miss simply re-fetches.
+let persistenceRequested = false;
+function requestStoragePersistence(): void {
+    if (persistenceRequested) return;
+    persistenceRequested = true;
+    try {
+        void navigator.storage?.persist?.();
+    } catch {
+        // no-op — persistence is an optimization, never required.
+    }
+}
 
 export function useMedia(
     files: MediaFile[],
@@ -96,8 +186,38 @@ export function useMedia(
         controllersRef.current.set(file.url, ctl);
         setStates((s) => ({ ...s, [file.url]: LOADING }));
 
+        // Build the object URL + ready state from decrypted bytes — shared by
+        // the cache-hit and the fetch paths.
+        const present = (plaintext: Uint8Array) => {
+            const detected = sniffInlineImageMime(plaintext);
+            const blob = new Blob(
+                [toPart(plaintext)],
+                detected
+                    ? { type: detected }
+                    : { type: 'application/octet-stream' },
+            );
+            const url = URL.createObjectURL(blob);
+            const prev = blobsRef.current.get(file.url);
+            if (prev) URL.revokeObjectURL(prev);
+            blobsRef.current.set(file.url, url);
+            setStates((s) => ({
+                ...s,
+                [file.url]: { status: 'ready', blobUrl: url, mime: detected },
+            }));
+        };
+
         (async () => {
             try {
+                // Read-through: a cache hit renders with no network. Media
+                // objects are write-once, so a cached entry is never stale.
+                const cached = await getMediaBlob(file.url).catch(
+                    () => undefined,
+                );
+                if (ctl.signal.aborted) return;
+                if (cached) {
+                    present(new Uint8Array(cached.bytes));
+                    return;
+                }
                 const ciphertext = await fetchMedia(tok, file.url, ctl.signal);
                 if (ctl.signal.aborted) return;
                 const plaintext = await decryptMedia(
@@ -106,30 +226,19 @@ export function useMedia(
                     file.iv,
                 );
                 if (ctl.signal.aborted) return;
-                const detected = sniffInlineImageMime(plaintext);
-                const blob = new Blob(
-                    [plaintext as unknown as BlobPart],
-                    detected
-                        ? { type: detected }
-                        : { type: 'application/octet-stream' },
-                );
-                const url = URL.createObjectURL(blob);
-                const prev = blobsRef.current.get(file.url);
-                if (prev) URL.revokeObjectURL(prev);
-                blobsRef.current.set(file.url, url);
-                setStates((s) => ({
-                    ...s,
-                    [file.url]: {
-                        status: 'ready',
-                        blobUrl: url,
-                        mime: detected,
-                    },
-                }));
+                present(plaintext);
+                // Durable cache write is best-effort and off the render path.
+                void cacheAfterLoad(file, plaintext);
             } catch (e) {
                 if (ctl.signal.aborted) return;
                 let status: MediaStatus = 'network-error';
                 if (e instanceof MediaCorruptError) status = 'corrupt';
-                else if (e instanceof NotFoundError) status = 'unavailable';
+                else if (e instanceof NotFoundError) {
+                    status = 'unavailable';
+                    // Retention swept the original (ADR-0006) → evict any cache
+                    // entry so it doesn't linger after the source is gone.
+                    void deleteMediaBlob(file.url).catch(() => {});
+                }
                 setStates((s) => ({
                     ...s,
                     [file.url]: { status, blobUrl: null, mime: null },
@@ -248,6 +357,8 @@ export function useMedia(
     }, [files, token, load]);
 
     useEffect(() => {
+        // One-shot, best-effort: reduce eviction of the offline media cache.
+        requestStoragePersistence();
         const controllers = controllersRef.current;
         const blobs = blobsRef.current;
         const observed = observedRef.current;

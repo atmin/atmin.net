@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { sendAmendment } from '@/lib/amendments';
 import { storeDelete } from '@/lib/api';
 import type { Session } from '@/lib/auth';
+import { deleteMediaBlob } from '@/lib/db';
 import { syncAndPublish } from '@/lib/inbox-sync';
 import type { SessionManager } from '@/lib/megolm-session';
 import type { AmendmentAction } from '@/lib/messaging';
@@ -17,9 +18,11 @@ export interface ChatAmendments {
 // Edit/delete actions for the user's own messages. Both send an amendment
 // envelope referencing the original by msg_id (ADR-0014). On delete of a media
 // message the sender additionally drops the message's full S3 object set — the
-// full and its preview (ADR-0022) — best-effort; the recipient's decrypted-blob
-// cache is purged automatically by useMedia once the materializer removes the
-// media reference from the message.
+// full and its preview (ADR-0022) — and evicts each from the local media cache
+// (ADR-0022 §7), all best-effort. The in-memory object URLs are released
+// automatically by useMedia once the materializer removes the media reference;
+// the deleteMediaBlob calls clear the durable copy so a deleted image cannot
+// linger offline.
 export function useChatAmendments(
     handle: string | undefined,
     isSaved: boolean,
@@ -60,6 +63,14 @@ export function useChatAmendments(
                     storeDelete(session.token, url).catch((e) =>
                         console.error(
                             'media blob delete failed (best-effort):',
+                            e,
+                        ),
+                    );
+                    // Evict the local cached copy too (ADR-0022 §7), so a
+                    // deleted image does not linger offline on this device.
+                    deleteMediaBlob(url).catch((e) =>
+                        console.error(
+                            'media cache evict failed (best-effort):',
                             e,
                         ),
                     );

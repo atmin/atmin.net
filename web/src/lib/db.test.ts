@@ -4,12 +4,15 @@ import {
     clearInboundSessions,
     clearIngestedArchives,
     clearKeyShares,
+    clearMediaCache,
     clearMessages,
     clearOutboundSession,
     clearSyncCursors,
     deleteDatabase,
+    deleteMediaBlob,
     getContact,
     getLatestTimestamp,
+    getMediaBlob,
     hasKeyShare,
     loadAllContacts,
     loadConversations,
@@ -20,6 +23,7 @@ import {
     loadOutboundSession,
     loadSyncCursor,
     markArchiveIngested,
+    putMediaBlob,
     recordKeyShare,
     saveContact,
     saveInboundSession,
@@ -779,5 +783,191 @@ describe('schema migration v5 → v6 (backup_keys_by_version)', () => {
         const got = await getBackupKey('U_X', 1);
         expect(got).toBeDefined();
         expect(got?.type).toBe('secret');
+    });
+});
+
+// ── Media cache (ADR-0022 §7) ────────────────────────────────────────
+
+describe('db - media cache', () => {
+    const bytesOf = (...b: number[]) => new Uint8Array(b).buffer as ArrayBuffer;
+
+    it('put/get round-trips a cached blob', async () => {
+        await putMediaBlob({
+            url: 'media/u1/img',
+            bytes: bytesOf(1, 2, 3, 4),
+            mime: 'image/jpeg',
+            cachedAt: 111,
+        });
+        const got = await getMediaBlob('media/u1/img');
+        expect(got?.mime).toBe('image/jpeg');
+        expect(got?.cachedAt).toBe(111);
+        expect(new Uint8Array(got?.bytes ?? new ArrayBuffer(0))).toEqual(
+            new Uint8Array([1, 2, 3, 4]),
+        );
+    });
+
+    it('get returns undefined on a miss', async () => {
+        expect(await getMediaBlob('media/u1/absent')).toBeUndefined();
+    });
+
+    it('put upserts by url (later write wins)', async () => {
+        await putMediaBlob({
+            url: 'media/u1/x',
+            bytes: bytesOf(1),
+            mime: 'image/png',
+            cachedAt: 1,
+        });
+        await putMediaBlob({
+            url: 'media/u1/x',
+            bytes: bytesOf(2, 2),
+            mime: 'image/jpeg',
+            cachedAt: 2,
+        });
+        const got = await getMediaBlob('media/u1/x');
+        expect(got?.mime).toBe('image/jpeg');
+        expect(new Uint8Array(got?.bytes ?? new ArrayBuffer(0))).toEqual(
+            new Uint8Array([2, 2]),
+        );
+    });
+
+    it('delete evicts an entry; deleting a missing url is a no-op', async () => {
+        await putMediaBlob({
+            url: 'media/u1/del',
+            bytes: bytesOf(9),
+            mime: 'image/png',
+            cachedAt: 1,
+        });
+        await deleteMediaBlob('media/u1/del');
+        expect(await getMediaBlob('media/u1/del')).toBeUndefined();
+        await expect(
+            deleteMediaBlob('media/u1/never'),
+        ).resolves.toBeUndefined();
+    });
+
+    it('clear empties the whole cache', async () => {
+        await putMediaBlob({
+            url: 'a',
+            bytes: bytesOf(1),
+            mime: 'image/png',
+            cachedAt: 1,
+        });
+        await putMediaBlob({
+            url: 'b',
+            bytes: bytesOf(2),
+            mime: 'image/png',
+            cachedAt: 1,
+        });
+        await clearMediaCache();
+        expect(await getMediaBlob('a')).toBeUndefined();
+        expect(await getMediaBlob('b')).toBeUndefined();
+    });
+});
+
+// ── v8 → v9 migration (media_cache) ──────────────────────────────────
+
+describe('schema migration v8 → v9 (media_cache)', () => {
+    // Build the full v8 schema by hand, so the production open at v9 exercises
+    // a real upgrade (oldVersion 8) rather than a fresh create.
+    function openV8(): Promise<IDBDatabase> {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('atmin', 8);
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => resolve(req.result);
+            req.onupgradeneeded = (event) => {
+                const db = (event.target as IDBOpenDBRequest).result;
+                if (!db.objectStoreNames.contains('keys')) {
+                    db.createObjectStore('keys');
+                }
+                if (!db.objectStoreNames.contains('messages')) {
+                    const s = db.createObjectStore('messages', {
+                        keyPath: 'id',
+                    });
+                    s.createIndex('userId', 'userId');
+                    s.createIndex('timestamp', 'timestamp');
+                    s.createIndex('userId_timestamp', ['userId', 'timestamp']);
+                    s.createIndex('fromUser', 'fromUser');
+                }
+                if (!db.objectStoreNames.contains('conversations')) {
+                    const s = db.createObjectStore('conversations', {
+                        keyPath: 'conversationId',
+                    });
+                    s.createIndex(
+                        'lastMessageTimestamp',
+                        'lastMessageTimestamp',
+                    );
+                }
+                if (!db.objectStoreNames.contains('contacts')) {
+                    db.createObjectStore('contacts', { keyPath: 'userId' });
+                }
+                if (!db.objectStoreNames.contains('megolm_outbound')) {
+                    db.createObjectStore('megolm_outbound', { keyPath: 'id' });
+                }
+                if (!db.objectStoreNames.contains('megolm_inbound')) {
+                    db.createObjectStore('megolm_inbound', {
+                        keyPath: 'sessionId',
+                    });
+                }
+                if (!db.objectStoreNames.contains('megolm_key_shares')) {
+                    db.createObjectStore('megolm_key_shares', {
+                        keyPath: ['sessionId', 'recipientUserId'],
+                    });
+                }
+                if (!db.objectStoreNames.contains('sync_cursors')) {
+                    db.createObjectStore('sync_cursors', { keyPath: 'prefix' });
+                }
+                if (!db.objectStoreNames.contains('backup_keys_by_version')) {
+                    db.createObjectStore('backup_keys_by_version');
+                }
+                if (!db.objectStoreNames.contains('pending_key_backups')) {
+                    db.createObjectStore('pending_key_backups', {
+                        keyPath: 'sessionId',
+                    });
+                }
+                if (!db.objectStoreNames.contains('ingested_archives')) {
+                    db.createObjectStore('ingested_archives', {
+                        keyPath: 'key',
+                    });
+                }
+            };
+        });
+    }
+
+    it('opening at v9 on top of a populated v8 DB preserves rows and adds media_cache', async () => {
+        const v8 = await openV8();
+        expect(v8.objectStoreNames.contains('media_cache')).toBe(false);
+        const tx = v8.transaction(
+            ['contacts', 'ingested_archives'],
+            'readwrite',
+        );
+        tx.objectStore('contacts').put({
+            userId: 'U_BOB',
+            handle: 'cool-badger',
+        });
+        tx.objectStore('ingested_archives').put({
+            key: 'inbox/U/archive/2026-06-14-01HW',
+            ingestedAt: 5,
+        });
+        await new Promise<void>((res, rej) => {
+            tx.oncomplete = () => res();
+            tx.onerror = () => rej(tx.error);
+        });
+        v8.close();
+
+        // Production open at v9 triggers the migration.
+        expect((await loadAllContacts()).get('U_BOB')).toBe('cool-badger');
+        expect(
+            (await loadIngestedArchiveKeys()).has(
+                'inbox/U/archive/2026-06-14-01HW',
+            ),
+        ).toBe(true);
+
+        // The new store is created and usable.
+        await putMediaBlob({
+            url: 'media/U/img',
+            bytes: new Uint8Array([7, 7]).buffer as ArrayBuffer,
+            mime: 'image/png',
+            cachedAt: 9,
+        });
+        expect((await getMediaBlob('media/U/img'))?.mime).toBe('image/png');
     });
 });

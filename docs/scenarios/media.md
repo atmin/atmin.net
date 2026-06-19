@@ -159,6 +159,21 @@ inbox/bob01/live/msg008             ← message with file reference
 inbox/alice01/live/msg008           ← self-copy
 ```
 
+## Local cache (offline browsing)
+
+After Bob first fetches and decrypts an object, its **preview** (or a
+below-threshold small original) is cached in IndexedDB keyed by the S3 URL
+([ADR-0022](../decisions/adr-0022-multipart-media.md) §7). Media objects are
+write-once, so a cached entry is never stale — subsequent chat opens render it
+with no network, and media history browses offline and survives refresh. A
+preview-less image leaves a receiver-derived ~512 px thumbnail after its one
+full download (local-only; never uploaded). The cache is best-effort: a miss or
+eviction simply re-fetches; it is purged when the message is deleted and when a
+fetch 404s (retention swept the original, [ADR-0006](../decisions/adr-0006-data-retention.md)).
+Full originals are not cached (deferred). Decrypted-at-rest is the same exposure
+class as the message text and Megolm pickles already in IndexedDB — not a new
+trust boundary.
+
 ## Security properties
 
 - **Server sees**: an opaque encrypted blob at a ULID path and an opaque envelope. It cannot associate the blob with the message (the URL is inside the Megolm ciphertext).

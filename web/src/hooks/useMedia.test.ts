@@ -31,6 +31,27 @@ vi.mock('@/lib/media', () => ({
         /\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(name),
 }));
 
+// The offline media cache (ADR-0022 §7). Defaults: a miss (getMediaBlob →
+// undefined), no-op writes/evicts. Reset in beforeEach so a per-test override
+// never leaks into the next test.
+vi.mock('@/lib/db', () => ({
+    getMediaBlob: vi.fn(),
+    putMediaBlob: vi.fn(),
+    deleteMediaBlob: vi.fn(),
+}));
+
+// Keep the pure needsPreview threshold real; mock only the canvas-touching
+// imageSize/makePreview, which the unit-test DOM can't run.
+vi.mock('@/lib/image', async () => {
+    const actual =
+        await vi.importActual<typeof import('@/lib/image')>('@/lib/image');
+    return {
+        ...actual,
+        imageSize: vi.fn().mockResolvedValue({ width: 64, height: 64 }),
+        makePreview: vi.fn(),
+    };
+});
+
 const makeFile = (url: string, name = 'file.jpg'): MediaFile => ({
     url,
     key: new Uint8Array([1]),
@@ -89,7 +110,7 @@ describe('useMedia', () => {
     let createObjectURL: ReturnType<typeof vi.fn>;
     let revokeObjectURL: ReturnType<typeof vi.fn>;
 
-    beforeEach(() => {
+    beforeEach(async () => {
         vi.clearAllMocks();
         observers = [];
         (
@@ -107,6 +128,16 @@ describe('useMedia', () => {
             writable: true,
             configurable: true,
         });
+        // clearAllMocks resets calls but not implementations, so re-assert the
+        // mock defaults each test (a per-test override otherwise leaks forward):
+        //  - cache: miss + no-op writes (a hit test overrides getMediaBlob);
+        //  - sniff: image (the non-image test overrides it to null).
+        const db = await import('@/lib/db');
+        vi.mocked(db.getMediaBlob).mockResolvedValue(undefined);
+        vi.mocked(db.putMediaBlob).mockResolvedValue(undefined);
+        vi.mocked(db.deleteMediaBlob).mockResolvedValue(undefined);
+        const media = await import('@/lib/media');
+        vi.mocked(media.sniffInlineImageMime).mockReturnValue('image/jpeg');
     });
 
     afterEach(() => {
@@ -494,5 +525,161 @@ describe('useMedia', () => {
 
         expect('media/u1/file1' in result.current.states).toBe(true);
         expect('media/u1/file2' in result.current.states).toBe(false);
+    });
+
+    // ── Offline media cache (ADR-0022 §7) ──────────────────────────────────
+
+    it('serves a cached url from IDB without a network fetch', async () => {
+        const { fetchMedia } = await import('@/lib/api');
+        const { getMediaBlob } = await import('@/lib/db');
+        vi.mocked(getMediaBlob).mockResolvedValue({
+            url: 'media/u1/img1',
+            bytes: new Uint8Array([5, 5, 5]).buffer,
+            mime: 'image/jpeg',
+            cachedAt: 1,
+        });
+
+        const { useMedia } = await import('./useMedia');
+        const file = makeFile('media/u1/img1');
+        const { result } = renderHook(() => useMedia([file], 'tok'));
+        await act(async () => {
+            await tick();
+        });
+        const el = document.createElement('div');
+        act(() => {
+            result.current.observe('media/u1/img1', el);
+        });
+        await act(async () => {
+            fireIntersect(el);
+            await tick();
+        });
+
+        expect(fetchMedia).not.toHaveBeenCalled();
+        expect(result.current.states['media/u1/img1']?.status).toBe('ready');
+        expect(result.current.states['media/u1/img1']?.blobUrl).toBe(BLOB_URL);
+    });
+
+    it('on a miss, fetches then writes the decrypted blob to the cache', async () => {
+        const { fetchMedia } = await import('@/lib/api');
+        const { putMediaBlob } = await import('@/lib/db');
+        vi.mocked(fetchMedia).mockResolvedValue(new Uint8Array([10, 20]));
+
+        const { useMedia } = await import('./useMedia');
+        const file = makeFile('media/u1/img1');
+        const { result } = renderHook(() => useMedia([file], 'tok'));
+        await act(async () => {
+            await tick();
+        });
+        const el = document.createElement('div');
+        act(() => {
+            result.current.observe('media/u1/img1', el);
+        });
+        await act(async () => {
+            fireIntersect(el);
+            await tick();
+        });
+
+        expect(fetchMedia).toHaveBeenCalledTimes(1);
+        expect(result.current.states['media/u1/img1']?.status).toBe('ready');
+        // The write-through is best-effort and off the render path — poll for it.
+        await vi.waitFor(() =>
+            expect(putMediaBlob).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    url: 'media/u1/img1',
+                    mime: 'image/jpeg',
+                }),
+            ),
+        );
+    });
+
+    it('a cache read error falls through to a network fetch', async () => {
+        const { fetchMedia } = await import('@/lib/api');
+        const { getMediaBlob } = await import('@/lib/db');
+        vi.mocked(fetchMedia).mockResolvedValue(new Uint8Array([10, 20]));
+        vi.mocked(getMediaBlob).mockRejectedValue(new Error('idb boom'));
+
+        const { useMedia } = await import('./useMedia');
+        const file = makeFile('media/u1/img1');
+        const { result } = renderHook(() => useMedia([file], 'tok'));
+        await act(async () => {
+            await tick();
+        });
+        const el = document.createElement('div');
+        act(() => {
+            result.current.observe('media/u1/img1', el);
+        });
+        await act(async () => {
+            fireIntersect(el);
+            await tick();
+        });
+
+        expect(fetchMedia).toHaveBeenCalledTimes(1);
+        expect(result.current.states['media/u1/img1']?.status).toBe('ready');
+    });
+
+    it('evicts the cache entry on a server 404', async () => {
+        const { fetchMedia } = await import('@/lib/api');
+        const { deleteMediaBlob } = await import('@/lib/db');
+        vi.mocked(fetchMedia).mockRejectedValue(new FakeNotFoundError());
+
+        const { useMedia } = await import('./useMedia');
+        const file = makeFile('media/u1/missing');
+        const { result } = renderHook(() => useMedia([file], 'tok'));
+        await act(async () => {
+            await tick();
+        });
+        const el = document.createElement('div');
+        act(() => {
+            result.current.observe('media/u1/missing', el);
+        });
+        await act(async () => {
+            fireIntersect(el);
+            await tick();
+        });
+
+        expect(result.current.states['media/u1/missing']?.status).toBe(
+            'unavailable',
+        );
+        expect(deleteMediaBlob).toHaveBeenCalledWith('media/u1/missing');
+    });
+
+    it('caches a downscaled thumbnail for a large preview-less image', async () => {
+        const { fetchMedia } = await import('@/lib/api');
+        const { putMediaBlob } = await import('@/lib/db');
+        const { imageSize, makePreview } = await import('@/lib/image');
+        vi.mocked(fetchMedia).mockResolvedValue(new Uint8Array([10, 20]));
+        // Over the preview threshold by edge → triggers the downscale path.
+        vi.mocked(imageSize).mockResolvedValue({ width: 4000, height: 3000 });
+        vi.mocked(makePreview).mockResolvedValue({
+            blob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }),
+            width: 512,
+            height: 384,
+        });
+
+        const { useMedia } = await import('./useMedia');
+        const file = makeFile('media/u1/big');
+        const { result } = renderHook(() => useMedia([file], 'tok'));
+        await act(async () => {
+            await tick();
+        });
+        const el = document.createElement('div');
+        act(() => {
+            result.current.observe('media/u1/big', el);
+        });
+        await act(async () => {
+            fireIntersect(el);
+            await tick();
+        });
+
+        // The downscale + write-through is best-effort and off the render path.
+        await vi.waitFor(() => {
+            expect(makePreview).toHaveBeenCalled();
+            expect(putMediaBlob).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    url: 'media/u1/big',
+                    mime: 'image/jpeg',
+                }),
+            );
+        });
     });
 });

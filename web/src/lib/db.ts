@@ -13,12 +13,15 @@
  * - 'ingested_archives' store: Full S3 keys of inbox archives whose every
  *   message is durably materialized in IndexedDB — safe to skip re-downloading
  *   on the next sync (archive-ingest cache)
+ * - 'media_cache' store: Decrypted media blobs (previews + below-threshold
+ *   smalls + receiver-derived thumbnails) keyed by S3 URL, for offline media
+ *   browsing (ADR-0022 §7). Best-effort — a miss re-fetches from S3.
  */
 
 import { isAmendment } from './payload';
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
 const CONVERSATIONS_STORE = 'conversations';
@@ -30,6 +33,7 @@ const SYNC_CURSORS_STORE = 'sync_cursors';
 const BACKUP_KEYS_STORE = 'backup_keys_by_version';
 const PENDING_KEY_BACKUPS_STORE = 'pending_key_backups';
 const INGESTED_ARCHIVES_STORE = 'ingested_archives';
+const MEDIA_CACHE_STORE = 'media_cache';
 
 export interface StoredOutboundSession {
     id: 'current';
@@ -98,6 +102,21 @@ export interface StoredPendingKeyBackup {
 export interface StoredIngestedArchive {
     key: string; // full S3 key, e.g. "inbox/U1/archive/2026-06-14-01HW…"
     ingestedAt: number; // ms epoch — for optional pruning, not correctness
+}
+
+/**
+ * A decrypted media blob cached for offline browsing (ADR-0022 §7). Keyed by
+ * the S3 URL; media objects are write-once, so a cached entry is never stale —
+ * no invalidation. Holds **previews**, **below-threshold smalls**, and
+ * **receiver-derived thumbnails** only — never a full original (deferred v2).
+ * Decrypted-at-rest is the same exposure class as the message text and Megolm
+ * pickles already in IDB ([ADR-0001]); not a new trust boundary.
+ */
+export interface StoredMediaBlob {
+    url: string; // S3 key — primary key
+    bytes: ArrayBuffer; // decrypted plaintext
+    mime: string; // sniffed inline MIME (or 'application/octet-stream')
+    cachedAt: number; // ms epoch — for optional future LRU
 }
 
 function awaitTx(tx: IDBTransaction): Promise<void> {
@@ -240,6 +259,15 @@ async function openDB(): Promise<IDBDatabase> {
             if (!database.objectStoreNames.contains(INGESTED_ARCHIVES_STORE)) {
                 database.createObjectStore(INGESTED_ARCHIVES_STORE, {
                     keyPath: 'key',
+                });
+            }
+
+            // v9: Decrypted media blobs cached for offline browsing (ADR-0022
+            // §7), keyed by S3 URL. Empty after the upgrade — the first view of
+            // each media object fetches + decrypts once to populate it.
+            if (!database.objectStoreNames.contains(MEDIA_CACHE_STORE)) {
+                database.createObjectStore(MEDIA_CACHE_STORE, {
+                    keyPath: 'url',
                 });
             }
         };
@@ -757,5 +785,42 @@ export async function clearIngestedArchives(): Promise<void> {
     const database = await openDB();
     const tx = database.transaction(INGESTED_ARCHIVES_STORE, 'readwrite');
     tx.objectStore(INGESTED_ARCHIVES_STORE).clear();
+    return awaitTx(tx);
+}
+
+// ── Media cache (ADR-0022 §7 — offline browsing) ──────────────────
+
+/** The cached decrypted blob for an S3 URL, or undefined on a miss. */
+export async function getMediaBlob(
+    url: string,
+): Promise<StoredMediaBlob | undefined> {
+    const database = await openDB();
+    const tx = database.transaction(MEDIA_CACHE_STORE, 'readonly');
+    return awaitReq<StoredMediaBlob | undefined>(
+        tx.objectStore(MEDIA_CACHE_STORE).get(url),
+    );
+}
+
+/** Cache a decrypted blob (preview / below-threshold small / derived thumb). */
+export async function putMediaBlob(entry: StoredMediaBlob): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEDIA_CACHE_STORE, 'readwrite');
+    tx.objectStore(MEDIA_CACHE_STORE).put(entry);
+    return awaitTx(tx);
+}
+
+/** Evict a cached blob (delete sweep, or a server 404). Best-effort. */
+export async function deleteMediaBlob(url: string): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEDIA_CACHE_STORE, 'readwrite');
+    tx.objectStore(MEDIA_CACHE_STORE).delete(url);
+    return awaitTx(tx);
+}
+
+/** Drop the whole media cache (tests). */
+export async function clearMediaCache(): Promise<void> {
+    const database = await openDB();
+    const tx = database.transaction(MEDIA_CACHE_STORE, 'readwrite');
+    tx.objectStore(MEDIA_CACHE_STORE).clear();
     return awaitTx(tx);
 }
