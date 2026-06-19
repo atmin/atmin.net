@@ -108,6 +108,8 @@ routes/    → hooks/      → lib/
 
 `make e2e-local` runs Playwright against a native Rust server + Vite + MinIO; pass `SPEC=...` to scope (e.g. `make e2e-local SPEC=media`). `make e2e` runs the full Docker image (used by CI on tags).
 
+**e2e specs read as prose.** The test body narrates the flow (`registerUser`, `openChat`, `revokeOtherDevice`); `waitForSelector`, raw locators, and cryptic interaction sequences belong behind semantically-named helpers in `web/e2e/helpers.ts`. Extract opportunistically — boy-scout rule: leave each spec you touch a little more readable.
+
 The unit project runs in **node** — DOM is opt-in per file via `// @vitest-environment happy-dom` (line 1). Never rely on an ambient `localStorage`/`sessionStorage`: a test that installs a partial Web Storage global leaks it into sibling files in a reused CI worker (green locally, red in CI). Use the shared `memoryStorage()` from `src/test/storage.ts` with `vi.stubGlobal('localStorage', memoryStorage())` in `beforeEach` and `vi.unstubAllGlobals()` in `afterEach`, so each test owns a fresh Storage and restores it after.
 
 ### Styling
