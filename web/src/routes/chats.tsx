@@ -1,6 +1,7 @@
-import { useNavigate } from 'react-router-dom';
-import ChatsView from '@/components/ChatsView';
+import ChatsViewKonsta from '@/components/ChatsViewKonsta';
 import { useConversations } from '@/hooks/useConversations';
+import { useKonstaTheme } from '@/hooks/useKonstaTheme';
+import { useViewTransitionNavigate } from '@/hooks/useViewTransitionNavigate';
 import type { Session } from '@/lib/auth';
 import type { SessionManager } from '@/lib/megolm-session';
 
@@ -17,18 +18,26 @@ export default function ChatsRoute({
 }: Props) {
     const { conversations, contacts, displayNames, serverOk } =
         useConversations(session, sessionManager);
-    const navigate = useNavigate();
+    const { theme, setTheme } = useKonstaTheme();
+    // Q4: drive the View Transitions API ourselves — RR's built-in option
+    // no-ops under the declarative <BrowserRouter>. index.css styles the slide.
+    const vtNavigate = useViewTransitionNavigate();
 
     return (
-        <ChatsView
+        <ChatsViewKonsta
             handle={session.handle}
             serverOk={serverOk}
             conversations={conversations}
             contacts={contacts}
             displayNames={displayNames}
             userId={session.userId}
+            theme={theme}
+            setTheme={setTheme}
+            onOpen={vtNavigate}
             onNewChat={(handle) =>
-                navigate(`/@${encodeURIComponent(handle.trim().toLowerCase())}`)
+                vtNavigate(
+                    `/@${encodeURIComponent(handle.trim().toLowerCase())}`,
+                )
             }
             onLogout={onLogout}
         />

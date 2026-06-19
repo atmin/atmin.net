@@ -38,6 +38,9 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      konsta:
+        specifier: ^5.1.0
+        version: 5.1.0
       lucide-react:
         specifier: ^0.564.0
         version: 0.564.0(react@19.2.4)
@@ -3892,6 +3895,10 @@ packages:
   kleur@4.1.5:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
+
+  konsta@5.1.0:
+    resolution: {integrity: sha512-ZY6DgYCGTJioHKECp7O4ZevkljprJu9zZHkSxzPkE/BlGL05XeTvTjLnB+RHqJovQRStzMSSqvM5wO5uzWOlvw==}
+    engines: {node: '>= 4.7.0'}
 
   leven@3.1.0:
     resolution: {integrity: sha512-qsda+H8jTaUaN/x5vzW2rzc+8Rw4TAQ/4KjB46IwK5VH+IlVeeeje/EoZRpiXvIqjFgK84QffqPztGI3VBLG1A==}
@@ -9488,6 +9495,10 @@ snapshots:
   kleur@3.0.3: {}
 
   kleur@4.1.5: {}
+
+  konsta@5.1.0:
+    dependencies:
+      tailwind-merge: 3.5.0
 
   leven@3.1.0: {}
 

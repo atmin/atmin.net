@@ -1,4 +1,8 @@
 @import "tailwindcss";
+/* Konsta UI spike (tasks/konsta-ui-spike.md) — Konsta 5 is Tailwind-v4-native:
+   this brings its iOS/Material component styles + @source scanning + the
+   k-ios/k-material custom-variants. No tailwind.config.js / @config bridge. */
+@import "konsta/react/theme.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -141,4 +145,32 @@ input,
 textarea,
 select {
     font-size: max(16px, 1em);
+}
+
+/* Konsta spike (Q4) — native-feel page transition for list→chat navigation.
+   React Router v7 drives document.startViewTransition when a navigation opts in
+   with { viewTransition: true }; these rules style the cross-fade + slide. */
+@media (prefers-reduced-motion: no-preference) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation-duration: 220ms;
+        animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    ::view-transition-old(root) {
+        animation-name: spike-slide-out-left;
+    }
+    ::view-transition-new(root) {
+        animation-name: spike-slide-in-right;
+    }
+    @keyframes spike-slide-out-left {
+        to {
+            transform: translateX(-25%);
+            opacity: 0;
+        }
+    }
+    @keyframes spike-slide-in-right {
+        from {
+            transform: translateX(100%);
+        }
+    }
 }

@@ -110,3 +110,93 @@ the cheapest risks first so the ADR is written from evidence, not hope.
 - A written **go/no-go recommendation** exists.
 - The spike branch is **not merged** to master; all conclusions are captured in
   the findings note / ADR so the branch can be deleted without loss.
+
+## Findings (spike run — 2026-06-19, branch `konsta-spike`, Konsta 5.1.0)
+
+**Q1 — Tailwind v4: ✅ no bridge needed; the kill risk is dead.** Konsta 5 is
+Tailwind-v4-native. It ships `konsta/react/theme.css` using v4's `@source`
+scanning and `@custom-variant ios/material` (scoped to `.k-ios`/`.k-material`).
+Wiring is **one line** in [index.css](../web/src/index.css):
+`@import "konsta/react/theme.css";` after `@import "tailwindcss";`. No
+`tailwind.config.js`, no `@config` directive, no preset, no downgrade. (The
+legacy v3 `konsta/config` preset is still in the export map but not shipped —
+ignore it.)
+
+**Q2 — conversation list in Konsta: built + compiles.**
+[ChatsViewKonsta.tsx](../web/src/components/ChatsViewKonsta.tsx) rebuilds the
+list with `App/Page/Navbar/Block/BlockTitle/List/ListItem/ListInput/Button/
+Segmented`. Theme via the `App theme` prop; a live iOS/Material `Segmented`
+toggle is wired for side-by-side comparison; dark mode composes with the app's
+existing `.dark` class. **Confirmed by reviewer (2026-06-19): themes look right**
+(desktop browser + DevTools mobile view).
+
+**Q3 — web/responsive ✅; native shells pending devices.** **Confirmed by
+reviewer:** renders correctly across browsers including VSCode's built-in
+browser, and at narrow→wide widths (wide is fine too, not just the phone width).
+Capacitor (iOS/Android sim) and the Tauri tall-rect window still need a
+device/sim — not runnable here. Revisit **mouse-driving** swipe affordances in
+Tauri when swipeout rows are added (this screen has none → clean).
+
+**Q4 — motion: element animations ✅; page View Transition needed a router
+fix.** Two parts:
+- **Element-level motion (Konsta ripples/press states): free and fine** —
+  confirmed by reviewer.
+- **Page-level View Transition (list→chat slide): RR's built-in `viewTransition`
+  option is a no-op here.** It's a **data-router-only** feature
+  (`createBrowserRouter`/`RouterProvider`); this app uses the declarative
+  `<BrowserRouter>` (RR 7.14), which never runs that machinery — so the option is
+  silently ignored and no page slide fired. Resolved **router-agnostically**:
+  [useViewTransitionNavigate.ts](../web/src/hooks/useViewTransitionNavigate.ts)
+  drives `document.startViewTransition` directly + `flushSync(navigate)` so React
+  commits the route change inside the capture callback. `index.css` styles
+  `::view-transition-old/new(root)` (slide+fade, behind `prefers-reduced-motion`).
+- **Migration decision:** keep this small manual wrapper, **or** migrate to the
+  data router to get RR's built-in support. Real remaining unknown: WKWebView
+  (iOS Safari) View Transitions support — **device-gated**, verify on hardware.
+- **Known follow-up (deferred, reviewer-noted):** only *forward* navigations are
+  wrapped, so the **back button doesn't transition**. A polished result needs
+  **directional** transitions — detect PUSH vs POP and reverse the slide (back =
+  slide in from left). This per-navigation plumbing is the cost of the manual
+  wrapper and mildly favors the data router, which centralizes it. Migration
+  detail, not a blocker.
+
+**Q5 — bundle delta: ~+24 kB gzip for the first screen.**
+
+| | baseline | with Konsta | delta (gzip) |
+|---|---|---|---|
+| main JS | 152.09 kB | 165.18 kB | **+13.1 kB** |
+| main CSS | 7.00 kB | 17.62 kB | **+10.6 kB** |
+
+The CSS delta is mostly **one-time** (Konsta's `theme.css` base: colors,
+ios-material, glass, hairlines, safe-areas, touch-ripple, preloader, range) — it
+does not scale per screen and is **reducible** by importing only the sub-styles
+used instead of the `theme.css` barrel. JS delta is the imported components
+(tree-shaken). Modest for a full UI kit, well under Framework7's footprint;
+acceptable vs ADR-0003's lightweight stance but document it in the ADR.
+
+**Q6 — coexistence: clean, mix freely.** Konsta is just Tailwind classes + thin
+React wrappers, so Konsta components and plain Tailwind elements compose in the
+same tree (the navbar's status dot + Settings button are plain Tailwind inside a
+Konsta `Navbar`). shadcn + Konsta coexist in one build, no conflict. Migration
+shape: **replace the chrome screen-by-screen**, keep plain Tailwind for bespoke
+bits, retire shadcn per-screen — no big-bang.
+
+**Arch + gates:** production-shaped — detection in `useKonstaTheme` (hook, called
+from the route); component takes `theme`/`setTheme`/`onOpen` props and imports
+`KonstaTheme` type-only. `make fmt lint` (incl. architecture lint), `pnpm tsc`,
+`pnpm build` all green. **Did not** run unit/e2e — the chats DOM changed, so e2e
+selectors need re-checking before any merge (`placeholder="Enter a handle..."`
+and the `Chat` button are preserved; `Settings` is now a `<button>`, was a `<Link>`).
+
+### Recommendation: **GO** — proceed to an ADR + incremental migration
+
+Q1, the only decision-risk, is resolved with a one-line import. Reviewer has
+**confirmed Q2 (themes) and Q3 (web/responsive)**; Q4 element motion is fine and
+the page-transition mechanism is now in place (the manual wrapper). What remains
+is **device-gated only**: the Capacitor/Tauri shells and WKWebView View
+Transitions on real iOS hardware. Next: if it feels right on devices, write the
+ADR amending [ADR-0003](../docs/decisions/adr-0003-ui-component-framework.md) and
+a screen-by-screen migration task. **Do not merge this branch** — lift the
+`index.css` import pattern, `useKonstaTheme`, and `useViewTransitionNavigate`
+into the real migration; the `ChatsViewKonsta` swap and the spike-only theme
+toggle are throwaway.
