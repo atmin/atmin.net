@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
-import { E2E_PASSWORD, openChat, registerUserWithPassword } from './helpers';
+import {
+    E2E_PASSWORD,
+    openChat,
+    registerUserWithPassword,
+    waitForChatList,
+} from './helpers';
 
 const STRONG_PW = 'correct-horse-battery-staple-7';
 
@@ -31,7 +36,7 @@ test.describe('Custom handles', () => {
         const register = alice.getByRole('button', { name: 'Register' });
         await expect(register).toBeEnabled({ timeout: 5_000 });
         await register.click();
-        await alice.waitForSelector('text=Your handle', { timeout: 30_000 });
+        await waitForChatList(alice);
 
         // Bob tries the same handle — the availability indicator turns ✗.
         await bob.goto('/register');
@@ -170,7 +175,7 @@ test.describe('Custom handles', () => {
 
         await login.fill('#secret', password);
         await login.getByRole('button', { name: 'Sign In' }).click();
-        await login.waitForSelector('text=Your handle', { timeout: 30_000 });
+        await waitForChatList(login);
 
         await regCtx.close();
         await loginCtx.close();

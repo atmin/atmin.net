@@ -3,6 +3,7 @@ import DeleteAccountPanel from '@/components/DeleteAccountPanel';
 import DeviceSettings from '@/components/DeviceSettings';
 import PhotoQualitySetting from '@/components/PhotoQualitySetting';
 import ProfileSettings from '@/components/ProfileSettings';
+import SignOutPanel from '@/components/SignOutPanel';
 import { StorageIndicator } from '@/components/StorageIndicator';
 import { useDeleteAccount } from '@/hooks/useDeleteAccount';
 import { useDevices } from '@/hooks/useDevices';
@@ -16,12 +17,14 @@ interface Props {
     session: Session;
     onSessionChange: (next: Session) => void;
     onDeleted: () => void | Promise<void>;
+    onLogout: () => void;
 }
 
 export default function SettingsRoute({
     session,
     onSessionChange,
     onDeleted,
+    onLogout,
 }: Props) {
     const devicesState = useDevices(session.token, session.userId);
     const rotate = useRotateKeys(session, onSessionChange);
@@ -64,6 +67,7 @@ export default function SettingsRoute({
                 value={photoQuality}
                 onChange={setPhotoQuality}
             />
+            <SignOutPanel onLogout={onLogout} />
             <DeleteAccountPanel
                 handle={session.handle}
                 step={del.step}

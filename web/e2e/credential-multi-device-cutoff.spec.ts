@@ -5,6 +5,7 @@ import {
     registerUser,
     registerUserWithPassword,
     sendMessage,
+    waitForChatList,
     waitForMessage,
 } from './helpers';
 
@@ -84,7 +85,7 @@ test.describe('Credential rotation — multi-device cutoff', () => {
         // ── 7. The new password works on B (clean IDB) ──────────────────
         await b.fill('#secret', NEW_PASSWORD);
         await b.getByRole('button', { name: 'Sign In' }).click();
-        await b.waitForSelector('text=Your handle', { timeout: 30_000 });
+        await waitForChatList(b);
 
         // ── 8. History from before the rotation still decrypts on B
         //      (chain walk recovers the v1 backup key from key_chain.json),

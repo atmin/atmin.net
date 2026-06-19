@@ -1,9 +1,18 @@
+import {
+    Block,
+    BlockTitle,
+    Button,
+    List,
+    ListInput,
+    ListItem,
+    Navbar,
+    Page,
+    Sheet,
+} from 'konsta/react';
+import { Notebook, Settings as SettingsIcon, SquarePen } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import type { StoredConversation } from '@/lib/db';
-import Layout from './Layout';
-import Logo from './Logo';
-import PageContent from './PageContent';
 
 function timeAgo(ts: number): string {
     const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -16,37 +25,51 @@ function timeAgo(ts: number): string {
     return `${days}d ago`;
 }
 
+const avatar = (content: ReactNode) => (
+    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/5 text-lg dark:bg-white/10">
+        {content}
+    </span>
+);
+
 interface Props {
-    handle: string;
     serverOk: boolean | null;
     conversations: StoredConversation[];
     contacts: Map<string, string>;
     displayNames: Map<string, string>;
     userId: string;
+    /** Navigate (forward View Transition) to a chat / settings route. */
+    onOpen: (path: string) => void;
     onNewChat: (handle: string) => void;
-    onLogout: () => void;
 }
 
 export default function ChatsView({
-    handle,
     serverOk,
     conversations,
     contacts,
     displayNames,
     userId,
+    onOpen,
     onNewChat,
-    onLogout,
 }: Props) {
-    const [copied, setCopied] = useState(false);
+    const [composeOpen, setComposeOpen] = useState(false);
     const [handleInput, setHandleInput] = useState('');
 
-    const copyHandle = () => {
-        navigator.clipboard.writeText(handle);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-    };
+    // Server reachability — the colored dot on the wordmark. Distinct from the
+    // device network status (OfflineIndicator). Color-only needs a label.
+    const serverLabel =
+        serverOk === true
+            ? 'Server online'
+            : serverOk === false
+              ? 'Server offline'
+              : 'Connecting to server';
+    const serverDot =
+        serverOk === true
+            ? 'bg-green-500'
+            : serverOk === false
+              ? 'bg-red-500'
+              : 'bg-yellow-500';
 
-    // Split: saved messages on top, then DMs sorted by recency
+    // Saved Messages on top, then DMs sorted by recency (already sorted upstream).
     const savedConv = conversations.find((c) =>
         c.conversationId.startsWith('self:'),
     );
@@ -54,7 +77,7 @@ export default function ChatsView({
         (c) => !c.conversationId.startsWith('self:'),
     );
 
-    // Extract peer userId from conversationId "dm:U1:U2"
+    // Extract peer userId from conversationId "dm:U1:U2".
     const peerId = (convId: string): string => {
         const parts = convId.split(':');
         return parts[1] === userId ? parts[2] : parts[1];
@@ -62,145 +85,119 @@ export default function ChatsView({
     const peerHandle = (uid: string) => contacts.get(uid) ?? uid.slice(0, 8);
     const peerLabel = (uid: string) => displayNames.get(uid) || peerHandle(uid);
 
-    const topBar = (
-        <>
-            <div className="flex items-center gap-2 font-mono">
-                <Logo className="h-7 w-7" />
-                <span className="font-bold">atmin</span>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-                <Link
-                    to="/settings"
-                    className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                    Settings
-                </Link>
-                <span
-                    className={`inline-block h-2 w-2 rounded-full ${
-                        serverOk === true
-                            ? 'bg-green-500'
-                            : serverOk === false
-                              ? 'bg-red-500'
-                              : 'bg-yellow-500'
-                    }`}
-                />
-            </div>
-        </>
+    const startChat = () => {
+        const h = handleInput.trim();
+        if (!h) return;
+        onNewChat(h);
+        setComposeOpen(false);
+        setHandleInput('');
+    };
+
+    const title = (
+        <span className="flex items-center justify-center gap-1.5 font-semibold">
+            atmin
+            <span
+                role="img"
+                aria-label={serverLabel}
+                title={serverLabel}
+                className={`inline-block h-2 w-2 rounded-full ${serverDot}`}
+            />
+        </span>
+    );
+
+    // Plain buttons (not Konsta `Link`, which hardcodes role="link") — these are
+    // controls: compose opens a sheet, the gear navigates programmatically. Keeps
+    // correct button semantics + accessible names for the e2e selectors.
+    const navbarRight = (
+        <div className="flex items-center">
+            <button
+                type="button"
+                aria-label="New chat"
+                onClick={() => setComposeOpen(true)}
+                className="flex h-10 w-10 items-center justify-center active:opacity-60"
+            >
+                <SquarePen className="h-5 w-5" />
+            </button>
+            <button
+                type="button"
+                aria-label="Settings"
+                onClick={() => onOpen('/settings')}
+                className="flex h-10 w-10 items-center justify-center active:opacity-60"
+            >
+                <SettingsIcon className="h-5 w-5" />
+            </button>
+        </div>
     );
 
     return (
-        <Layout topBar={topBar}>
-            <PageContent>
-                <div className="mb-6 rounded bg-muted p-4">
-                    <p className="mb-1 text-xs text-muted-foreground">
-                        Your handle
-                    </p>
-                    <div className="flex items-center justify-between">
-                        <span className="text-lg">{handle}</span>
-                        <button
-                            type="button"
-                            onClick={copyHandle}
-                            className="text-xs text-muted-foreground hover:text-foreground"
-                        >
-                            {copied ? 'Copied' : 'Copy'}
-                        </button>
-                    </div>
-                </div>
+        <Page>
+            <Navbar title={title} right={navbarRight} />
 
-                {/* Chat list */}
-                <div className="space-y-2">
-                    {/* Saved Messages */}
-                    <Link
-                        to="/saved"
-                        className="block rounded border border-border bg-card p-4 hover:bg-accent"
-                    >
-                        <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                                📝
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <div className="font-medium">
-                                    Saved Messages
-                                </div>
-                                <div className="truncate text-xs text-muted-foreground">
-                                    {savedConv
-                                        ? savedConv.lastMessageText
-                                        : 'Your private notes'}
-                                </div>
-                            </div>
-                            {savedConv && (
-                                <span className="shrink-0 text-xs text-muted-foreground">
-                                    {timeAgo(savedConv.lastMessageTimestamp)}
-                                </span>
-                            )}
-                        </div>
-                    </Link>
-
-                    {/* DM conversations */}
-                    {dmConvs.map((conv) => {
-                        const uid = peerId(conv.conversationId);
-                        const handle = peerHandle(uid);
-                        const label = peerLabel(uid);
-                        return (
-                            <Link
-                                key={conv.conversationId}
-                                to={`/@${encodeURIComponent(handle)}`}
-                                className="block rounded border border-border bg-card p-4 hover:bg-accent"
-                            >
-                                <div className="flex items-center gap-3">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                                        💬
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                        <div className="font-medium">
-                                            {label}
-                                        </div>
-                                        <div className="truncate text-xs text-muted-foreground">
-                                            {conv.lastMessageText}
-                                        </div>
-                                    </div>
-                                    <span className="shrink-0 text-xs text-muted-foreground">
-                                        {timeAgo(conv.lastMessageTimestamp)}
-                                    </span>
-                                </div>
-                            </Link>
-                        );
-                    })}
-
-                    {/* New chat */}
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            const h = handleInput.trim();
-                            if (h) onNewChat(h);
-                        }}
-                        className="flex gap-2"
-                    >
-                        <input
-                            type="text"
-                            value={handleInput}
-                            onChange={(e) => setHandleInput(e.target.value)}
-                            placeholder="Enter a handle..."
-                            className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
+            <List strong inset>
+                <ListItem
+                    link
+                    title="Saved Messages"
+                    subtitle={
+                        savedConv
+                            ? savedConv.lastMessageText
+                            : 'Your private notes'
+                    }
+                    after={
+                        savedConv
+                            ? timeAgo(savedConv.lastMessageTimestamp)
+                            : undefined
+                    }
+                    media={avatar(<Notebook className="h-5 w-5" />)}
+                    onClick={() => onOpen('/saved')}
+                />
+                {dmConvs.map((conv) => {
+                    const uid = peerId(conv.conversationId);
+                    const h = peerHandle(uid);
+                    return (
+                        <ListItem
+                            key={conv.conversationId}
+                            link
+                            title={peerLabel(uid)}
+                            subtitle={conv.lastMessageText}
+                            after={timeAgo(conv.lastMessageTimestamp)}
+                            media={avatar('💬')}
+                            onClick={() => onOpen(`/@${encodeURIComponent(h)}`)}
                         />
-                        <button
-                            type="submit"
-                            disabled={!handleInput.trim()}
-                            className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                        >
-                            Chat
-                        </button>
-                    </form>
-                </div>
+                    );
+                })}
+            </List>
 
-                <button
-                    type="button"
-                    onClick={onLogout}
-                    className="mt-8 text-xs text-muted-foreground hover:text-destructive"
-                >
-                    Sign out
-                </button>
-            </PageContent>
-        </Layout>
+            {dmConvs.length === 0 && (
+                <Block className="text-center text-sm opacity-60">
+                    No conversations yet — tap the compose button to start one.
+                </Block>
+            )}
+
+            <Sheet
+                opened={composeOpen}
+                onBackdropClick={() => setComposeOpen(false)}
+                className="w-full pb-8"
+            >
+                <BlockTitle>New chat</BlockTitle>
+                <List strong inset>
+                    <ListInput
+                        type="text"
+                        placeholder="Enter a handle..."
+                        value={handleInput}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                            setHandleInput(e.target.value)
+                        }
+                    />
+                </List>
+                <Block className="flex gap-3">
+                    <Button clear onClick={() => setComposeOpen(false)}>
+                        Cancel
+                    </Button>
+                    <Button onClick={startChat} disabled={!handleInput.trim()}>
+                        Start chat
+                    </Button>
+                </Block>
+            </Sheet>
+        </Page>
     );
 }

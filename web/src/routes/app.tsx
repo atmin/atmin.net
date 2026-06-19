@@ -134,6 +134,7 @@ export default function App() {
                                     session={session}
                                     onSessionChange={handleLogin}
                                     onDeleted={handleAccountDeleted}
+                                    onLogout={handleLogout}
                                 />
                             ) : (
                                 <Navigate to="/login" replace />
@@ -149,7 +150,6 @@ export default function App() {
                                 <Chats
                                     session={session}
                                     sessionManager={sessionManager}
-                                    onLogout={handleLogout}
                                 />
                             ) : (
                                 <Landing

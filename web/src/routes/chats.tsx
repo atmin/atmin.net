@@ -1,36 +1,31 @@
-import { useNavigate } from 'react-router-dom';
 import ChatsView from '@/components/ChatsView';
 import { useConversations } from '@/hooks/useConversations';
+import { useViewTransitionNavigate } from '@/hooks/useViewTransitionNavigate';
 import type { Session } from '@/lib/auth';
 import type { SessionManager } from '@/lib/megolm-session';
 
 interface Props {
     session: Session;
     sessionManager: SessionManager | null;
-    onLogout: () => void;
 }
 
-export default function ChatsRoute({
-    session,
-    sessionManager,
-    onLogout,
-}: Props) {
+export default function ChatsRoute({ session, sessionManager }: Props) {
     const { conversations, contacts, displayNames, serverOk } =
         useConversations(session, sessionManager);
-    const navigate = useNavigate();
+    // Drive forward View Transitions for list → chat / settings (ADR-0023).
+    const onOpen = useViewTransitionNavigate();
 
     return (
         <ChatsView
-            handle={session.handle}
             serverOk={serverOk}
             conversations={conversations}
             contacts={contacts}
             displayNames={displayNames}
             userId={session.userId}
+            onOpen={onOpen}
             onNewChat={(handle) =>
-                navigate(`/@${encodeURIComponent(handle.trim().toLowerCase())}`)
+                onOpen(`/@${encodeURIComponent(handle.trim().toLowerCase())}`)
             }
-            onLogout={onLogout}
         />
     );
 }

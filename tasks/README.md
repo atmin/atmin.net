@@ -52,19 +52,24 @@ full barrel would be +10.6 kB CSS — the trim saves ~1 kB; CSS is mostly one-ti
 `@source`-generated Konsta classes). T6 does the final measurement once all
 screens migrate. Remaining work proceeds risk-ascending; T6 last.
 
-1. **[konsta-t1-chats](konsta-t1-chats.md)** — conversation list (spike already
-   prototyped it).
-2. **[konsta-t2-settings](konsta-t2-settings.md)** — settings panels (list-heavy;
-   proves forms + dialogs).
-3. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
+**T1 (conversation list) has landed** — `ChatsView` rebuilt as a Konsta
+`Page`/`Navbar`/`List`; `atmin` wordmark carries the `serverOk` dot, a compose
+action opens a `Sheet` for new chats, and the gear navigates to Settings. The
+handle card moved to Settings (already there) and sign-out moved into the
+(still-shadcn) Settings screen. Per-screen JS cost: **~+12 kB gzip** (the Konsta
+component runtime; CSS unchanged — classes were scanned in T0).
+
+1. **[konsta-t2-settings](konsta-t2-settings.md)** — settings panels (list-heavy;
+   proves forms + dialogs). Also restyle the sign-out T1 parked here.
+2. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
    AuroraBackground**.
-4. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
+3. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
    `Messagebar` composer (preserves the compose tray).
-5. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
+4. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
    (`Messages`/`Message`) + media + edit/delete; needs T4a.
-6. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+5. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
    dialogs (can interleave any time now T0 is done).
-7. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
+6. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
    bundle measurement, flip ADR-0023 Draft→Accepted, retire the spike branch.
 
 ### Parked / deferred

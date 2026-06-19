@@ -5,9 +5,10 @@ import ChatsView from './ChatsView';
 const meta = {
     title: 'Chat/ChatsView',
     component: ChatsView,
+    parameters: { layout: 'fullscreen' },
     args: {
         onNewChat: fn(),
-        onLogout: fn(),
+        onOpen: fn(),
     },
 } satisfies Meta<typeof ChatsView>;
 
@@ -16,7 +17,6 @@ type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {
     args: {
-        handle: 'copper-falcon',
         serverOk: true,
         conversations: [],
         contacts: new Map(),
@@ -27,7 +27,6 @@ export const Empty: Story = {
 
 export const WithConversations: Story = {
     args: {
-        handle: 'copper-falcon',
         serverOk: true,
         conversations: [
             {
@@ -60,7 +59,6 @@ export const WithConversations: Story = {
 
 export const ServerDown: Story = {
     args: {
-        handle: 'copper-falcon',
         serverOk: false,
         conversations: [],
         contacts: new Map(),
@@ -71,7 +69,6 @@ export const ServerDown: Story = {
 
 export const ServerConnecting: Story = {
     args: {
-        handle: 'copper-falcon',
         serverOk: null,
         conversations: [],
         contacts: new Map(),

@@ -3,6 +3,7 @@ import {
     openChat,
     registerUser,
     sendMessage,
+    waitForChatList,
     waitForMessage,
 } from './helpers';
 
@@ -19,7 +20,7 @@ test.describe('Profile Management', () => {
         const aliceHandle = await registerUser(alice);
 
         // ── 2. Alice navigates to settings and sets display name ─
-        await alice.click('text=Settings');
+        await alice.getByRole('button', { name: 'Settings' }).click();
         await alice.waitForURL('**/settings');
         await alice.fill('#display-name', 'Alice Wonderland');
         await alice.getByRole('button', { name: 'Save' }).click();
@@ -34,9 +35,7 @@ test.describe('Profile Management', () => {
 
         // ── 5. Bob goes to chat list — sees "Alice Wonderland" ───
         await bob.goto('/');
-        await bob.waitForSelector('text=Your handle', {
-            timeout: 15_000,
-        });
+        await waitForChatList(bob, 15_000);
         await expect(
             bob.locator('text=Alice Wonderland'),
         ).toBeVisible({ timeout: 15_000 });
@@ -63,7 +62,7 @@ test.describe('Profile Management', () => {
         await registerUser(bob);
 
         // ── 2. Alice sets initial display name ───────────────────
-        await alice.click('text=Settings');
+        await alice.getByRole('button', { name: 'Settings' }).click();
         await alice.waitForURL('**/settings');
         await alice.fill('#display-name', 'Alice');
         await alice.getByRole('button', { name: 'Save' }).click();
@@ -73,9 +72,7 @@ test.describe('Profile Management', () => {
         await openChat(bob, aliceHandle);
         await sendMessage(bob, 'Hey');
         await bob.goto('/');
-        await bob.waitForSelector('text=Your handle', {
-            timeout: 15_000,
-        });
+        await waitForChatList(bob, 15_000);
         await expect(bob.locator('text=Alice')).toBeVisible({
             timeout: 15_000,
         });
@@ -88,9 +85,7 @@ test.describe('Profile Management', () => {
 
         // ── 5. Bob reloads chat list — sees updated name ─────────
         await bob.goto('/');
-        await bob.waitForSelector('text=Your handle', {
-            timeout: 15_000,
-        });
+        await waitForChatList(bob, 15_000);
         await expect(
             bob.locator('text=Alice Wonderland'),
         ).toBeVisible({ timeout: 15_000 });

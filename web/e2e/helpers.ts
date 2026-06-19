@@ -17,6 +17,20 @@ function nextHandle(prefix = 'tester'): string {
 }
 
 /**
+ * Wait for the authenticated chats screen to render. The "atmin" wordmark in the
+ * Konsta navbar (ADR-0023/T1) is the stable signal that the conversation list
+ * has mounted — used after login / registration / navigating home. Defaults to
+ * the long timeout for the Argon2id-bearing auth paths; pass a shorter one for
+ * plain in-app navigations.
+ */
+export async function waitForChatList(
+    page: Page,
+    timeout = 30_000,
+): Promise<void> {
+    await page.waitForSelector('text=atmin', { timeout });
+}
+
+/**
  * Register a new user via the UI and return their handle.
  * Assumes the page is not logged in.
  */
@@ -57,9 +71,7 @@ export async function registerUserWithPassword(
     await register.click();
 
     // Wait for redirect to home page (Argon2id + registration).
-    await page.waitForSelector('text=Your handle', {
-        timeout: 30_000,
-    });
+    await waitForChatList(page);
 
     return { handle, password };
 }
@@ -80,17 +92,17 @@ export async function loginUser(
     await page.getByRole('button', { name: 'Sign In' }).click();
 
     // Wait for redirect to home page (Argon2id + add-device).
-    await page.waitForSelector('text=Your handle', {
-        timeout: 30_000,
-    });
+    await waitForChatList(page);
 }
 
 /**
  * From the chats page, enter a handle and navigate to the chat.
  */
 export async function openChat(page: Page, handle: string): Promise<void> {
+    // New-chat is a navbar compose action that opens a Konsta Sheet (ADR-0023/T1).
+    await page.getByRole('button', { name: 'New chat' }).click();
     await page.fill('input[placeholder="Enter a handle..."]', handle);
-    await page.getByRole('button', { name: 'Chat' }).click();
+    await page.getByRole('button', { name: 'Start chat' }).click();
     await page.waitForURL(`**/@${handle}`);
 }
 
@@ -130,9 +142,7 @@ export async function resyncChat(
     handle: string,
 ): Promise<void> {
     await page.goto('/');
-    await page.waitForSelector('text=Your handle', {
-        timeout: 15_000,
-    });
+    await waitForChatList(page, 15_000);
     await openChat(page, handle);
 }
 

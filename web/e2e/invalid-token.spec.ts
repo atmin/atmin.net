@@ -5,6 +5,7 @@ import {
     registerUser,
     registerUserWithPassword,
     sendMessage,
+    waitForChatList,
     waitForMessage,
 } from './helpers';
 
@@ -77,16 +78,11 @@ test.describe('Invalid token (401)', () => {
         const alice = await aliceCtx.newPage();
         const bob = await bobCtx.newPage();
 
-        // 1. Register Alice and Bob
-        await registerUserWithPassword(alice);
+        // 1. Register Alice (capturing her handle) and Bob
+        const { handle: aliceHandle } = await registerUserWithPassword(alice);
         const bobHandle = await registerUser(bob);
 
-        // 2. Bob opens chat with Alice's handle (resolved from Alice's registration)
-        const aliceHandle = await alice
-            .locator('.text-lg')
-            .textContent()
-            .then((h) => h?.trim() ?? '');
-
+        // 2. Bob opens chat with Alice's handle (from her registration)
         await openChat(bob, aliceHandle);
         await sendMessage(bob, 'Hello');
 
@@ -100,7 +96,7 @@ test.describe('Invalid token (401)', () => {
 
         // 5. Navigate home so useChat unmounts and the current SSE closes cleanly
         await alice.goto('/');
-        await alice.waitForSelector('text=Your handle');
+        await waitForChatList(alice);
 
         // 6. Intercept the storeList probe to return 401 (token is now invalid on server)
         await alice.route('**/v1/store/list*', (route) =>

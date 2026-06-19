@@ -7,6 +7,7 @@ import {
     registerUser,
     registerUserWithPassword,
     sendMessage,
+    waitForChatList,
     waitForMessage,
 } from './helpers';
 
@@ -38,9 +39,7 @@ test.describe('Session Rotation', () => {
 
         // ── 3. Bob reloads (rotation-on-start → new session) ───────
         await bob.goto('/');
-        await bob.waitForSelector('text=Your handle', {
-            timeout: 15_000,
-        });
+        await waitForChatList(bob, 15_000);
 
         // ── 4. Bob opens chat again, sends on session 2 ───────────
         await openChat(bob, aliceHandle);
