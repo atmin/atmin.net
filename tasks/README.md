@@ -37,4 +37,6 @@ per-image captions, grid — the clean schema break), which has no task yet.
 
 ### Active tasks
 
-1. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.
+1. **[konsta-ui-spike](konsta-ui-spike.md)** _(spike)_ — Throwaway prototype to de-risk the v0.2 UI direction (Option A: Konsta UI + View Transitions over shadcn). Answers, cheapest-killing-risk first: does Konsta render under our Tailwind v4 setup (the `@config` bridge), on one real screen themed iOS+Material, across web/Capacitor/Tauri, with a View Transition on one nav, and at what bundle cost. Produces a go/no-go + findings → an ADR amending [ADR-0003](../docs/decisions/adr-0003-ui-component-framework.md) and a migration task if go. Not merged.
+
+2. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.
