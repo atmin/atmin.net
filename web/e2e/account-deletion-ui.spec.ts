@@ -1,5 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { loginUser, registerUserWithPassword } from './helpers';
+import {
+    loginUser,
+    registerUserWithPassword,
+    tickKonstaCheckbox,
+} from './helpers';
 
 // Scenario: docs/scenarios/account-deletion.md (client-side flow).
 test.describe('Account deletion (Settings → Danger zone)', () => {
@@ -31,7 +35,7 @@ test.describe('Account deletion (Settings → Danger zone)', () => {
                     () => localStorage.getItem('atmin:handle') ?? '',
                 ),
             );
-        await page.getByTestId('delete-account-ack').click();
+        await tickKonstaCheckbox(page, 'delete-account-ack');
         await page.getByTestId('delete-account-submit').click();
 
         await expect(page.getByText('Password is incorrect.')).toBeVisible({
@@ -49,7 +53,7 @@ test.describe('Account deletion (Settings → Danger zone)', () => {
         await page
             .locator('#delete-password')
             .fill('correct-horse-battery-staple-7');
-        await page.getByTestId('delete-account-ack').click();
+        await tickKonstaCheckbox(page, 'delete-account-ack');
 
         // Wrong handle → disabled.
         await page
@@ -77,7 +81,7 @@ test.describe('Account deletion (Settings → Danger zone)', () => {
         await expandDangerZone(page);
         await page.locator('#delete-password').fill(password);
         await page.getByTestId('delete-account-handle-confirm').fill(handle);
-        await page.getByTestId('delete-account-ack').click();
+        await tickKonstaCheckbox(page, 'delete-account-ack');
         await page.getByTestId('delete-account-submit').click();
 
         // Lands on Landing with the one-shot confirmation.

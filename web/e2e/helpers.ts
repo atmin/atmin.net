@@ -30,6 +30,49 @@ export async function waitForChatList(
     await page.waitForSelector('text=atmin', { timeout });
 }
 
+// Konsta UI renders a checkbox as a native <input> hidden with display:none
+// (`CheckboxClasses` → `input: 'hidden'`) inside a styled <label>. Two e2e
+// consequences: setChecked/check() hang on the invisible input, and getByRole
+// can't see it (it's out of the a11y tree). So we interact via the label — a
+// click toggles the input — and assert against the input located by CSS. Give
+// the <Checkbox> a data-testid; it lands on the label.
+
+/** Toggle a Konsta checkbox by clicking its label — use on an unchecked box to tick it. */
+export async function tickKonstaCheckbox(
+    page: Page,
+    testId: string,
+): Promise<void> {
+    await page.getByTestId(testId).click();
+}
+
+/** Assert a Konsta checkbox is checked (reads the hidden input's state). */
+export async function expectKonstaCheckboxChecked(
+    page: Page,
+    testId: string,
+    timeout = 5_000,
+): Promise<void> {
+    await expect(page.getByTestId(testId).locator('input')).toBeChecked({
+        timeout,
+    });
+}
+
+/**
+ * From Settings → Devices, revoke the device that isn't the current one (the one
+ * without the "this device" badge): click its Revoke, then confirm with the secret
+ * in the Konsta dialog. Assumes exactly one other device.
+ */
+export async function revokeOtherDevice(
+    page: Page,
+    secret: string,
+): Promise<void> {
+    const other = page
+        .getByTestId('device-item')
+        .filter({ hasNot: page.getByText('this device') });
+    await other.getByTestId('revoke-button').click();
+    await page.getByTestId('credential-input').fill(secret);
+    await page.getByTestId('confirm-revoke').click();
+}
+
 /**
  * Register a new user via the UI and return their handle.
  * Assumes the page is not logged in.

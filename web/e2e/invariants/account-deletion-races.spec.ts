@@ -19,6 +19,7 @@ import {
     openChat,
     registerUserWithPassword,
     sendMessage,
+    tickKonstaCheckbox,
 } from '../helpers';
 import { getCurrentUserId, listRemoteKeys, makeS3Client } from './helpers';
 
@@ -66,7 +67,7 @@ test.describe('I7 — account deletion races terminate cleanly', () => {
         await alice
             .getByTestId('delete-account-handle-confirm')
             .fill(aliceHandle);
-        await alice.getByTestId('delete-account-ack').click();
+        await tickKonstaCheckbox(alice, 'delete-account-ack');
         await alice.getByTestId('delete-account-submit').click();
 
         // Device 1 lands on the confirmation.

@@ -58,8 +58,14 @@ export const WrongPasswordError: Story = {
 
 export const Verifying: Story = {
     args: { step: 'verifying' },
+    play: async ({ canvas, userEvent }) => {
+        await userEvent.click(canvas.getByTestId('delete-account-trigger'));
+    },
 };
 
 export const Deleting: Story = {
     args: { step: 'deleting' },
+    play: async ({ canvas, userEvent }) => {
+        await userEvent.click(canvas.getByTestId('delete-account-trigger'));
+    },
 };

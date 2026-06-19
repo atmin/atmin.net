@@ -18,12 +18,14 @@
 import { expect, test } from '@playwright/test';
 import {
     E2E_PASSWORD,
+    expectKonstaCheckboxChecked,
     loginUser,
     openChat,
     registerUser,
     registerUserWithPassword,
     resyncChat,
     sendMessage,
+    tickKonstaCheckbox,
     waitForMessage,
 } from '../helpers';
 import {
@@ -61,17 +63,16 @@ test.describe('I9 — chain walker recovers history across N rotations', () => {
             newPassword: string,
         ) => {
             await alice.goto('/settings');
+            // Change password is a Konsta Sheet (ADR-0023/T2) — open it first.
+            await alice.getByTestId('change-password-trigger').click();
             await alice.waitForSelector('#current-password', {
                 timeout: 15_000,
             });
             await alice.fill('#current-password', currentPassword);
             await alice.fill('#new-password', newPassword);
             await alice.fill('#confirm-new-password', newPassword);
-            const ack = alice.getByRole('checkbox', {
-                name: /unrecoverable/i,
-            });
-            await ack.setChecked(true);
-            await expect(ack).toBeChecked({ timeout: 5_000 });
+            await tickKonstaCheckbox(alice, 'change-password-ack');
+            await expectKonstaCheckboxChecked(alice, 'change-password-ack');
             const submit = alice.getByTestId('change-password-submit');
             await expect(submit).toBeEnabled({ timeout: 5_000 });
             await submit.click();

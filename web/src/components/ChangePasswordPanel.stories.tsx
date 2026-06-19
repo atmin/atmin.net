@@ -28,13 +28,11 @@ const meta = {
         onSubmit: fn(),
         strength: noStrength,
     },
-    decorators: [
-        (Story) => (
-            <div className="max-w-xl p-8">
-                <Story />
-            </div>
-        ),
-    ],
+    // The form/step content now lives in a Konsta Sheet; open it on render so
+    // every story shows its state (matches DeleteAccountPanel's pattern).
+    play: async ({ canvas, userEvent }) => {
+        await userEvent.click(canvas.getByTestId('change-password-trigger'));
+    },
 } satisfies Meta<typeof ChangePasswordPanel>;
 
 export default meta;

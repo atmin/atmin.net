@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
 import {
+    expectKonstaCheckboxChecked,
     loginUser,
     openChat,
     registerUser,
     registerUserWithPassword,
     sendMessage,
+    tickKonstaCheckbox,
     waitForChatList,
     waitForMessage,
 } from './helpers';
@@ -44,13 +46,14 @@ test.describe('Credential rotation — multi-device cutoff', () => {
 
         // ── 3. Alice rotates her password on device A ───────────────────
         await a.goto('/settings');
+        // Change password is a Konsta Sheet (ADR-0023/T2) — open it first.
+        await a.getByTestId('change-password-trigger').click();
         await a.waitForSelector('#current-password', { timeout: 15_000 });
         await a.fill('#current-password', oldPassword);
         await a.fill('#new-password', NEW_PASSWORD);
         await a.fill('#confirm-new-password', NEW_PASSWORD);
-        const ack = a.getByRole('checkbox', { name: /unrecoverable/i });
-        await ack.setChecked(true);
-        await expect(ack).toBeChecked({ timeout: 5_000 });
+        await tickKonstaCheckbox(a, 'change-password-ack');
+        await expectKonstaCheckboxChecked(a, 'change-password-ack');
         const submit = a.getByTestId('change-password-submit');
         await expect(submit).toBeEnabled({ timeout: 5_000 });
         await submit.click();

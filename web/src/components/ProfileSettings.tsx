@@ -1,21 +1,26 @@
-import { type ReactNode, useState } from 'react';
+import {
+    Block,
+    BlockTitle,
+    Button,
+    List,
+    ListInput,
+    ListItem,
+} from 'konsta/react';
+import { useState } from 'react';
 import { updateProfile } from '@/lib/api';
-import BackButton from './BackButton';
-import Layout from './Layout';
-import PageContent from './PageContent';
 
 interface Props {
     handle: string;
     token: string;
     initialDisplayName?: string;
-    children?: ReactNode;
 }
 
+// Profile section of Settings (ADR-0023 / T2). No longer the page wrapper —
+// settings.tsx owns the Page + Navbar; this is just a grouped-list section.
 export default function ProfileSettings({
     handle,
     token,
     initialDisplayName = '',
-    children,
 }: Props) {
     const [displayName, setDisplayName] = useState(initialDisplayName);
     const [saving, setSaving] = useState(false);
@@ -46,68 +51,48 @@ export default function ProfileSettings({
         setTimeout(() => setCopied(false), 2000);
     };
 
-    const topBar = (
-        <>
-            <BackButton />
-            <span className="ml-1 font-mono text-sm font-medium">Settings</span>
-        </>
-    );
-
     return (
-        <Layout topBar={topBar}>
-            <PageContent>
-                <div className="mb-6 rounded bg-muted p-4">
-                    <p className="mb-1 text-xs text-muted-foreground">
-                        Your handle
-                    </p>
-                    <div className="flex items-center justify-between">
-                        <span className="text-lg">{handle}</span>
+        <>
+            <BlockTitle>Your handle</BlockTitle>
+            <List strong inset>
+                <ListItem
+                    title={<span className="font-mono">{handle}</span>}
+                    after={
                         <button
                             type="button"
                             onClick={copyHandle}
-                            className="text-xs text-muted-foreground hover:text-foreground"
+                            className="text-sm text-primary active:opacity-60"
                         >
                             {copied ? 'Copied' : 'Copy'}
                         </button>
-                    </div>
-                </div>
+                    }
+                />
+            </List>
 
-                <div className="space-y-4">
-                    <div>
-                        <label
-                            htmlFor="display-name"
-                            className="mb-1 block text-xs text-muted-foreground"
-                        >
-                            Display name
-                        </label>
-                        <input
-                            id="display-name"
-                            type="text"
-                            value={displayName}
-                            onChange={(e) => setDisplayName(e.target.value)}
-                            placeholder="How others see you"
-                            className="w-full rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-                            maxLength={64}
-                        />
-                    </div>
-
-                    <button
-                        type="button"
-                        onClick={handleSave}
-                        disabled={!dirty || saving}
-                        className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                    >
-                        {saving ? 'Saving...' : 'Save'}
-                    </button>
-
-                    {saved && <p className="text-xs text-green-600">Saved</p>}
-                    {error && (
-                        <p className="text-xs text-destructive">{error}</p>
-                    )}
-                </div>
-
-                {children}
-            </PageContent>
-        </Layout>
+            <BlockTitle>Display name</BlockTitle>
+            <List strong inset>
+                <ListInput
+                    inputId="display-name"
+                    type="text"
+                    placeholder="How others see you"
+                    value={displayName}
+                    maxLength={64}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setDisplayName(e.target.value)
+                    }
+                />
+            </List>
+            <Block className="space-y-2">
+                <Button onClick={handleSave} disabled={!dirty || saving}>
+                    {saving ? 'Saving…' : 'Save'}
+                </Button>
+                {saved && (
+                    <p className="text-center text-sm text-green-600">Saved</p>
+                )}
+                {error && (
+                    <p className="text-center text-sm text-red-500">{error}</p>
+                )}
+            </Block>
+        </>
     );
 }

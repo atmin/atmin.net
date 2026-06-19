@@ -1,14 +1,14 @@
+import {
+    Block,
+    BlockTitle,
+    Button,
+    Checkbox,
+    List,
+    ListItem,
+    Sheet,
+} from 'konsta/react';
 import { useState } from 'react';
 import PasswordInput from '@/components/PasswordInput';
-import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import type { DeleteStep } from '@/hooks/useDeleteAccount';
 
 interface Props {
@@ -24,18 +24,16 @@ interface Props {
     onSubmit: () => void;
 }
 
-function StepCover({ label }: { label: string }) {
+function StatusCover({ label }: { label: string }) {
     return (
-        <Card className="mt-8 border-destructive/40">
-            <CardContent className="pt-6 text-center">
-                <div className="mb-4 flex justify-center gap-2">
-                    <span className="size-3 animate-pulse rounded-full bg-destructive [animation-delay:-0.3s]" />
-                    <span className="size-3 animate-pulse rounded-full bg-destructive [animation-delay:-0.15s]" />
-                    <span className="size-3 animate-pulse rounded-full bg-destructive" />
-                </div>
-                <p className="text-sm font-medium">{label}</p>
-            </CardContent>
-        </Card>
+        <Block className="py-10 text-center">
+            <div className="mb-4 flex justify-center gap-2">
+                <span className="size-3 animate-pulse rounded-full bg-red-500 [animation-delay:-0.3s]" />
+                <span className="size-3 animate-pulse rounded-full bg-red-500 [animation-delay:-0.15s]" />
+                <span className="size-3 animate-pulse rounded-full bg-red-500" />
+            </div>
+            <p className="text-sm font-medium">{label}</p>
+        </Block>
     );
 }
 
@@ -51,17 +49,10 @@ export default function DeleteAccountPanel({
     onAcknowledgedChange,
     onSubmit,
 }: Props) {
-    const [expanded, setExpanded] = useState(false);
+    const [open, setOpen] = useState(false);
 
-    if (step === 'verifying') {
-        return <StepCover label="Verifying your password…" />;
-    }
-    if (step === 'deleting' || step === 'done') {
-        return <StepCover label="Deleting your account…" />;
-    }
-
-    const cancel = () => {
-        setExpanded(false);
+    const close = () => {
+        setOpen(false);
         onPasswordChange('');
         onHandleConfirmChange('');
         onAcknowledgedChange(false);
@@ -69,136 +60,152 @@ export default function DeleteAccountPanel({
 
     const canSubmit =
         password.length > 0 && handleConfirm === handle && acknowledged;
-
-    if (!expanded) {
-        return (
-            <Card className="mt-8 border-destructive/40">
-                <CardHeader>
-                    <CardTitle className="text-destructive">
-                        Delete account
-                    </CardTitle>
-                    <CardDescription>
-                        Permanently delete @{handle} and all your data. This
-                        cannot be undone. Want to leave on just this device?
-                        Sign out from Devices instead.
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <Button
-                        variant="outline"
-                        onClick={() => setExpanded(true)}
-                        data-testid="delete-account-trigger"
-                        className="border-destructive/50 text-destructive hover:bg-destructive/10"
-                    >
-                        Delete account
-                    </Button>
-                </CardContent>
-            </Card>
-        );
-    }
+    const busy = step === 'verifying' || step === 'deleting' || step === 'done';
 
     return (
-        <Card className="mt-8 border-destructive/40">
-            <CardHeader>
-                <CardTitle className="text-destructive">
-                    Delete account
-                </CardTitle>
-                <CardDescription>This cannot be undone.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-                <div className="space-y-2 text-sm">
-                    <p className="font-medium">What will be deleted</p>
-                    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                        <li>
-                            Your profile, contacts, conversation history, key
-                            backups, and uploaded media.
-                        </li>
-                        <li>All your sessions on every device.</li>
-                        <li>
-                            Your handle @{handle} will be reserved for 30 days,
-                            then becomes available to anyone — including, until
-                            then, not even you can re-claim it.
-                        </li>
-                    </ul>
-                    <p className="font-medium">What will not be deleted</p>
-                    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                        <li>
-                            Messages you've sent to others — their copies remain
-                            on their devices and in their inboxes.
-                        </li>
-                    </ul>
-                </div>
+        <>
+            <BlockTitle>Danger zone</BlockTitle>
+            <List strong inset>
+                <ListItem
+                    link
+                    title={<span className="text-red-500">Delete account</span>}
+                    onClick={() => setOpen(true)}
+                    data-testid="delete-account-trigger"
+                />
+            </List>
 
-                <div>
-                    <label
-                        htmlFor="delete-password"
-                        className="mb-1 block text-sm font-medium"
-                    >
-                        Password
-                    </label>
-                    <PasswordInput
-                        id="delete-password"
-                        value={password}
-                        onChange={onPasswordChange}
-                        autoComplete="current-password"
-                    />
-                </div>
+            <Sheet
+                opened={open}
+                onBackdropClick={busy ? undefined : close}
+                className="w-full pb-8"
+            >
+                <div className="max-h-[85vh] overflow-y-auto">
+                    {step === 'verifying' && (
+                        <StatusCover label="Verifying your password…" />
+                    )}
+                    {(step === 'deleting' || step === 'done') && (
+                        <StatusCover label="Deleting your account…" />
+                    )}
 
-                <div>
-                    <label
-                        htmlFor="delete-handle-confirm"
-                        className="mb-1 block text-sm font-medium"
-                    >
-                        Type your handle{' '}
-                        <span className="font-mono">{handle}</span> to confirm
-                    </label>
-                    <input
-                        id="delete-handle-confirm"
-                        type="text"
-                        value={handleConfirm}
-                        onChange={(e) => onHandleConfirmChange(e.target.value)}
-                        autoComplete="off"
-                        data-testid="delete-account-handle-confirm"
-                        className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
-                    />
-                </div>
+                    {step === 'enter' && (
+                        <>
+                            <BlockTitle>Delete account</BlockTitle>
+                            <Block strong inset className="space-y-5">
+                                <div className="space-y-2 text-sm">
+                                    <p className="font-medium">
+                                        What will be deleted
+                                    </p>
+                                    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                                        <li>
+                                            Your profile, contacts, conversation
+                                            history, key backups, and uploaded
+                                            media.
+                                        </li>
+                                        <li>
+                                            All your sessions on every device.
+                                        </li>
+                                        <li>
+                                            Your handle{' '}
+                                            <span className="font-mono">
+                                                @{handle}
+                                            </span>{' '}
+                                            will be reserved for 30 days, then
+                                            becomes available to anyone —
+                                            including, until then, not even you
+                                            can re-claim it.
+                                        </li>
+                                    </ul>
+                                    <p className="font-medium">
+                                        What will not be deleted
+                                    </p>
+                                    <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                                        <li>
+                                            Messages you've sent to others —
+                                            their copies remain on their devices
+                                            and in their inboxes.
+                                        </li>
+                                    </ul>
+                                </div>
 
-                <div>
-                    {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix UI Checkbox handles accessibility */}
-                    <label className="flex items-start gap-3">
-                        <Checkbox
-                            checked={acknowledged}
-                            onCheckedChange={(checked) =>
-                                onAcknowledgedChange(checked === true)
-                            }
-                            data-testid="delete-account-ack"
-                        />
-                        <span className="text-sm">
-                            I understand this cannot be undone.
-                        </span>
-                    </label>
-                </div>
+                                <div>
+                                    <label
+                                        htmlFor="delete-password"
+                                        className="mb-1 block text-sm font-medium"
+                                    >
+                                        Password
+                                    </label>
+                                    <PasswordInput
+                                        id="delete-password"
+                                        value={password}
+                                        onChange={onPasswordChange}
+                                        autoComplete="current-password"
+                                    />
+                                </div>
 
-                {error && <p className="text-sm text-destructive">{error}</p>}
+                                <div>
+                                    <label
+                                        htmlFor="delete-handle-confirm"
+                                        className="mb-1 block text-sm font-medium"
+                                    >
+                                        Type your handle{' '}
+                                        <span className="font-mono">
+                                            {handle}
+                                        </span>{' '}
+                                        to confirm
+                                    </label>
+                                    <input
+                                        id="delete-handle-confirm"
+                                        type="text"
+                                        value={handleConfirm}
+                                        onChange={(e) =>
+                                            onHandleConfirmChange(
+                                                e.target.value,
+                                            )
+                                        }
+                                        autoComplete="off"
+                                        data-testid="delete-account-handle-confirm"
+                                        className="w-full rounded border border-input bg-background px-3 py-2 text-sm"
+                                    />
+                                </div>
 
-                <div className="flex gap-3">
-                    <Button
-                        variant="destructive"
-                        onClick={onSubmit}
-                        disabled={!canSubmit}
-                        data-testid="delete-account-submit"
-                    >
-                        Delete account
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        onClick={cancel}
-                        data-testid="delete-account-cancel"
-                    >
-                        Cancel
-                    </Button>
+                                <Checkbox
+                                    checked={acknowledged}
+                                    onChange={(
+                                        e: React.ChangeEvent<HTMLInputElement>,
+                                    ) => onAcknowledgedChange(e.target.checked)}
+                                    data-testid="delete-account-ack"
+                                >
+                                    <span className="text-sm">
+                                        I understand this cannot be undone.
+                                    </span>
+                                </Checkbox>
+
+                                {error && (
+                                    <p className="text-sm text-red-500">
+                                        {error}
+                                    </p>
+                                )}
+                            </Block>
+                            <Block className="flex gap-3">
+                                <Button clear onClick={close}>
+                                    Cancel
+                                </Button>
+                                <Button
+                                    colors={{
+                                        fillBgIos: 'bg-red-500',
+                                        fillBgMaterial: 'bg-red-500',
+                                    }}
+                                    onClick={onSubmit}
+                                    disabled={!canSubmit}
+                                    data-testid="delete-account-submit"
+                                >
+                                    Delete account
+                                </Button>
+                            </Block>
+                        </>
+                    )}
                 </div>
-            </CardContent>
-        </Card>
+            </Sheet>
+        </>
     );
 }

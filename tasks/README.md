@@ -59,17 +59,25 @@ handle card moved to Settings (already there) and sign-out moved into the
 (still-shadcn) Settings screen. Per-screen JS cost: **~+12 kB gzip** (the Konsta
 component runtime; CSS unchanged — classes were scanned in T0).
 
-1. **[konsta-t2-settings](konsta-t2-settings.md)** — settings panels (list-heavy;
-   proves forms + dialogs). Also restyle the sign-out T1 parked here.
-2. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
+**T2 (settings) has landed** — Settings is now one scrolling Konsta `Page` of
+grouped inset `List` sections (`settings.tsx` owns the Page + back `Navbar`;
+`ProfileSettings` is just the profile section). Change-password and
+delete-account are `Sheet`s, device-revoke is a `Dialog`, photo-quality is a
+checkmark radio-list, storage gains a `Progressbar`, sign-out is a red
+`ListButton`. The sign-out parked by T1 is now restyled in Konsta. Shared
+`PasswordInput`/`PasswordStrengthMeter` reused inside the sheets (T3 migrates
+auth). Per-screen JS cost: **~+3 kB gzip** (new Konsta components, partly offset
+by dropping shadcn `Card`/`Checkbox`/`Button` here; CSS flat).
+
+1. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
    AuroraBackground**.
-3. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
+2. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
    `Messagebar` composer (preserves the compose tray).
-4. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
+3. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
    (`Messages`/`Message`) + media + edit/delete; needs T4a.
-5. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+4. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
    dialogs (can interleave any time now T0 is done).
-6. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
+5. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
    bundle measurement, flip ADR-0023 Draft→Accepted, retire the spike branch.
 
 ### Parked / deferred

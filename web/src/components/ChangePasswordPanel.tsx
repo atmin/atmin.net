@@ -1,14 +1,15 @@
+import {
+    Block,
+    BlockTitle,
+    Button,
+    Checkbox,
+    List,
+    ListItem,
+    Sheet,
+} from 'konsta/react';
+import { useState } from 'react';
 import PasswordInput from '@/components/PasswordInput';
 import PasswordStrengthMeter from '@/components/PasswordStrengthMeter';
-import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
 import type { PasswordStrength } from '@/hooks/usePasswordStrength';
 import type { RotateStep } from '@/hooks/useRotateKeys';
 
@@ -27,18 +28,16 @@ interface Props {
     onSubmit: () => void;
 }
 
-function StepCover({ label }: { label: string }) {
+function StatusCover({ label }: { label: string }) {
     return (
-        <Card>
-            <CardContent className="pt-6 text-center">
-                <div className="mb-4 flex justify-center gap-2">
-                    <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.3s]" />
-                    <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.15s]" />
-                    <span className="size-3 animate-pulse rounded-full bg-primary" />
-                </div>
-                <p className="text-sm font-medium">{label}</p>
-            </CardContent>
-        </Card>
+        <Block className="py-10 text-center">
+            <div className="mb-4 flex justify-center gap-2">
+                <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.3s]" />
+                <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.15s]" />
+                <span className="size-3 animate-pulse rounded-full bg-primary" />
+            </div>
+            <p className="text-sm font-medium">{label}</p>
+        </Block>
     );
 }
 
@@ -56,6 +55,8 @@ export default function ChangePasswordPanel({
     onAcknowledgedChange,
     onSubmit,
 }: Props) {
+    const [open, setOpen] = useState(false);
+
     const mismatch =
         confirmPassword.length > 0 && newPassword !== confirmPassword;
     const canSubmit =
@@ -65,134 +66,155 @@ export default function ChangePasswordPanel({
         acknowledged &&
         step === 'enter';
 
-    if (step === 'deriving-old') {
-        return <StepCover label="Verifying your current password…" />;
-    }
-    if (step === 'deriving-new') {
-        return <StepCover label="Deriving keys for your new password…" />;
-    }
-    if (step === 'writing-chain') {
-        return <StepCover label="Writing key chain…" />;
-    }
-    if (step === 'rotating') {
-        return <StepCover label="Rotating credentials on the server…" />;
-    }
-    if (step === 'done') {
-        return (
-            <Card>
-                <CardContent className="pt-6">
-                    <p className="text-center text-sm text-green-600">
-                        ✓ Password changed
-                    </p>
-                </CardContent>
-            </Card>
-        );
-    }
-
     return (
-        <Card className="mt-8">
-            <CardHeader>
-                <CardTitle>Change password</CardTitle>
-                <CardDescription>
-                    Replaces the credential that derives all your encryption
-                    keys. Other devices will be signed out and need to sign in
-                    again with the new password.
-                </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-5">
-                <div>
-                    <label
-                        htmlFor="current-password"
-                        className="mb-1 block text-sm font-medium"
-                    >
-                        Current password or recovery phrase
-                    </label>
-                    <PasswordInput
-                        id="current-password"
-                        value={currentPassword}
-                        onChange={onCurrentChange}
-                        autoComplete="current-password"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">
-                        Accounts created before password support migrate to a
-                        password the first time you change it — enter your
-                        12-word recovery phrase here.
-                    </p>
-                </div>
+        <>
+            <BlockTitle>Security</BlockTitle>
+            <List strong inset>
+                <ListItem
+                    link
+                    title="Change password"
+                    onClick={() => setOpen(true)}
+                    data-testid="change-password-trigger"
+                />
+            </List>
 
-                <div>
-                    <label
-                        htmlFor="new-password"
-                        className="mb-1 block text-sm font-medium"
-                    >
-                        New password
-                    </label>
-                    <PasswordInput
-                        id="new-password"
-                        value={newPassword}
-                        onChange={onNewChange}
-                        autoComplete="new-password"
-                    />
-                    {newPassword.length > 0 && (
-                        <div className="mt-2">
-                            <PasswordStrengthMeter
-                                score={strength.score}
-                                feedback={strength.feedback}
-                                pwned={strength.pwned}
-                                loading={strength.loading}
-                            />
-                        </div>
+            <Sheet
+                opened={open}
+                onBackdropClick={() => setOpen(false)}
+                className="w-full pb-8"
+            >
+                <div className="max-h-[85vh] overflow-y-auto">
+                    {step === 'deriving-old' && (
+                        <StatusCover label="Verifying your current password…" />
+                    )}
+                    {step === 'deriving-new' && (
+                        <StatusCover label="Deriving keys for your new password…" />
+                    )}
+                    {step === 'writing-chain' && (
+                        <StatusCover label="Writing key chain…" />
+                    )}
+                    {step === 'rotating' && (
+                        <StatusCover label="Rotating credentials on the server…" />
+                    )}
+                    {step === 'done' && (
+                        <Block className="py-10 text-center text-sm text-green-600">
+                            ✓ Password changed
+                        </Block>
+                    )}
+
+                    {step === 'enter' && (
+                        <>
+                            <BlockTitle>Change password</BlockTitle>
+                            <Block className="text-sm opacity-70">
+                                Replaces the credential that derives all your
+                                encryption keys. Other devices will be signed
+                                out and need to sign in again with the new
+                                password.
+                            </Block>
+                            <Block strong inset className="space-y-5">
+                                <div>
+                                    <label
+                                        htmlFor="current-password"
+                                        className="mb-1 block text-sm font-medium"
+                                    >
+                                        Current password or recovery phrase
+                                    </label>
+                                    <PasswordInput
+                                        id="current-password"
+                                        value={currentPassword}
+                                        onChange={onCurrentChange}
+                                        autoComplete="current-password"
+                                    />
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Accounts created before password support
+                                        migrate to a password the first time you
+                                        change it — enter your 12-word recovery
+                                        phrase here.
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <label
+                                        htmlFor="new-password"
+                                        className="mb-1 block text-sm font-medium"
+                                    >
+                                        New password
+                                    </label>
+                                    <PasswordInput
+                                        id="new-password"
+                                        value={newPassword}
+                                        onChange={onNewChange}
+                                        autoComplete="new-password"
+                                    />
+                                    {newPassword.length > 0 && (
+                                        <div className="mt-2">
+                                            <PasswordStrengthMeter
+                                                score={strength.score}
+                                                feedback={strength.feedback}
+                                                pwned={strength.pwned}
+                                                loading={strength.loading}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div>
+                                    <label
+                                        htmlFor="confirm-new-password"
+                                        className="mb-1 block text-sm font-medium"
+                                    >
+                                        Confirm new password
+                                    </label>
+                                    <PasswordInput
+                                        id="confirm-new-password"
+                                        value={confirmPassword}
+                                        onChange={onConfirmChange}
+                                        autoComplete="new-password"
+                                        ariaInvalid={mismatch}
+                                    />
+                                    {mismatch && (
+                                        <p className="mt-1 text-xs text-red-500">
+                                            Passwords do not match.
+                                        </p>
+                                    )}
+                                </div>
+
+                                <Checkbox
+                                    checked={acknowledged}
+                                    onChange={(
+                                        e: React.ChangeEvent<HTMLInputElement>,
+                                    ) => onAcknowledgedChange(e.target.checked)}
+                                    data-testid="change-password-ack"
+                                >
+                                    <span className="text-sm">
+                                        I understand that if I forget this
+                                        password, my account and history are
+                                        unrecoverable.
+                                    </span>
+                                </Checkbox>
+
+                                {error && (
+                                    <p className="text-sm text-red-500">
+                                        {error}
+                                    </p>
+                                )}
+                            </Block>
+                            <Block className="flex gap-3">
+                                <Button clear onClick={() => setOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={onSubmit}
+                                    disabled={!canSubmit}
+                                    data-testid="change-password-submit"
+                                >
+                                    Change password
+                                </Button>
+                            </Block>
+                        </>
                     )}
                 </div>
-
-                <div>
-                    <label
-                        htmlFor="confirm-new-password"
-                        className="mb-1 block text-sm font-medium"
-                    >
-                        Confirm new password
-                    </label>
-                    <PasswordInput
-                        id="confirm-new-password"
-                        value={confirmPassword}
-                        onChange={onConfirmChange}
-                        autoComplete="new-password"
-                        ariaInvalid={mismatch}
-                    />
-                    {mismatch && (
-                        <p className="mt-1 text-xs text-destructive">
-                            Passwords do not match.
-                        </p>
-                    )}
-                </div>
-
-                <div>
-                    {/* biome-ignore lint/a11y/noLabelWithoutControl: Radix UI Checkbox handles accessibility */}
-                    <label className="flex items-start gap-3">
-                        <Checkbox
-                            checked={acknowledged}
-                            onCheckedChange={(checked) =>
-                                onAcknowledgedChange(checked === true)
-                            }
-                        />
-                        <span className="text-sm">
-                            I understand that if I forget this password, my
-                            account and history are unrecoverable.
-                        </span>
-                    </label>
-                </div>
-
-                {error && <p className="text-sm text-destructive">{error}</p>}
-
-                <Button
-                    onClick={onSubmit}
-                    disabled={!canSubmit}
-                    className="w-full"
-                    data-testid="change-password-submit"
-                >
-                    Change password
-                </Button>
-            </CardContent>
-        </Card>
+            </Sheet>
+        </>
     );
 }

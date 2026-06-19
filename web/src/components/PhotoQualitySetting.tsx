@@ -1,3 +1,5 @@
+import { BlockTitle, List, ListItem } from 'konsta/react';
+import { Check } from 'lucide-react';
 import type { PhotoQuality } from '@/lib/photo-quality';
 
 interface Props {
@@ -18,42 +20,34 @@ const OPTIONS: { value: PhotoQuality; label: string; hint: string }[] = [
     },
 ];
 
-// Global photo-send quality preference (ADR-0022 §4). Presentational and
-// controlled: the route owns the value via usePhotoQuality and persists on
-// change. A per-send override is deferred to the album composer (Phase 2).
+// Global photo-send quality preference (ADR-0022 §4). Single-select grouped list
+// with a checkmark on the active row; the hint stays as sub-text so the guidance
+// survives (a bare Toggle would drop it). Controlled — the route owns the value.
 export default function PhotoQualitySetting({ value, onChange }: Props) {
     return (
-        <div className="mt-8">
-            <h2 className="mb-4 text-lg font-bold">Photo quality</h2>
-            <div className="space-y-3" data-testid="photo-quality">
+        <>
+            <BlockTitle>Photo quality</BlockTitle>
+            <List strong inset data-testid="photo-quality">
                 {OPTIONS.map((opt) => {
                     const selected = value === opt.value;
                     return (
-                        <button
+                        <ListItem
                             key={opt.value}
-                            type="button"
-                            aria-pressed={selected}
+                            link
+                            chevron={false}
+                            title={opt.label}
+                            text={opt.hint}
+                            after={
+                                selected ? (
+                                    <Check className="h-5 w-5 text-primary" />
+                                ) : undefined
+                            }
                             onClick={() => onChange(opt.value)}
                             data-testid={`photo-quality-${opt.value}`}
-                            className={`block w-full rounded border p-3 text-left ${
-                                selected
-                                    ? 'border-ring bg-muted'
-                                    : 'border-input hover:bg-accent'
-                            }`}
-                        >
-                            <span className="font-medium">{opt.label}</span>
-                            {selected && (
-                                <span className="ml-2 text-xs text-muted-foreground">
-                                    (selected)
-                                </span>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                                {opt.hint}
-                            </p>
-                        </button>
+                        />
                     );
                 })}
-            </div>
-        </div>
+            </List>
+        </>
     );
 }

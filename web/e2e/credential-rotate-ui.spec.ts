@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 import {
+    expectKonstaCheckboxChecked,
     loginUser,
     openChat,
     registerUser,
     registerUserWithPassword,
     resyncChat,
     sendMessage,
+    tickKonstaCheckbox,
     waitForMessage,
 } from './helpers';
 
@@ -39,17 +41,16 @@ test.describe('Credential rotation (Change password)', () => {
 
         // ── 3. Open settings, enter the WRONG current password ──────────
         await alice.goto('/settings');
+        // Change password is a Konsta Sheet now (ADR-0023/T2) — open it first.
+        await alice.getByTestId('change-password-trigger').click();
         await alice.waitForSelector('#current-password', { timeout: 15_000 });
         await alice.fill('#current-password', 'this-is-not-my-password');
         await alice.fill('#new-password', NEW_PASSWORD);
         await alice.fill('#confirm-new-password', NEW_PASSWORD);
 
-        // Radix Checkbox renders as <button role="checkbox">; setChecked
-        // is Playwright's checkbox-aware API and works on ARIA roles too.
-        // Assert the final state so we fail fast if the toggle didn't take.
-        const ack = alice.getByRole('checkbox', { name: /unrecoverable/i });
-        await ack.setChecked(true);
-        await expect(ack).toBeChecked({ timeout: 5_000 });
+        // Tick the acknowledgement; assert it took so we fail fast if it didn't.
+        await tickKonstaCheckbox(alice, 'change-password-ack');
+        await expectKonstaCheckboxChecked(alice, 'change-password-ack');
 
         const submit = alice.getByTestId('change-password-submit');
         // Fail fast if `canSubmit` is still false, rather than burning the

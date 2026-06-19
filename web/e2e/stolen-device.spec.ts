@@ -5,6 +5,7 @@ import {
     registerUser,
     registerUserWithPassword,
     resyncChat,
+    revokeOtherDevice,
     sendMessage,
     waitForMessage,
 } from './helpers';
@@ -49,25 +50,15 @@ test.describe('Stolen Device', () => {
         const deviceItems = laptop.locator('[data-testid="device-item"]');
         await expect(deviceItems).toHaveCount(2, { timeout: 15_000 });
 
-        // Verify "this device" indicator is shown
-        await expect(laptop.locator('text=(this device)')).toBeVisible();
+        // Verify the current device is marked
+        await expect(laptop.getByText('this device')).toBeVisible();
 
-        // ── 5. Alice clicks "Revoke" on the phone, enters password, confirms ──
-        // Find the device item that does NOT have "(this device)" and click its Revoke button
-        const otherDevice = deviceItems.filter({
-            hasNot: laptop.locator('text=(this device)'),
-        });
-        await otherDevice
-            .locator('[data-testid="revoke-button"]')
-            .click();
-
-        // Enter credential (password) and confirm
-        await laptop.fill('[data-testid="credential-input"]', password);
-        await laptop.click('[data-testid="confirm-revoke"]');
+        // ── 5. Alice revokes the phone (the other device), confirms with password ──
+        await revokeOtherDevice(laptop, password);
 
         // ── 6. Device list now shows only the laptop ─────────────────────
         await expect(deviceItems).toHaveCount(1, { timeout: 15_000 });
-        await expect(laptop.locator('text=(this device)')).toBeVisible();
+        await expect(laptop.getByText('this device')).toBeVisible();
 
         // ── 7. Phone triggers a sync — server returns 403 → self-wipe ────
         // Navigating directly to a chat triggers useChat → fetchMessages → storeList → 403.

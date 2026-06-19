@@ -1,3 +1,5 @@
+import { Navbar, NavbarBackLink, Page } from 'konsta/react';
+import { useNavigate } from 'react-router-dom';
 import ChangePasswordPanel from '@/components/ChangePasswordPanel';
 import DeleteAccountPanel from '@/components/DeleteAccountPanel';
 import DeviceSettings from '@/components/DeviceSettings';
@@ -26,6 +28,7 @@ export default function SettingsRoute({
     onDeleted,
     onLogout,
 }: Props) {
+    const navigate = useNavigate();
     const devicesState = useDevices(session.token, session.userId);
     const rotate = useRotateKeys(session, onSessionChange);
     const strength = usePasswordStrength(rotate.newPassword);
@@ -33,9 +36,25 @@ export default function SettingsRoute({
     const [photoQuality, setPhotoQuality] = usePhotoQuality();
     const del = useDeleteAccount(session, onDeleted);
 
+    // Plain navigate for back — directional/reverse View Transitions are the
+    // parked data-router task (ADR-0023), so no animation on the way back.
     return (
-        <ProfileSettings handle={session.handle} token={session.token}>
+        <Page>
+            <Navbar
+                title="Settings"
+                left={
+                    <NavbarBackLink
+                        text="Chats"
+                        onClick={() => navigate('/')}
+                    />
+                }
+            />
+            <ProfileSettings handle={session.handle} token={session.token} />
             <StorageIndicator usage={storage.usage} loading={storage.loading} />
+            <PhotoQualitySetting
+                value={photoQuality}
+                onChange={setPhotoQuality}
+            />
             <ChangePasswordPanel
                 step={rotate.step}
                 currentPassword={rotate.currentPassword}
@@ -63,10 +82,6 @@ export default function SettingsRoute({
                 onSecretChange={devicesState.setSecretInput}
                 onConfirmRevoke={devicesState.handleRevoke}
             />
-            <PhotoQualitySetting
-                value={photoQuality}
-                onChange={setPhotoQuality}
-            />
             <SignOutPanel onLogout={onLogout} />
             <DeleteAccountPanel
                 handle={session.handle}
@@ -80,6 +95,6 @@ export default function SettingsRoute({
                 onAcknowledgedChange={del.setAcknowledged}
                 onSubmit={del.submit}
             />
-        </ProfileSettings>
+        </Page>
     );
 }
