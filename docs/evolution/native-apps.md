@@ -91,6 +91,15 @@ integrity works for sideloaded apps too.
   allowed sideloading. Not practical at launch — store presence provides user
   trust and auto-updates.
 
+**Web → app routing.** iOS web visitors who land on the URL are pointed to the
+App Store listing via Apple's Smart App Banner (a `<meta name="apple-itunes-app">`
+tag), and Android visitors can be linked to the Play listing similarly. This
+supersedes the earlier PWA "Add to Home Screen" install hint (dropped): the
+native app is the iOS install path, and an installed iOS PWA still cannot
+receive APNs background push, so promoting it was promoting the weaker
+experience. The banner is a thin web-side addition, not a native-build concern,
+and lights up only once the store listings exist.
+
 ## Monetization outside app stores
 
 Features like storage beyond a free quota can be sold through the project's

@@ -93,8 +93,8 @@ OS-level device lock (PIN, biometrics) is the first line of defense — not the 
   [specs/mvp-v0.1.md](specs/mvp-v0.1.md). Nearly complete — remaining
   work tracked in [tasks/](../tasks/README.md).
 - **v0.2** — group chats, background delivery, reach, and a UX refresh.
-  Group conversations (the headline, sketched), background delivery (via native apps),
-  iOS "add to home screen" install hint, message-list virtualization, a
+  Group conversations (the headline, sketched), background delivery and
+  iOS reach (both via native apps), message-list virtualization, a
   UX pass (polish, simplification, a time-aware timeline, broader
   theming), history export, and (still firming up) opt-in discovery,
   better abuse controls, and optional realtime hints. Drafted in
