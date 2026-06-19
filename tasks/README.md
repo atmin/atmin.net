@@ -35,8 +35,42 @@ each additive on the v0.1 single `file` (no schema break):
 The next media chunk is **Phase 2 — albums** (`attachments[]`, multi-select,
 per-image captions, grid — the clean schema break), which has no task yet.
 
-### Active tasks
+### Konsta UI migration ([ADR-0023](../docs/decisions/adr-0023-konsta-ui.md))
 
-1. **[konsta-ui-spike](konsta-ui-spike.md)** _(spike)_ — Throwaway prototype to de-risk the v0.2 UI direction (Option A: Konsta UI + View Transitions over shadcn). Answers, cheapest-killing-risk first: does Konsta render under our Tailwind v4 setup (the `@config` bridge), on one real screen themed iOS+Material, across web/Capacitor/Tauri, with a View Transition on one nav, and at what bundle cost. Produces a go/no-go + findings → an ADR amending [ADR-0003](../docs/decisions/adr-0003-ui-component-framework.md) and a migration task if go. Not merged.
+Incremental, chrome-first migration off shadcn to Konsta UI (Tailwind-native
+iOS/Material), motion via View Transitions. Each screen is a **redesign**, not a
+1:1 port (Konsta kitchen-sink as the catalog); each rewrites its Storybook
+stories and updates its e2e selectors. The `konsta-spike` branch (preserved) is
+the reference prototype + findings. Do **T0 first** (it blocks the rest); then
+risk-ascending; T6 last.
 
-2. **[message-virtualization](message-virtualization.md)** — Replace the message list with `@tanstack/react-virtual`. Park until there is evidence of real perf degradation; the plain map is fine at current message volumes. Now that scroll-to-bottom has landed, the prerequisite is in place. Lazy-load degrades cleanly under it — an unmounted row is never observed.
+1. **[konsta-t0-foundation](konsta-t0-foundation.md)** — Konsta shell + theme
+   detection + View-Transition nav helper + the Storybook ios/material harness.
+   Blocks T1–T6; no screen redesigned.
+2. **[konsta-t1-chats](konsta-t1-chats.md)** — conversation list (spike already
+   prototyped it).
+3. **[konsta-t2-settings](konsta-t2-settings.md)** — settings panels (list-heavy;
+   proves forms + dialogs).
+4. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
+   AuroraBackground**.
+5. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
+   `Messagebar` composer (preserves the compose tray).
+6. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
+   (`Messages`/`Message`) + media + edit/delete; needs T4a.
+7. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+   dialogs (can interleave after T0).
+8. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
+   bundle measurement, flip ADR-0023 Draft→Accepted, retire the spike branch.
+
+### Parked / deferred
+
+- **Data-router migration + directional transitions** — optional; the manual
+  View-Transition wrapper only covers forward navigations, so the back button
+  doesn't transition. Migrating `<BrowserRouter>` → `createBrowserRouter` gives
+  RR-native, uniform transitions across all nav entry points (incl. back). Its
+  only payoff here is motion; take it up only if back/link transitions become a
+  felt gap (rationale in [ADR-0023](../docs/decisions/adr-0023-konsta-ui.md)).
+- **[message-virtualization](message-virtualization.md)** — replace the message
+  list with `@tanstack/react-virtual`. Park until there is evidence of real perf
+  degradation; the plain map is fine at current volumes. (Keep the Konsta
+  timeline rows measure-friendly — see T4b.)
