@@ -41,25 +41,30 @@ Incremental, chrome-first migration off shadcn to Konsta UI (Tailwind-native
 iOS/Material), motion via View Transitions. Each screen is a **redesign**, not a
 1:1 port (Konsta kitchen-sink as the catalog); each rewrites its Storybook
 stories and updates its e2e selectors. The `konsta-spike` branch (preserved) is
-the reference prototype + findings. Do **T0 first** (it blocks the rest); then
-risk-ascending; T6 last.
+the reference prototype + findings.
 
-1. **[konsta-t0-foundation](konsta-t0-foundation.md)** — Konsta shell + theme
-   detection + View-Transition nav helper + the Storybook ios/material harness.
-   Blocks T1–T6; no screen redesigned.
-2. **[konsta-t1-chats](konsta-t1-chats.md)** — conversation list (spike already
+**T0 (foundation) has landed** — Konsta `<App>` shell (provider + platform theme
+context) + `useKonstaTheme` detection + `useViewTransitionNavigate` helper + the
+Storybook ios/material harness; existing shadcn screens render unchanged inside
+it. Foundation bundle cost over baseline, trimmed `theme.css` (drops
+glass/preloader/range/no-scrollbar): **+9.6 kB gzip CSS, +0.8 kB gzip JS** (the
+full barrel would be +10.6 kB CSS — the trim saves ~1 kB; CSS is mostly one-time
+`@source`-generated Konsta classes). T6 does the final measurement once all
+screens migrate. Remaining work proceeds risk-ascending; T6 last.
+
+1. **[konsta-t1-chats](konsta-t1-chats.md)** — conversation list (spike already
    prototyped it).
-3. **[konsta-t2-settings](konsta-t2-settings.md)** — settings panels (list-heavy;
+2. **[konsta-t2-settings](konsta-t2-settings.md)** — settings panels (list-heavy;
    proves forms + dialogs).
-4. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
+3. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
    AuroraBackground**.
-5. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
+4. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
    `Messagebar` composer (preserves the compose tray).
-6. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
+5. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
    (`Messages`/`Message`) + media + edit/delete; needs T4a.
-7. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
-   dialogs (can interleave after T0).
-8. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
+6. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+   dialogs (can interleave any time now T0 is done).
+7. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
    bundle measurement, flip ADR-0023 Draft→Accepted, retire the spike branch.
 
 ### Parked / deferred

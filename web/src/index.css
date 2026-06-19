@@ -2,6 +2,30 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Konsta UI (ADR-0023) — Konsta 5 is Tailwind-v4-native, so its iOS/Material
+   chrome comes in as CSS, no tailwind.config.js / @config bridge.
+   Trimmed barrel (T0): konsta/react/theme.css pulls 10 sub-styles; we import
+   only the six we use and drop glass / preloader / range / no-scrollbar (the
+   first two we don't render, the latter two are tree-shaken-away custom-variants
+   / utilities we don't reference). konsta doesn't export the sub-styles as
+   package subpaths, so these are relative node_modules paths.
+   Kept ABOVE the app's @theme / @custom-variant blocks below so the app's own
+   --color-primary and `dark` definitions override Konsta's (Konsta's colors.css
+   maps --color-primary to its own palette and base.css redefines the dark
+   variant — the app's must win to leave shadcn screens unchanged). */
+@import "../node_modules/konsta/styles/base.css";
+@import "../node_modules/konsta/styles/colors.css";
+@import "../node_modules/konsta/styles/ios-material.css";
+@import "../node_modules/konsta/styles/hairlines.css";
+@import "../node_modules/konsta/styles/safe-areas.css";
+@import "../node_modules/konsta/styles/touch-ripple.css";
+
+/* Tailwind content scanning for Konsta's component class names (node_modules is
+   ignored by default). Mirrors the @source lines in konsta/react/theme.css. */
+@source "../node_modules/konsta/react";
+@source "../node_modules/konsta/shared";
+@source "../node_modules/konsta/styles";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -141,4 +165,34 @@ input,
 textarea,
 select {
     font-size: max(16px, 1em);
+}
+
+/* Konsta UI (ADR-0023) — native-feel page transition for forward navigations
+   driven by useViewTransitionNavigate (root cross-fade + slide). The hook
+   already bails when prefers-reduced-motion is set, but gate the keyframes too
+   so a static snapshot never animates. Directional / back transitions are the
+   parked data-router task. */
+@media (prefers-reduced-motion: no-preference) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation-duration: 220ms;
+        animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    ::view-transition-old(root) {
+        animation-name: vt-slide-out-left;
+    }
+    ::view-transition-new(root) {
+        animation-name: vt-slide-in-right;
+    }
+    @keyframes vt-slide-out-left {
+        to {
+            transform: translateX(-25%);
+            opacity: 0;
+        }
+    }
+    @keyframes vt-slide-in-right {
+        from {
+            transform: translateX(100%);
+        }
+    }
 }

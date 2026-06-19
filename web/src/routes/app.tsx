@@ -1,3 +1,4 @@
+import { App as KonstaApp } from 'konsta/react';
 import { useState } from 'react';
 import {
     BrowserRouter,
@@ -11,6 +12,7 @@ import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { RestoreWarningToast } from '@/components/RestoreWarningToast';
 import { SWUpdateToast } from '@/components/SWUpdateToast';
 import { useInboxSync } from '@/hooks/useInboxSync';
+import { useKonstaTheme } from '@/hooks/useKonstaTheme';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useSession } from '@/hooks/useSession';
 import { useSWUpdate } from '@/hooks/useSWUpdate';
@@ -84,104 +86,112 @@ export default function App() {
     const online = useOnlineStatus();
     const [chatSending, setChatSending] = useState(false);
     const swUpdate = useSWUpdate(chatSending);
+    // ADR-0023: Konsta theme context + chrome. T0 adds the provider only — it's
+    // a themed wrapper <div> (k-ios/k-material, safe-areas) plus context; Konsta
+    // `Page`/components arrive per-screen in T1+, so existing shadcn screens
+    // render unchanged inside it. `dark` composes with the existing `.dark`
+    // class on <html> (Konsta's dark variant is .dark-based).
+    const { theme } = useKonstaTheme();
 
     if (loading) return null;
 
     return (
-        <BrowserRouter>
-            <Routes>
-                {/* Auth routes */}
-                <Route
-                    path="/register"
-                    element={
-                        session ? (
-                            <Navigate to="/" replace />
-                        ) : (
-                            <Register onSuccess={handleLogin} />
-                        )
-                    }
-                />
-                <Route
-                    path="/login"
-                    element={
-                        session ? (
-                            <Navigate to="/" replace />
-                        ) : (
-                            <Login
-                                onSuccess={handleLogin}
-                                notice={notice}
-                                onDismissNotice={clearNotice}
-                            />
-                        )
-                    }
-                />
+        <KonstaApp theme={theme} dark safeAreas>
+            <BrowserRouter>
+                <Routes>
+                    {/* Auth routes */}
+                    <Route
+                        path="/register"
+                        element={
+                            session ? (
+                                <Navigate to="/" replace />
+                            ) : (
+                                <Register onSuccess={handleLogin} />
+                            )
+                        }
+                    />
+                    <Route
+                        path="/login"
+                        element={
+                            session ? (
+                                <Navigate to="/" replace />
+                            ) : (
+                                <Login
+                                    onSuccess={handleLogin}
+                                    notice={notice}
+                                    onDismissNotice={clearNotice}
+                                />
+                            )
+                        }
+                    />
 
-                {/* Settings */}
-                <Route
-                    path="/settings"
-                    element={
-                        session ? (
-                            <Settings
-                                session={session}
-                                onSessionChange={handleLogin}
-                                onDeleted={handleAccountDeleted}
-                            />
-                        ) : (
-                            <Navigate to="/login" replace />
-                        )
-                    }
-                />
+                    {/* Settings */}
+                    <Route
+                        path="/settings"
+                        element={
+                            session ? (
+                                <Settings
+                                    session={session}
+                                    onSessionChange={handleLogin}
+                                    onDeleted={handleAccountDeleted}
+                                />
+                            ) : (
+                                <Navigate to="/login" replace />
+                            )
+                        }
+                    />
 
-                {/* Chat routes */}
-                <Route
-                    path="/"
-                    element={
-                        session ? (
-                            <Chats
-                                session={session}
-                                sessionManager={sessionManager}
-                                onLogout={handleLogout}
-                            />
-                        ) : (
-                            <Landing
-                                notice={notice}
-                                onDismissNotice={clearNotice}
-                            />
-                        )
-                    }
-                />
-                {/* Splat catch-all: handles `/@{handle}` (chat),
+                    {/* Chat routes */}
+                    <Route
+                        path="/"
+                        element={
+                            session ? (
+                                <Chats
+                                    session={session}
+                                    sessionManager={sessionManager}
+                                    onLogout={handleLogout}
+                                />
+                            ) : (
+                                <Landing
+                                    notice={notice}
+                                    onDismissNotice={clearNotice}
+                                />
+                            )
+                        }
+                    />
+                    {/* Splat catch-all: handles `/@{handle}` (chat),
                     `/saved`, and 404s for anything else. Order-sensitive
                     — declared last so specific routes win first. */}
-                <Route
-                    path="*"
-                    element={
-                        session ? (
-                            <HandleOrNotFound
-                                session={session}
-                                sessionManager={sessionManager}
-                                onSendingChange={setChatSending}
-                            />
-                        ) : (
-                            <Navigate to="/login" replace />
-                        )
-                    }
-                />
-            </Routes>
-            {swUpdate.needRefresh && (
-                <SWUpdateToast
-                    sending={chatSending}
-                    onUpdate={swUpdate.onUpdate}
-                    onDismiss={swUpdate.onDismiss}
-                />
-            )}
-            {session && restoreWarning !== null && (
-                <RestoreWarningToast
-                    count={restoreWarning}
-                    onDismiss={clearRestoreWarning}
-                />
-            )}
-            {!online && <OfflineIndicator />}
-        </BrowserRouter>
+                    <Route
+                        path="*"
+                        element={
+                            session ? (
+                                <HandleOrNotFound
+                                    session={session}
+                                    sessionManager={sessionManager}
+                                    onSendingChange={setChatSending}
+                                />
+                            ) : (
+                                <Navigate to="/login" replace />
+                            )
+                        }
+                    />
+                </Routes>
+                {swUpdate.needRefresh && (
+                    <SWUpdateToast
+                        sending={chatSending}
+                        onUpdate={swUpdate.onUpdate}
+                        onDismiss={swUpdate.onDismiss}
+                    />
+                )}
+                {session && restoreWarning !== null && (
+                    <RestoreWarningToast
+                        count={restoreWarning}
+                        onDismiss={clearRestoreWarning}
+                    />
+                )}
+                {!online && <OfflineIndicator />}
+            </BrowserRouter>
+        </KonstaApp>
     );
 }
