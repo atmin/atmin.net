@@ -1,6 +1,9 @@
 # ADR-0003: UI component framework
 
-Status: **Accepted**
+Status: **Accepted** — component-framework choice amended for the v0.2
+native-feel UI by [ADR-0023](./adr-0023-konsta-ui.md) (Konsta UI, incremental).
+The Tailwind/own-the-code/lightweight-bundle premises and the
+`@tanstack/react-virtual` decision below still stand.
 Date: 2026-02-14
 
 ## Context
