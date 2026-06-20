@@ -13,6 +13,13 @@ import { Notebook, Settings as SettingsIcon, SquarePen } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { StoredConversation } from '@/lib/db';
+import { messagePreview } from '@/lib/payload';
+
+// Conversation-list preview: a typed payload reduced to one line (or "<photo>"),
+// clamped so a long body never wraps past a single row.
+function Preview({ text }: { text: string }) {
+    return <span className="line-clamp-1">{messagePreview(text)}</span>;
+}
 
 function timeAgo(ts: number): string {
     const seconds = Math.floor((Date.now() - ts) / 1000);
@@ -138,9 +145,11 @@ export default function ChatsView({
                     link
                     title="Saved Messages"
                     subtitle={
-                        savedConv
-                            ? savedConv.lastMessageText
-                            : 'Your private notes'
+                        savedConv ? (
+                            <Preview text={savedConv.lastMessageText} />
+                        ) : (
+                            'Your private notes'
+                        )
                     }
                     after={
                         savedConv
@@ -158,7 +167,7 @@ export default function ChatsView({
                             key={conv.conversationId}
                             link
                             title={peerLabel(uid)}
-                            subtitle={conv.lastMessageText}
+                            subtitle={<Preview text={conv.lastMessageText} />}
                             after={timeAgo(conv.lastMessageTimestamp)}
                             media={avatar('💬')}
                             onClick={() => onOpen(`/@${encodeURIComponent(h)}`)}

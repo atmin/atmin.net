@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAmendment, parseInner } from './payload';
+import { isAmendment, messagePreview, parseInner } from './payload';
 
 describe('parseInner', () => {
     it('treats a legacy bare string as text', () => {
@@ -166,5 +166,95 @@ describe('parseInner', () => {
         expect(isAmendment(JSON.stringify({ type: 'text', body: 'b' }))).toBe(
             false,
         );
+    });
+});
+
+describe('messagePreview', () => {
+    it('returns the body of a typed text envelope (not the raw JSON)', () => {
+        expect(
+            messagePreview(JSON.stringify({ type: 'text', body: 'hi there' })),
+        ).toBe('hi there');
+    });
+
+    it('collapses newlines and runs of whitespace to a single line', () => {
+        expect(
+            messagePreview(
+                JSON.stringify({ type: 'text', body: 'line one\nline   two' }),
+            ),
+        ).toBe('line one line two');
+    });
+
+    it('passes a legacy bare string through as text', () => {
+        expect(messagePreview('old plain message')).toBe('old plain message');
+    });
+
+    it('shows <photo> for image media (by mime)', () => {
+        expect(
+            messagePreview(
+                JSON.stringify({
+                    type: 'media',
+                    body: 'beach.jpg',
+                    file: {
+                        url: 'media/x',
+                        key: 'k',
+                        iv: 'i',
+                        name: 'beach.jpg',
+                        size: 1,
+                        mime: 'image/jpeg',
+                    },
+                }),
+            ),
+        ).toBe('<photo>');
+    });
+
+    it('shows <photo> for a legacy image (no mime, image extension)', () => {
+        expect(
+            messagePreview(
+                JSON.stringify({
+                    type: 'media',
+                    body: 'sunset.png',
+                    file: {
+                        url: 'media/x',
+                        key: 'k',
+                        iv: 'i',
+                        name: 'sunset.png',
+                        size: 1,
+                    },
+                }),
+            ),
+        ).toBe('<photo>');
+    });
+
+    it('shows <file> for a non-image attachment', () => {
+        expect(
+            messagePreview(
+                JSON.stringify({
+                    type: 'media',
+                    body: 'report.pdf',
+                    file: {
+                        url: 'media/x',
+                        key: 'k',
+                        iv: 'i',
+                        name: 'report.pdf',
+                        size: 1,
+                        mime: 'application/pdf',
+                    },
+                }),
+            ),
+        ).toBe('<file>');
+    });
+
+    it('returns empty for amendments and unknown types', () => {
+        expect(
+            messagePreview(
+                JSON.stringify({
+                    type: 'amendment',
+                    target_msg_id: '01T',
+                    action: 'edit',
+                    body: 'b',
+                }),
+            ),
+        ).toBe('');
+        expect(messagePreview(JSON.stringify({ type: 'reaction' }))).toBe('');
     });
 });

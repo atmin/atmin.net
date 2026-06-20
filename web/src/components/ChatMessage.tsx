@@ -1,5 +1,6 @@
 import { Message } from 'konsta/react';
 import { EllipsisVertical } from 'lucide-react';
+import { useState } from 'react';
 import type { MediaState } from '@/hooks/useMedia';
 import type { MediaFile } from '@/lib/media';
 import MediaAttachment from './MediaAttachment';
@@ -114,6 +115,13 @@ export default function ChatMessage({
 }: Props) {
     const type = sent ? 'sent' : 'received';
 
+    // Fold a long message so one bubble can't eat the screen. The components
+    // layer can't measure overflow (no refs/effects), so gate the fold on a
+    // length/line-count heuristic rather than actual rendered height.
+    const [expanded, setExpanded] = useState(false);
+    const isLong = text.length > 600 || text.split('\n').length > 12;
+    const clamp = isLong && !expanded;
+
     const timeLabel =
         timestamp.getTime() === 0
             ? 'No timestamp'
@@ -193,9 +201,23 @@ export default function ChatMessage({
                         </div>
                     )}
                     {text && (
-                        <p className="wrap-anywhere whitespace-pre-wrap text-sm">
+                        <p
+                            className={`wrap-anywhere whitespace-pre-wrap text-sm ${
+                                clamp ? 'line-clamp-12' : ''
+                            }`}
+                        >
                             {text}
                         </p>
+                    )}
+                    {isLong && (
+                        <button
+                            type="button"
+                            data-testid="message-expand-toggle"
+                            onClick={() => setExpanded((v) => !v)}
+                            className="mt-0.5 text-xs font-medium underline opacity-80 hover:opacity-100"
+                        >
+                            {expanded ? 'Show less' : 'Show more'}
+                        </button>
                     )}
                     {/* Reserve room on the timestamp row for the lower-right
                         trigger so a long "edited …" tag doesn't run under it. */}

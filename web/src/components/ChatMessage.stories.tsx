@@ -34,6 +34,20 @@ export const NoTimestamp: Story = {
     },
 };
 
+// A long message folds to a max height (line-clamp) with a "Show more" toggle so
+// a single bubble can't dominate the screen.
+export const LongMessage: Story = {
+    args: {
+        text: Array.from(
+            { length: 18 },
+            (_, i) =>
+                `Line ${i + 1}: this is a fairly long paragraph of text that keeps going so the whole message takes a lot of vertical space.`,
+        ).join('\n'),
+        timestamp: new Date('2025-01-15T14:30:00'),
+        sent: false,
+    },
+};
+
 // --- Media variants ---
 
 const fakeMedia = {

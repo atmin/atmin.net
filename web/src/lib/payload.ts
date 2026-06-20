@@ -1,16 +1,16 @@
 // Inner-plaintext parsing for the chat materializer.
 //
-// Free of runtime dependencies (a leaf module) so both the materializer
-// (hooks/useChat) and the storage-summary logic (lib/db) can import it without
-// creating an import cycle through messaging.ts (which itself imports db.ts).
-// The single import below is type-only (erased at build), so the property holds.
+// Imports only leaf modules (media.ts, which imports nothing), so both the
+// materializer (hooks/useChat) and the storage-summary / conversation-list logic
+// (lib/db, components/ChatsView) can import it without creating an import cycle
+// through messaging.ts (which itself imports db.ts).
 //
 // The wire format is a self-describing JSON object discriminated by `type`
 // (see docs/specs/mvp-v0.1.md "Payload by content type" and ADR-0014). For
 // backward compatibility this parser also accepts a legacy bare string (the
 // pre-typed-envelope text format) and treats it as a text body.
 
-import type { MediaFileExtras } from './media';
+import { isLikelyImage, type MediaFileExtras } from './media';
 
 // A preview object reference on the wire: key/iv as base64url strings (decoded
 // to bytes as DecodedPreviewRef in lib/media by the materializer).
@@ -134,4 +134,23 @@ export function parseInner(text: string): ParsedInner {
 // delete must not bump a conversation to the top of the chat list).
 export function isAmendment(text: string): boolean {
     return parseInner(text).kind === 'amendment';
+}
+
+// A one-line conversation-list preview for a stored plaintext (which is now a
+// typed JSON envelope, not bare text). Text collapses to a single line; media
+// shows a "<photo>" / "<file>" placeholder (the caption is omitted — a
+// caption-less send carries the filename as its body, which reads as noise).
+// Amendments/unknown yield '' (the list never surfaces those).
+export function messagePreview(text: string): string {
+    const inner = parseInner(text);
+    if (inner.kind === 'text') {
+        return inner.body.replace(/\s+/g, ' ').trim();
+    }
+    if (inner.kind === 'media') {
+        const isImage =
+            inner.file.mime?.startsWith('image/') ||
+            isLikelyImage(inner.file.name);
+        return isImage ? '<photo>' : '<file>';
+    }
+    return '';
 }
