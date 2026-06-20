@@ -83,6 +83,14 @@ export default function DeviceSettings({
             <Dialog
                 opened={!!revoking}
                 onBackdropClick={onCancelRevoke}
+                // Konsta's iOS Dialog draws its surface from the Glass component,
+                // whose `glass` style is trimmed from our theme (ADR-0023 / T0),
+                // so iOS rendered transparent. Give it the explicit frosted
+                // surface (same recipe as the overlays / actions sheet); Material
+                // keeps its tonal surface-3 default.
+                colors={{
+                    bgIos: 'bg-white/90 backdrop-blur-xl dark:bg-[#1c1c1e]/90',
+                }}
                 title={
                     revokingDevice
                         ? `Revoke “${revokingDevice.device_label}”?`

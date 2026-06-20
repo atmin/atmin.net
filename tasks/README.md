@@ -125,9 +125,18 @@ independent renders that could overlap. Per-screen cost: **JS ~+0.6 kB gzip**
 and `alert`), **CSS ~−0.2 kB gzip** (the frosted classes were already bundled by
 T4b). T6 does the final measurement.
 
-1. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
-   `AuroraBackground`), final bundle measurement, flip ADR-0023 Draft→Accepted,
-   retire the spike branch.
+**T6 (shadcn retirement + final pass) has landed — the Konsta migration is
+complete.** All dead shadcn primitives were removed (`button`/`card`/`checkbox`/
+`alert` + `AuroraBackground` and its hook/story; `Layout`/`PageContent` and
+their stories), `components/ui/` is now empty, and the unreferenced
+`tw-animate-css` + `shadcn/tailwind.css` imports and the dead `popover`/`chart-*`/
+`sidebar*` theme tokens were dropped from `index.css`. Also folded in: the
+device-revoke `Dialog` gained the explicit iOS frosted surface (it relied on the
+trimmed `glass` style, so it had rendered transparent on iOS). Contributor docs
+(CONTRIBUTING) now point new primitives at Konsta. **Final bundle vs the
+pre-migration baseline: JS +17.0 kB, CSS +8.1 kB, ~+25 kB gzip total** — matching
+the spike's ~+24 kB estimate; recorded in [ADR-0023](../docs/decisions/adr-0023-konsta-ui.md),
+now **Accepted**. The shadcn CLI stays for potential bespoke/desktop surfaces.
 
 ### Parked / deferred
 

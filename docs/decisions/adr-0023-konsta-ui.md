@@ -1,13 +1,14 @@
 # ADR-0023: Konsta UI for cross-platform native feel
 
 Date: 2026-06-19
-Status: Draft
+Status: Accepted (2026-06-20 — migration complete, T1–T6 landed)
 Amends: [ADR-0003](./adr-0003-ui-component-framework.md) (the component-framework
 choice for the mobile/native-feel UI; shadcn's other premises stand — see below)
 Relates to: [v0.2.md](../specs/v0.2.md) (client-UX direction),
 [evolution/native-apps.md](../evolution/native-apps.md) (the Capacitor/Tauri
 targets this serves), [ADR-0004](./adr-0004-sse-realtime-notifications.md) (RR
-routing context). Evidence: branch `konsta-spike` (preserved) and its findings.
+routing context). Evidence: the `konsta-spike` prototype — its findings are
+recorded in this ADR (Evidence + Outcome below), so the branch is retired.
 
 ## Context
 
@@ -65,6 +66,33 @@ hold; only the component library for the native-feel chrome changes.
 - **Themes and web/responsive: confirmed**; iOS+Material × light/dark render
   correctly, across browsers and narrow→wide widths.
 
+### Outcome (migration complete — T1–T6)
+
+The migration landed in seven steps (T0 foundation; T1 chats; T2 settings; T3
+auth; T4a/T4b chat chrome + timeline; T5 global overlays; T6 shadcn retirement +
+this measurement). All shadcn primitives are removed from the app (`components/ui/`
+is empty); the shadcn CLI stays available for bespoke/desktop surfaces.
+
+- **Real bundle cost (measured, not estimated).** Production gzip, pre-migration
+  baseline (commit before T0) → migration complete:
+  - **JS** (main app chunk): 152.1 kB → 169.1 kB = **+17.0 kB gzip**.
+  - **CSS**: 7.0 kB → 15.1 kB = **+8.1 kB gzip**.
+  - **Total ~+25 kB gzip** — within a kB of the spike's ~+24 kB estimate (the JS
+    came in higher, CSS lower). CSS is the trimmed Konsta theme (only the
+    sub-styles used: base/colors/ios-material/hairlines/safe-areas/touch-ripple/
+    preloader); dropping the dead shadcn `@import`s + theme tokens in T6 cut CSS
+    by ~1.6 kB. Within the lightweight-bundle stance for a full UI kit.
+- **Learnings worth recording.** (1) The trimmed `glass.css` means Konsta's
+  Glass-based components (Toast/Notification/Dialog/Actions) render no iOS
+  surface — each gets an explicit frosted override (`bg-white/80 backdrop-blur-xl
+  dark:bg-[#1c1c1e]/…`) rather than re-adding the style (which would also frost
+  every Navbar button). (2) `preloader.css` had to be re-added (T3) for the
+  shared crypto-progress spinner. (3) The manual View-Transition wrapper animates
+  **forward** navigations only — back/directional motion stays the parked
+  data-router task. (4) **Device-verified** on a real iPhone (staging): iOS
+  WKWebView View Transitions animate and installed-PWA self-update both work;
+  Capacitor/Tauri shells remain unverified on hardware.
+
 ## Consequences
 
 ### Positive
@@ -78,7 +106,9 @@ hold; only the component library for the native-feel chrome changes.
 ### Negative / costs
 
 - Two component systems coexist during the migration (transient).
-- Bundle grows (~+24 kB gzip first screen, as above) — acceptable, but recorded.
+- Bundle grows — confirmed **~+25 kB gzip total** (+17 kB JS, +8.1 kB CSS) once
+  the migration completed, matching the ~+24 kB spike estimate (see Outcome
+  above). Acceptable, and recorded.
 - With the manual View-Transition wrapper, transitions are wired per navigation;
   **directional / back transitions** (reverse the slide on POP) are follow-up.
 - e2e selectors change as screens migrate to Konsta DOM — specs need updating

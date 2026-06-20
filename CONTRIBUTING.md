@@ -74,7 +74,7 @@ Aggregates: `make all` = `lint test build`. CI runs the same Make targets — if
 
 ## Frontend (`web/`)
 
-React 19 + TypeScript, Tailwind CSS v4, shadcn/ui, Vite. Crypto is delivered as WASM from the `web/crypto` Rust crate (built by `make web-wasm`, called transitively from `make web-build`).
+React 19 + TypeScript, Tailwind CSS v4, Konsta UI (native-feel iOS/Material chrome — see [ADR-0023](docs/decisions/adr-0023-konsta-ui.md)), Vite. Crypto is delivered as WASM from the `web/crypto` Rust crate (built by `make web-wasm`, called transitively from `make web-build`).
 
 ### Layered architecture
 
@@ -94,7 +94,10 @@ routes/    → hooks/      → lib/
 | `lib/` | No imports from `@/routes/`, `@/hooks/`, or `@/components/`. |
 | `hooks/` | No imports from `@/routes/` or `@/components/`. |
 
-`components/ui/` is exempt — shadcn primitives are unmodified vendored code.
+`components/ui/` is exempt — the home for unmodified vendored primitives. The
+app's native-feel chrome is now Konsta (ADR-0023); the directory is empty after
+the migration but stays exempt for any shadcn primitives re-added for bespoke /
+desktop-only surfaces (ADR-0023 keeps shadcn available for those).
 
 ### Testing
 
@@ -117,7 +120,7 @@ The unit project runs in **node** — DOM is opt-in per file via `// @vitest-env
 - Tailwind CSS v4 utility classes only. No CSS modules, no inline styles.
 - Theme-aware colours via CSS custom properties (`bg-background`, `text-foreground`, etc.). See `web/src/index.css` for the full token set.
 - Dark mode is controlled by the `.dark` class on `<html>`. Both modes must work — verify in Storybook (`make web-storybook` on `:6006`) before merge.
-- New UI primitives (dialogs, inputs, etc.) come from shadcn/ui — run the CLI to copy source into `web/src/components/ui/`, then adjust.
+- New UI primitives (dialogs, inputs, sheets, etc.) come from **Konsta UI** (`konsta/react`) — the native-feel iOS/Material kit (ADR-0023). Compose them with plain Tailwind. shadcn remains available via its CLI for bespoke / desktop-only surfaces (vendored into `web/src/components/ui/`).
 
 ### WASM crypto crate (`web/crypto/`)
 

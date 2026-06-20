@@ -86,11 +86,10 @@ export default function App() {
     const online = useOnlineStatus();
     const [chatSending, setChatSending] = useState(false);
     const swUpdate = useSWUpdate(chatSending);
-    // ADR-0023: Konsta theme context + chrome. T0 adds the provider only — it's
-    // a themed wrapper <div> (k-ios/k-material, safe-areas) plus context; Konsta
-    // `Page`/components arrive per-screen in T1+, so existing shadcn screens
-    // render unchanged inside it. `dark` composes with the existing `.dark`
-    // class on <html> (Konsta's dark variant is .dark-based).
+    // ADR-0023: Konsta theme provider + chrome — a themed wrapper <div>
+    // (k-ios/k-material, safe-areas) plus the platform-theme context every Konsta
+    // component reads. Every screen is Konsta as of T6. `dark` composes with the
+    // existing `.dark` class on <html> (Konsta's dark variant is .dark-based).
     const { theme } = useKonstaTheme();
 
     if (loading) return null;
