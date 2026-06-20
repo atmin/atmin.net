@@ -174,7 +174,7 @@ export default function ChangePasswordPanel({
                                     ) => onAcknowledgedChange(e.target.checked)}
                                     data-testid="change-password-ack"
                                 >
-                                    <span className="text-sm">
+                                    <span className="ml-2 text-sm">
                                         I understand that if I forget this
                                         password, my account and history are
                                         unrecoverable.
@@ -188,10 +188,15 @@ export default function ChangePasswordPanel({
                                 )}
                             </Block>
                             <Block className="flex gap-3">
-                                <Button clear onClick={() => setOpen(false)}>
+                                <Button
+                                    rounded
+                                    clear
+                                    onClick={() => setOpen(false)}
+                                >
                                     Cancel
                                 </Button>
                                 <Button
+                                    rounded
                                     onClick={onSubmit}
                                     disabled={!canSubmit}
                                     data-testid="change-password-submit"

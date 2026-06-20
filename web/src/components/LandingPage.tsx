@@ -44,10 +44,15 @@ export default function LandingPage({
                     </p>
 
                     <div className="mt-10 w-full max-w-xs space-y-3">
-                        <Button large onClick={() => go('/register')}>
+                        <Button rounded large onClick={() => go('/register')}>
                             Create account
                         </Button>
-                        <Button large outline onClick={() => go('/login')}>
+                        <Button
+                            rounded
+                            large
+                            outline
+                            onClick={() => go('/login')}
+                        >
                             Sign in
                         </Button>
                     </div>

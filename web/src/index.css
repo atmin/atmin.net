@@ -12,9 +12,10 @@
    delete-account). konsta doesn't export the sub-styles as package subpaths,
    so these are relative node_modules paths.
    Kept ABOVE the app's @theme / @custom-variant blocks below so the app's own
-   --color-primary and `dark` definitions override Konsta's (Konsta's colors.css
-   maps --color-primary to its own palette and base.css redefines the dark
-   variant — the app's must win to leave shadcn screens unchanged). */
+   `dark` definition overrides Konsta's (base.css redefines the dark variant —
+   the app's must win). The accent (`--color-primary`) is deliberately NOT
+   overridden — it flows from Konsta's colors.css (`var(--k-color-primary)`, the
+   iOS system blue / Material primary) so buttons and accents render native. */
 @import "../node_modules/konsta/styles/base.css";
 @import "../node_modules/konsta/styles/colors.css";
 @import "../node_modules/konsta/styles/ios-material.css";
@@ -45,7 +46,8 @@
     --color-card-foreground: var(--card-foreground);
     --color-popover: var(--popover);
     --color-popover-foreground: var(--popover-foreground);
-    --color-primary: var(--primary);
+    /* --color-primary intentionally left to Konsta (var(--k-color-primary),
+       the native iOS/Material accent) — see the header note above. */
     --color-primary-foreground: var(--primary-foreground);
     --color-secondary: var(--secondary);
     --color-secondary-foreground: var(--secondary-foreground);

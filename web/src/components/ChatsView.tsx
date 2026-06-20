@@ -190,10 +190,14 @@ export default function ChatsView({
                     />
                 </List>
                 <Block className="flex gap-3">
-                    <Button clear onClick={() => setComposeOpen(false)}>
+                    <Button rounded clear onClick={() => setComposeOpen(false)}>
                         Cancel
                     </Button>
-                    <Button onClick={startChat} disabled={!handleInput.trim()}>
+                    <Button
+                        rounded
+                        onClick={startChat}
+                        disabled={!handleInput.trim()}
+                    >
                         Start chat
                     </Button>
                 </Block>

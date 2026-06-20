@@ -52,7 +52,9 @@ export default function DeleteAccountPanel({
 
     return (
         <>
-            <BlockTitle>Danger zone</BlockTitle>
+            <BlockTitle>
+                <span className="text-red-500">Danger zone</span>
+            </BlockTitle>
             <List strong inset>
                 <ListItem
                     link
@@ -169,7 +171,7 @@ export default function DeleteAccountPanel({
                                     ) => onAcknowledgedChange(e.target.checked)}
                                     data-testid="delete-account-ack"
                                 >
-                                    <span className="text-sm">
+                                    <span className="ml-2 text-sm">
                                         I understand this cannot be undone.
                                     </span>
                                 </Checkbox>
@@ -181,10 +183,11 @@ export default function DeleteAccountPanel({
                                 )}
                             </Block>
                             <Block className="flex gap-3">
-                                <Button clear onClick={close}>
+                                <Button rounded clear onClick={close}>
                                     Cancel
                                 </Button>
                                 <Button
+                                    rounded
                                     colors={{
                                         fillBgIos: 'bg-red-500',
                                         fillBgMaterial: 'bg-red-500',

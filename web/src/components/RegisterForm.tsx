@@ -7,6 +7,7 @@ import {
     NavbarBackLink,
     Page,
 } from 'konsta/react';
+import { Dices, TriangleAlert } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import PasswordField from '@/components/PasswordField';
 import PasswordStrengthMeter from '@/components/PasswordStrengthMeter';
@@ -176,11 +177,12 @@ export default function RegisterForm({
                     <Button
                         inline
                         outline
+                        rounded
                         onClick={onSurpriseMe}
                         data-testid="surprise-me"
-                        className="whitespace-nowrap"
+                        aria-label="Surprise me"
                     >
-                        Surprise me
+                        <Dices className="h-5 w-5" />
                     </Button>
                 </div>
                 {availability.message && (
@@ -215,8 +217,11 @@ export default function RegisterForm({
                 )}
             </Block>
 
-            <BlockTitle>⚠️ Critical security warning</BlockTitle>
-            <Block strong inset className="space-y-2 text-sm">
+            <Block strong inset className="mt-6 space-y-2 text-sm">
+                <div className="flex items-center gap-2 font-medium text-red-500">
+                    <TriangleAlert className="h-5 w-5 shrink-0" />
+                    Critical security warning
+                </div>
                 <p>
                     There is no password reset. If you forget this password and
                     lose your devices, your account and message history are gone
@@ -244,7 +249,7 @@ export default function RegisterForm({
                     }
                     data-testid="register-ack"
                 >
-                    <span className="text-sm">
+                    <span className="ml-2 text-sm">
                         I understand that my password cannot be reset and is the
                         only way to recover my account
                     </span>
@@ -254,7 +259,12 @@ export default function RegisterForm({
             {error && <Block className="text-sm text-red-500">{error}</Block>}
 
             <Block>
-                <Button large onClick={onRegister} disabled={!canSubmit}>
+                <Button
+                    rounded
+                    large
+                    onClick={onRegister}
+                    disabled={!canSubmit}
+                >
                     Register
                 </Button>
             </Block>

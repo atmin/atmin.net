@@ -83,7 +83,11 @@ export default function ProfileSettings({
                 />
             </List>
             <Block className="space-y-2">
-                <Button onClick={handleSave} disabled={!dirty || saving}>
+                <Button
+                    rounded
+                    onClick={handleSave}
+                    disabled={!dirty || saving}
+                >
                     {saving ? 'Saving…' : 'Save'}
                 </Button>
                 {saved && (

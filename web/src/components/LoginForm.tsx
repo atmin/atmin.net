@@ -130,6 +130,7 @@ export default function LoginForm({
                 <Block>
                     <Button
                         type="submit"
+                        rounded
                         large
                         disabled={loading || !handle || !secret}
                     >
