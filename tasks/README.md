@@ -82,13 +82,25 @@ the custom `PasswordInput` (eye toggle) + `PasswordStrengthMeter`; the register
 `Card`/`Alert`/`Checkbox`/`Button` from auth outweighs Konsta, already bundled);
 CSS **+0.25 kB gzip** (preloader styles). T6 does the final measurement.
 
-1. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
-   `Messagebar` composer (preserves the compose tray).
-2. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
-   (`Messages`/`Message`) + media + edit/delete; needs T4a.
-3. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+**T4a (chat chrome + composer) has landed** — `ChatView` is a Konsta
+`Page`/`Navbar` (back + centered mono handle) with the composer rebuilt on Konsta
+`Messagebar` (attach + send in its left/right slots; paste/drop/Enter-to-send ride
+the bar root since Konsta only forwards `onInput`/`onChange` to the textarea). The
+compose tray (staged image/file + caption + Send) and offline/sending states are
+preserved with their e2e testids. Konsta React ships no autogrow, so
+`useAutogrowTextarea` (route-wired, like the draft) grows the textarea and a scoped
+`index.css` rule lets the bar grow with it — controls centre at rest, bottom-align
+once it grows. `BackButton` retired (→ `NavbarBackLink`). The message timeline still
+renders the existing `ChatMessage` bubbles — T4b converts those. Per-screen JS cost:
+**~+1.5 kB gzip** (Konsta `Messagebar`/`Toolbar`/`Glass` + lucide icons + the hook);
+CSS **~+0.2 kB gzip** (messagebar layout overrides). T6 does the final measurement.
+
+1. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
+   (`Messages`/`Message`) + media + edit/delete; renders inside T4a's shell and
+   brings the system-colour bubbles.
+2. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
    dialogs (can interleave any time now T0 is done).
-4. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
+3. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
    `AuroraBackground`), final bundle measurement, flip ADR-0023 Draft→Accepted,
    retire the spike branch.
 

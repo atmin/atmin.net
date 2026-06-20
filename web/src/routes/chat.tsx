@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ChatView from '@/components/ChatView';
+import { useAutogrowTextarea } from '@/hooks/useAutogrowTextarea';
 import { useChat } from '@/hooks/useChat';
 import { useChatAmendments } from '@/hooks/useChatAmendments';
 import { useChatScroll } from '@/hooks/useChatScroll';
@@ -59,6 +60,9 @@ export default function ChatRoute({
     const scroll = useChatScroll(messages, handle);
     const [inputValue, setInputValue] = useDraft(handle ?? '');
     const compose = useComposeAttachment();
+    // Grow the Messagebar textarea with multi-line drafts (Konsta fixes its
+    // height); keyed to the composer's stable textarea id (ChatView).
+    useAutogrowTextarea('message-input');
 
     // Plain navigate for back — directional/reverse View Transitions are the
     // parked data-router task (ADR-0023), so no animation on the way back.

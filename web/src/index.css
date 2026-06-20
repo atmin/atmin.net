@@ -201,3 +201,24 @@ select {
         }
     }
 }
+
+/* Konsta Messagebar (ADR-0023 / T4a): its toolbar inner is a fixed h-12/h-14
+   (ToolbarClasses) and Konsta React ships no autogrow, so a multi-line textarea
+   (useAutogrowTextarea) overflows the row. The inner is the flex row carrying
+   `justify-between` (the bg layers are absolute and don't). Let it grow with the
+   textarea. Controls are centered at rest; useAutogrowTextarea bottom-aligns them
+   as the textarea grows (iOS-Messages style). */
+.k-messagebar .k-toolbar > div.justify-between {
+    height: auto;
+    min-height: 3rem;
+    align-items: center;
+}
+
+/* Konsta floors the bar's safe-area padding at the bottom only (pb-safe-4), which
+   top-shifts the whole row on displays without a safe area. Mirror it at the top so
+   the content sits centered in the bar; the env() inset still lifts it above the
+   home indicator on real devices. */
+.k-messagebar .k-toolbar {
+    padding-top: 0.5rem;
+    padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+}

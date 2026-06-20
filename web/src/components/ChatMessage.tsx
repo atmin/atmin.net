@@ -223,7 +223,11 @@ export default function ChatMessage({
                     />
                 </div>
             )}
-            {text && <p className="text-sm">{text}</p>}
+            {text && (
+                <p className="whitespace-pre-wrap wrap-break-word text-sm">
+                    {text}
+                </p>
+            )}
             <p className="mt-1 text-xs">
                 <span className="opacity-50">{timeLabel}</span>
                 {edited && (

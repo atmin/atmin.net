@@ -95,6 +95,26 @@ export const WithMessages: Story = {
     },
 };
 
+// A received message with newlines — the bubble must preserve them (whitespace-
+// pre-wrap), now that the composer can produce multi-line sends.
+export const WithMultilineMessage: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'Shopping list:\n- milk\n- eggs\n- a very long line that should wrap onto the next visual row on its own without breaking the others',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: false,
+            },
+        ],
+        loading: false,
+        sending: false,
+    },
+};
+
 export const Sending: Story = {
     args: {
         chatTitle: 'copper-falcon',
@@ -219,6 +239,17 @@ export const ComposeEmpty: Story = {
 // Text typed, no attachment — Send dispatches a plain text message (today's path).
 export const ComposeTextOnly: Story = {
     args: { ...composeArgs, inputValue: 'just a normal message' },
+};
+
+// A multi-line draft. Konsta fixes the textarea height; useAutogrowTextarea (wired
+// in the route) grows it. Storybook renders the component without the route, so the
+// textarea shows clipped here — the grow behavior is exercised against this story in
+// the screenshot harness / at runtime.
+export const ComposeMultiline: Story = {
+    args: {
+        ...composeArgs,
+        inputValue: 'first line\nsecond line\nthird line',
+    },
 };
 
 // A staged image: the tray shows its thumbnail with a remove (✕); Send is

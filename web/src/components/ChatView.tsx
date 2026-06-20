@@ -151,7 +151,7 @@ export default function ChatView({
             data-testid="attach-button"
             aria-label="Attach file"
             aria-disabled={inputsDisabled}
-            className={`flex size-9 items-center justify-center rounded-full text-primary ${
+            className={`flex size-8 -translate-y-2.5 items-center justify-center rounded-full text-primary ${
                 inputsDisabled
                     ? 'pointer-events-none opacity-40'
                     : 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/10'
@@ -177,7 +177,7 @@ export default function ChatView({
             aria-label="Send"
             disabled={!canSend}
             onClick={submit}
-            className="flex size-9 items-center justify-center rounded-full text-primary disabled:opacity-40"
+            className="flex size-8 -translate-y-2.5 items-center justify-center rounded-full text-primary disabled:opacity-40"
         >
             <SendHorizontal className="size-5" />
         </button>
@@ -366,6 +366,8 @@ export default function ChatView({
                 )}
                 <Messagebar
                     className="relative!"
+                    leftClassName="-ms-1"
+                    rightClassName="-me-1"
                     value={inputValue}
                     placeholder={placeholder}
                     textareaId="message-input"
