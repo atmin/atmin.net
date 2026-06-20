@@ -1,8 +1,20 @@
+import { Toast } from 'konsta/react';
+import { TriangleAlert } from 'lucide-react';
+
 interface Props {
     /** Number of session keys that couldn't be restored on this device. */
     count: number;
     onDismiss: () => void;
 }
+
+// iOS draws its frosted surface from the trimmed `glass` style (T0), so give it
+// the explicit frosted recipe; Material keeps its tonal surface-5. See
+// OfflineIndicator for the shared rationale.
+const OVERLAY_COLORS = {
+    bgIos: 'bg-white/80 shadow-lg backdrop-blur-xl dark:bg-[#1c1c1e]/80',
+    textIos: 'text-foreground',
+    textMaterial: 'text-foreground',
+};
 
 /**
  * Surfaces partial history loss after a restore (I6): some key-backup
@@ -13,24 +25,29 @@ interface Props {
  */
 export function RestoreWarningToast({ count, onDismiss }: Props) {
     return (
-        <div
-            className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-lg border border-destructive/40 bg-background px-4 py-2 shadow-lg text-sm"
+        <Toast
+            opened
+            position="center"
+            colors={OVERLAY_COLORS}
             role="alert"
             data-testid="restore-warning"
+            button={
+                <button
+                    type="button"
+                    onClick={onDismiss}
+                    aria-label="Dismiss"
+                    className="font-medium text-primary"
+                >
+                    Dismiss
+                </button>
+            }
         >
-            <span>
+            <span className="flex items-center gap-2 text-sm">
+                <TriangleAlert className="size-4 shrink-0 text-amber-500" />
                 {count === 1
                     ? "1 conversation's history couldn't be restored on this device."
                     : `${count} conversations' history couldn't be restored on this device.`}
             </span>
-            <button
-                type="button"
-                onClick={onDismiss}
-                aria-label="Dismiss"
-                className="text-muted-foreground hover:text-foreground"
-            >
-                ✕
-            </button>
-        </div>
+        </Toast>
     );
 }

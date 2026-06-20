@@ -111,9 +111,21 @@ unbreakable log line via `wrap-anywhere`) inside the bubble instead of spawning 
 horizontal scrollbar. The now-dead `--bubble-*` tokens were removed. Per-screen
 cost vs T4a: **JS ~+1.9 kB gzip**, **CSS ~flat**. T6 does the final measurement.
 
-1. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
-   dialogs (can interleave any time now T0 is done).
-2. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
+**T5 (global overlays) has landed** — the app-level overlays are Konsta
+`Toast`s: the offline indicator, the SW-update prompt (Reload + dismiss) and the
+restore-warning (amber alert icon + Dismiss) are frosted bottom pills with
+lucide icons, and `NotFound` is a bare centered Konsta `Page`. iOS draws its
+frosted surface from the `glass` style trimmed in T0, so the toasts carry the
+explicit frosted recipe from the T4b actions sheet (Material keeps its tonal
+surface-5); the now-dead shadcn `alert` primitive is dropped. The overlay slot
+in `app.tsx` shows at most one bottom overlay at a time by priority (offline >
+restore > update) — they share the same fixed bottom edge — replacing the prior
+independent renders that could overlap. Per-screen cost: **JS ~+0.6 kB gzip**
+(lucide icons + Konsta `Toast`, partly offset by dropping the plain-div toasts
+and `alert`), **CSS ~−0.2 kB gzip** (the frosted classes were already bundled by
+T4b). T6 does the final measurement.
+
+1. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
    `AuroraBackground`), final bundle measurement, flip ADR-0023 Draft→Accepted,
    retire the spike branch.
 

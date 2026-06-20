@@ -177,20 +177,27 @@ export default function App() {
                         }
                     />
                 </Routes>
-                {swUpdate.needRefresh && (
+                {/* Bottom overlay slot — Konsta Toasts all anchor to the same
+                    fixed bottom edge, so at most one shows at a time, picked by
+                    priority. Offline is transient + most actionable; the restore
+                    warning persists until dismissed; the SW-update prompt is the
+                    least urgent. A suppressed lower-priority overlay resurfaces
+                    once the higher one clears (each is still conditionally
+                    mounted, so it unmounts cleanly when its condition ends). */}
+                {!online ? (
+                    <OfflineIndicator />
+                ) : session && restoreWarning !== null ? (
+                    <RestoreWarningToast
+                        count={restoreWarning}
+                        onDismiss={clearRestoreWarning}
+                    />
+                ) : swUpdate.needRefresh ? (
                     <SWUpdateToast
                         sending={chatSending}
                         onUpdate={swUpdate.onUpdate}
                         onDismiss={swUpdate.onDismiss}
                     />
-                )}
-                {session && restoreWarning !== null && (
-                    <RestoreWarningToast
-                        count={restoreWarning}
-                        onDismiss={clearRestoreWarning}
-                    />
-                )}
-                {!online && <OfflineIndicator />}
+                ) : null}
             </BrowserRouter>
         </KonstaApp>
     );
