@@ -23,6 +23,12 @@ export default defineConfig({
 
     use: {
         baseURL: `http://localhost:${APP_PORT}`,
+        // Request reduced motion: useViewTransitionNavigate bails to a plain
+        // navigate() and the VT keyframes (gated on prefers-reduced-motion) go
+        // dormant, so forward navigations don't play the 220ms root slide. The
+        // slide moves the incoming route's bounding boxes, which would otherwise
+        // stall Playwright's actionability checks on every nav across the suite.
+        contextOptions: { reducedMotion: 'reduce' },
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
         video: 'retain-on-failure',
