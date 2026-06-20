@@ -9,11 +9,19 @@ import { useEffect, useRef } from 'react';
 // useEffect) and is route-wired like the draft.
 const MAX_HEIGHT_PX = 120;
 
-export function useAutogrowTextarea(textareaId: string): void {
+// `value` is a dependency, not read directly: the textarea is controlled, so the
+// effect must re-run on every value change (typed draft OR a message loaded for
+// editing) to re-measure and resize. Reading the live element by id keeps us off
+// Konsta's internal ref.
+export function useAutogrowTextarea(textareaId: string, value: string): void {
     // Konsta's resting height (h-10 ios / h-12 material), captured once before we
     // start overriding it — single-line drafts floor here rather than shrinking
     // below Konsta's (deliberately roomy) input height.
     const baseRef = useRef<number | null>(null);
+    // `value` is a re-run trigger, not read in the body: the textarea is
+    // controlled, so the effect must re-measure the DOM element on each value
+    // change. Dropping it would make autogrow mount-only.
+    // biome-ignore lint/correctness/useExhaustiveDependencies: value is an intentional re-run trigger (read off the DOM, not the closure)
     useEffect(() => {
         const el = document.getElementById(textareaId);
         if (!(el instanceof HTMLTextAreaElement)) return;
@@ -31,5 +39,5 @@ export function useAutogrowTextarea(textareaId: string): void {
             inner.style.alignItems =
                 grown > baseRef.current ? 'flex-end' : 'center';
         }
-    }, [textareaId]);
+    }, [textareaId, value]);
 }

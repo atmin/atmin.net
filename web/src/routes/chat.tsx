@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ChatView from '@/components/ChatView';
 import { useAutogrowTextarea } from '@/hooks/useAutogrowTextarea';
@@ -60,9 +60,32 @@ export default function ChatRoute({
     const scroll = useChatScroll(messages, handle);
     const [inputValue, setInputValue] = useDraft(handle ?? '');
     const compose = useComposeAttachment();
-    // Grow the Messagebar textarea with multi-line drafts (Konsta fixes its
-    // height); keyed to the composer's stable textarea id (ChatView).
-    useAutogrowTextarea('message-input');
+
+    // Editing reuses the composer rather than an inline field: starting an edit
+    // loads the message body into a separate edit buffer (so the in-progress
+    // draft is preserved), and the composer commits it via editMessage. The
+    // route owns this because it also owns the draft and the autogrow value.
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editValue, setEditValue] = useState('');
+    const startEdit = (id: string, body: string) => {
+        setEditingId(id);
+        setEditValue(body);
+    };
+    const cancelEdit = () => {
+        setEditingId(null);
+        setEditValue('');
+    };
+    const commitEdit = () => {
+        const body = editValue.trim();
+        if (editingId && body) editMessage(editingId, body);
+        cancelEdit();
+    };
+
+    // Whatever the composer currently shows — the edit buffer while editing,
+    // else the persisted draft. Feeds autogrow so the textarea resizes to fit a
+    // loaded multi-line message as well as live typing.
+    const composerValue = editingId !== null ? editValue : inputValue;
+    useAutogrowTextarea('message-input', composerValue);
 
     // Plain navigate for back — directional/reverse View Transitions are the
     // parked data-router task (ADR-0023), so no animation on the way back.
@@ -89,7 +112,12 @@ export default function ChatRoute({
             onClearAttachment={compose.clear}
             inputValue={inputValue}
             setInputValue={setInputValue}
-            onEditMessage={editMessage}
+            editingId={editingId}
+            editValue={editValue}
+            onEditValueChange={setEditValue}
+            onStartEdit={startEdit}
+            onCancelEdit={cancelEdit}
+            onCommitEdit={commitEdit}
             onDeleteMessage={deleteMessage}
             scrollContainerRef={scroll.setScrollEl}
             showJumpToBottom={scroll.showJumpToBottom}

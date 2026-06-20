@@ -114,7 +114,10 @@ export default function MediaAttachment({
                         type="button"
                         data-testid="media-chip"
                         onClick={onRequest}
-                        className="flex max-w-full items-center gap-2 rounded-lg border border-input px-3 py-2 text-left hover:bg-accent"
+                        // Translucent fill (not a bordered box) so the chip reads
+                        // on both the system-blue sent bubble and the grey
+                        // received bubble it now sits inside (T4b).
+                        className="flex max-w-full items-center gap-2 rounded-xl bg-black/5 px-3 py-2 text-left hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
                     >
                         <FileIcon
                             className="size-4 shrink-0 opacity-70"

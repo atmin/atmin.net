@@ -95,12 +95,25 @@ renders the existing `ChatMessage` bubbles — T4b converts those. Per-screen JS
 **~+1.5 kB gzip** (Konsta `Messagebar`/`Toolbar`/`Glass` + lucide icons + the hook);
 CSS **~+0.2 kB gzip** (messagebar layout overrides). T6 does the final measurement.
 
-1. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
-   (`Messages`/`Message`) + media + edit/delete; renders inside T4a's shell and
-   brings the system-colour bubbles.
-2. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+**T4b (chat timeline) has landed** — the message timeline is Konsta
+`Messages`/`Message`, so bubbles now carry the system colours (iOS blue/grey,
+Material primary/surface — the bubble width cap is a single tune point in
+`ChatMessage`). The per-bubble menu became a native Konsta `Actions` sheet
+(Edit / destructive Delete → confirm), lifted to `ChatView` and rendered once
+outside the `transform`-ed bubbles (Konsta modals position with `fixed` and
+don't portal) and given an explicit iOS frosted surface (the `glass` style was
+trimmed in T0). Editing now reuses the composer — Edit loads the body into the
+Messagebar with an "Editing message" banner and a Save check; the inline `<input>`
+is gone, and `useAutogrowTextarea` regained its `value` dep so the textarea fits a
+loaded multi-line message. `MediaAttachment` kept all its lazy/preview/status
+logic; a scoped `.k-message > div { min-width: 0 }` rule keeps a wide image (or an
+unbreakable log line via `wrap-anywhere`) inside the bubble instead of spawning a
+horizontal scrollbar. The now-dead `--bubble-*` tokens were removed. Per-screen
+cost vs T4a: **JS ~+1.9 kB gzip**, **CSS ~flat**. T6 does the final measurement.
+
+1. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
    dialogs (can interleave any time now T0 is done).
-3. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
+2. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
    `AuroraBackground`), final bundle measurement, flip ADR-0023 Draft→Accepted,
    retire the spike branch.
 

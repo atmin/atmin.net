@@ -256,9 +256,9 @@ export async function getMessageCount(page: Page): Promise<number> {
 }
 
 /**
- * Edit one of the user's own messages via the per-bubble action menu.
- * Matches the bubble by its current text, opens the menu, picks Edit,
- * replaces the body, and saves.
+ * Edit one of the user's own messages via the per-bubble action sheet.
+ * Matches the bubble by its current text, opens the sheet, picks Edit (which
+ * loads the body into the composer), replaces it, and saves.
  */
 export async function editMessage(
     page: Page,
@@ -271,9 +271,11 @@ export async function editMessage(
         .first();
     await bubble.getByTestId('message-actions-trigger').click();
     await page.getByTestId('message-action-edit').click();
-    const input = page.getByTestId('message-edit-input');
+    // Edit reuses the composer: the message body is loaded into #message-input
+    // and the send button becomes "Save edit".
+    const input = page.locator('#message-input');
     await input.fill(newText);
-    await page.getByTestId('message-edit-save').click();
+    await page.getByRole('button', { name: 'Save edit' }).click();
 }
 
 /**

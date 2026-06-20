@@ -1,5 +1,18 @@
-import { Messagebar, Navbar, NavbarBackLink, Page } from 'konsta/react';
-import { File as FileIcon, Paperclip, SendHorizontal, X } from 'lucide-react';
+import {
+    Messagebar,
+    Messages,
+    Navbar,
+    NavbarBackLink,
+    Page,
+} from 'konsta/react';
+import {
+    Check,
+    File as FileIcon,
+    Paperclip,
+    Pencil,
+    SendHorizontal,
+    X,
+} from 'lucide-react';
 import { useState } from 'react';
 import type { Message } from '@/hooks/useChat';
 import type { PendingAttachment } from '@/hooks/useComposeAttachment';
@@ -7,6 +20,7 @@ import type { MediaState } from '@/hooks/useMedia';
 import { formatBytes } from '@/lib/utils';
 import ChatMessage from './ChatMessage';
 import { JumpToBottomButton } from './JumpToBottomButton';
+import MessageActions from './MessageActions';
 
 interface Props {
     chatTitle: string;
@@ -35,7 +49,16 @@ interface Props {
     // the stored draft key.
     inputValue: string;
     setInputValue: (v: string) => void;
-    onEditMessage?: (id: string, newBody: string) => void;
+    // Editing reuses the composer (route-owned state). editingId marks the bubble
+    // being edited; editValue is the live edit buffer (kept separate so the draft
+    // survives). onStartEdit loads a message in; onCommitEdit saves; onCancelEdit
+    // drops it. Edit is offered for a message only when onStartEdit is wired.
+    editingId?: string | null;
+    editValue?: string;
+    onEditValueChange?: (v: string) => void;
+    onStartEdit?: (id: string, body: string) => void;
+    onCancelEdit?: () => void;
+    onCommitEdit?: () => void;
     onDeleteMessage?: (id: string, mediaUrls?: string[]) => void;
     scrollContainerRef?: (el: HTMLDivElement | null) => void;
     showJumpToBottom?: boolean;
@@ -62,24 +85,35 @@ export default function ChatView({
     onClearAttachment,
     inputValue,
     setInputValue,
-    onEditMessage,
+    editingId = null,
+    editValue = '',
+    onEditValueChange,
+    onStartEdit,
+    onCancelEdit,
+    onCommitEdit,
     onDeleteMessage,
     scrollContainerRef,
     showJumpToBottom = false,
     onJumpToBottom,
 }: Props) {
-    // Which message is in inline-edit mode. Only one at a time — starting an
-    // edit on another message replaces the target.
-    const [editingId, setEditingId] = useState<string | null>(null);
+    // Which message's action sheet is open. Lifted out of the bubble because the
+    // Konsta Actions sheet positions with `fixed` and must not sit inside a
+    // transform-ed `k-message` (which would trap it to the bubble's box).
+    const [actionsId, setActionsId] = useState<string | null>(null);
 
+    const editing = editingId !== null;
     const inputsDisabled = sending || !encryptionReady || !online;
-    // Send is enabled with text OR a staged attachment (a caption-less image is
-    // a valid send).
-    const canSend = !inputsDisabled && (!!inputValue.trim() || !!pending);
+    // Editing commits a text amendment; composing sends text OR a staged image
+    // (a caption-less image is a valid send).
+    const canSend = editing
+        ? !inputsDisabled && !!editValue.trim()
+        : !inputsDisabled && (!!inputValue.trim() || !!pending);
 
     const submit = () => {
         if (!canSend) return;
-        if (pending && onSendMedia) {
+        if (editing) {
+            onCommitEdit?.();
+        } else if (pending && onSendMedia) {
             // One media message; the typed text becomes its caption (sendMedia
             // falls back to the filename when empty). Clear both the draft and
             // the staged attachment on success-path dispatch.
@@ -105,9 +139,10 @@ export default function ChatView({
     };
 
     // Clipboard paste of an image stages it instead of sending; any non-image
-    // clipboard content (text) pastes through untouched.
+    // clipboard content (text) pastes through untouched. No staging while editing
+    // (an edit is text-only).
     const handlePaste = (e: React.ClipboardEvent) => {
-        if (!onAttach) return;
+        if (!onAttach || editing) return;
         const items = e.clipboardData?.items;
         if (!items) return;
         for (let i = 0; i < items.length; i++) {
@@ -126,7 +161,7 @@ export default function ChatView({
     // Drag-drop stages the first dropped file (image or not — non-images show a
     // chip). dragOver must preventDefault so the browser fires the drop.
     const handleDrop = (e: React.DragEvent) => {
-        if (!onAttach) return;
+        if (!onAttach || editing) return;
         const file = e.dataTransfer?.files?.[0];
         if (file) {
             e.preventDefault();
@@ -134,52 +169,81 @@ export default function ChatView({
         }
     };
     const handleDragOver = (e: React.DragEvent) => {
-        if (onAttach) e.preventDefault();
+        if (onAttach && !editing) e.preventDefault();
     };
 
-    const placeholder = pending
-        ? 'Add a caption…'
-        : online
-          ? 'Type a message...'
-          : 'You are offline';
+    const placeholder = editing
+        ? 'Edit message…'
+        : pending
+          ? 'Add a caption…'
+          : online
+            ? 'Type a message...'
+            : 'You are offline';
 
-    // Attach + send ride the Messagebar's left/right slots. The attach <label>
-    // wraps the hidden file input (kept for the e2e setInputFiles path); send is
-    // a button with a stable "Send" accessible name even while disabled.
-    const attachControl = onAttach ? (
-        <label
-            data-testid="attach-button"
-            aria-label="Attach file"
-            aria-disabled={inputsDisabled}
-            className={`flex size-8 -translate-y-2.5 items-center justify-center rounded-full text-primary ${
-                inputsDisabled
-                    ? 'pointer-events-none opacity-40'
-                    : 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/10'
-            }`}
-        >
-            <Paperclip className="size-5" />
-            <input
-                type="file"
-                className="hidden"
-                disabled={inputsDisabled}
-                onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) onAttach(f);
-                    e.target.value = '';
-                }}
-            />
-        </label>
-    ) : undefined;
+    // The message whose action sheet is open, plus whether it offers Edit (text
+    // or captioned media — never a pure-media bubble). Resolving by id (not a
+    // stored object) keeps the sheet honest if the message re-materializes.
+    const actionsMsg = actionsId
+        ? messages.find((m) => m.id === actionsId)
+        : undefined;
+    const actionsCanEdit =
+        !!actionsMsg &&
+        !!onStartEdit &&
+        (!actionsMsg.media || actionsMsg.text !== '');
 
+    // The blob keys a media delete must also remove (display object + preview).
+    const mediaUrlsOf = (m: Message): string[] | undefined =>
+        m.media
+            ? [m.media.url, m.media.preview?.url].filter(
+                  (u): u is string => !!u,
+              )
+            : undefined;
+
+    // Attach (composing only) + send/save ride the Messagebar's left/right slots.
+    // The attach <label> wraps the hidden file input (kept for the e2e
+    // setInputFiles path). Attaching is hidden while editing — an edit is
+    // text-only.
+    const attachControl =
+        onAttach && !editing ? (
+            <label
+                data-testid="attach-button"
+                aria-label="Attach file"
+                aria-disabled={inputsDisabled}
+                className={`flex size-8 -translate-y-2.5 items-center justify-center rounded-full text-primary ${
+                    inputsDisabled
+                        ? 'pointer-events-none opacity-40'
+                        : 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/10'
+                }`}
+            >
+                <Paperclip className="size-5" />
+                <input
+                    type="file"
+                    className="hidden"
+                    disabled={inputsDisabled}
+                    onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) onAttach(f);
+                        e.target.value = '';
+                    }}
+                />
+            </label>
+        ) : undefined;
+
+    // Send (compose) / Save (edit) — a stable accessible name per mode so e2e and
+    // SRs can target it; the glyph switches to a check while editing.
     const sendControl = (
         <button
             type="button"
-            aria-label="Send"
+            aria-label={editing ? 'Save edit' : 'Send'}
             disabled={!canSend}
             onClick={submit}
             className="flex size-8 -translate-y-2.5 items-center justify-center rounded-full text-primary disabled:opacity-40"
         >
-            <SendHorizontal className="size-5" />
+            {editing ? (
+                <Check className="size-5" />
+            ) : (
+                <SendHorizontal className="size-5" />
+            )}
         </button>
     );
 
@@ -201,11 +265,14 @@ export default function ChatView({
             />
 
             <div className="relative flex flex-1 flex-col overflow-hidden">
+                {/* overflow-x-hidden: a self-end bubble of unbreakable text must
+                    not be able to widen the column and spawn a horizontal
+                    scrollbar (overflow-y-auto alone computes overflow-x to auto). */}
                 <div
                     ref={scrollContainerRef}
-                    className="flex-1 overflow-y-auto"
+                    className="flex-1 overflow-y-auto overflow-x-hidden"
                 >
-                    <div className="mx-auto max-w-2xl px-4 py-4">
+                    <div className="mx-auto max-w-2xl px-1 py-4">
                         {loading ? (
                             <div className="flex h-96 items-center justify-center text-muted-foreground">
                                 <p>Loading messages...</p>
@@ -222,19 +289,14 @@ export default function ChatView({
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-3">
+                            <Messages className="mb-2! bg-transparent">
                                 {messages.map((msg) => {
-                                    // Own, non-deleted messages can be amended.
-                                    // Edit is offered only for text or a media
-                                    // caption (not a pure-media bubble).
+                                    // Own, non-deleted messages can be amended
+                                    // via the action sheet (lifted to ChatView).
                                     const canAmend =
                                         msg.sent &&
                                         !msg.deleted &&
                                         !!onDeleteMessage;
-                                    const canEdit =
-                                        canAmend &&
-                                        !!onEditMessage &&
-                                        (!msg.media || msg.text !== '');
                                     return (
                                         <ChatMessage
                                             key={msg.id}
@@ -260,54 +322,15 @@ export default function ChatView({
                                             mediaObserve={mediaObserve}
                                             editedAt={msg.editedAt}
                                             deleted={msg.deleted}
-                                            editing={editingId === msg.id}
-                                            onStartEdit={
-                                                canEdit
-                                                    ? () => setEditingId(msg.id)
-                                                    : undefined
-                                            }
-                                            onCancelEdit={() =>
-                                                setEditingId(null)
-                                            }
-                                            onSaveEdit={
-                                                onEditMessage
-                                                    ? (body) => {
-                                                          onEditMessage(
-                                                              msg.id,
-                                                              body,
-                                                          );
-                                                          setEditingId(null);
-                                                      }
-                                                    : undefined
-                                            }
-                                            onDelete={
+                                            onRequestActions={
                                                 canAmend
-                                                    ? () =>
-                                                          onDeleteMessage(
-                                                              msg.id,
-                                                              msg.media
-                                                                  ? [
-                                                                        msg
-                                                                            .media
-                                                                            .url,
-                                                                        msg
-                                                                            .media
-                                                                            .preview
-                                                                            ?.url,
-                                                                    ].filter(
-                                                                        (
-                                                                            u,
-                                                                        ): u is string =>
-                                                                            !!u,
-                                                                    )
-                                                                  : undefined,
-                                                          )
+                                                    ? () => setActionsId(msg.id)
                                                     : undefined
                                             }
                                         />
                                     );
                                 })}
-                            </div>
+                            </Messages>
                         )}
                     </div>
                 </div>
@@ -318,61 +341,85 @@ export default function ChatView({
                 )}
             </div>
 
-            {/* Composer — staged attachment tray (when any) above the Messagebar */}
+            {/* Composer footer. While editing: an "Editing message" banner with a
+                cancel. Otherwise: the staged-attachment tray (when any). */}
             <div className="bg-background">
-                {pending && (
-                    <div className="px-3 pt-3">
-                        <div
-                            data-testid="compose-tray"
-                            className="flex items-center gap-3 rounded-xl bg-black/5 p-2 dark:bg-white/10"
+                {editing ? (
+                    <div
+                        data-testid="edit-banner"
+                        className="flex items-center gap-2 px-4 pt-2 text-sm"
+                    >
+                        <Pencil className="size-4 text-primary" aria-hidden />
+                        <span className="font-medium text-primary">
+                            Editing message
+                        </span>
+                        <button
+                            type="button"
+                            data-testid="edit-cancel"
+                            aria-label="Cancel edit"
+                            onClick={onCancelEdit}
+                            className="ml-auto flex size-7 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
                         >
-                            {pending.isImage ? (
-                                <img
-                                    data-testid="compose-thumb"
-                                    src={pending.previewUrl}
-                                    alt={pending.file.name}
-                                    className="size-16 rounded-lg object-cover"
-                                />
-                            ) : (
-                                <div
-                                    data-testid="compose-file"
-                                    className="flex min-w-0 flex-1 items-center gap-2"
-                                >
-                                    <FileIcon
-                                        className="size-4 shrink-0 opacity-70"
-                                        aria-hidden
-                                    />
-                                    <span className="min-w-0">
-                                        <span className="block truncate text-sm">
-                                            {pending.file.name}
-                                        </span>
-                                        <span className="block text-xs opacity-70">
-                                            {formatBytes(pending.file.size)}
-                                        </span>
-                                    </span>
-                                </div>
-                            )}
-                            <button
-                                type="button"
-                                data-testid="compose-remove"
-                                aria-label="Remove attachment"
-                                onClick={() => onClearAttachment?.()}
-                                className="ml-auto flex size-8 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
-                            >
-                                <X className="size-4" />
-                            </button>
-                        </div>
+                            <X className="size-4" />
+                        </button>
                     </div>
+                ) : (
+                    pending && (
+                        <div className="px-3 pt-3">
+                            <div
+                                data-testid="compose-tray"
+                                className="flex items-center gap-3 rounded-xl bg-black/5 p-2 dark:bg-white/10"
+                            >
+                                {pending.isImage ? (
+                                    <img
+                                        data-testid="compose-thumb"
+                                        src={pending.previewUrl}
+                                        alt={pending.file.name}
+                                        className="size-16 rounded-lg object-cover"
+                                    />
+                                ) : (
+                                    <div
+                                        data-testid="compose-file"
+                                        className="flex min-w-0 flex-1 items-center gap-2"
+                                    >
+                                        <FileIcon
+                                            className="size-4 shrink-0 opacity-70"
+                                            aria-hidden
+                                        />
+                                        <span className="min-w-0">
+                                            <span className="block truncate text-sm">
+                                                {pending.file.name}
+                                            </span>
+                                            <span className="block text-xs opacity-70">
+                                                {formatBytes(pending.file.size)}
+                                            </span>
+                                        </span>
+                                    </div>
+                                )}
+                                <button
+                                    type="button"
+                                    data-testid="compose-remove"
+                                    aria-label="Remove attachment"
+                                    onClick={() => onClearAttachment?.()}
+                                    className="ml-auto flex size-8 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+                                >
+                                    <X className="size-4" />
+                                </button>
+                            </div>
+                        </div>
+                    )
                 )}
                 <Messagebar
                     className="relative!"
                     leftClassName="-ms-1"
                     rightClassName="-me-1"
-                    value={inputValue}
+                    value={editing ? editValue : inputValue}
                     placeholder={placeholder}
                     textareaId="message-input"
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                        setInputValue(e.target.value)
+                        editing
+                            ? onEditValueChange?.(e.target.value)
+                            : setInputValue(e.target.value)
                     }
                     onKeyDown={handleKeyDown}
                     onPaste={handlePaste}
@@ -382,6 +429,30 @@ export default function ChatView({
                     right={sendControl}
                 />
             </div>
+
+            {/* One action sheet for the whole timeline, keyed to the bubble
+                whose ⋯ was tapped. Rendered here — outside the transform-ed
+                message bubbles — so its fixed-positioned overlay fills the
+                viewport rather than a single bubble's box. */}
+            <MessageActions
+                opened={!!actionsMsg}
+                canEdit={actionsCanEdit}
+                onEdit={() => {
+                    if (actionsMsg) {
+                        onStartEdit?.(actionsMsg.id, actionsMsg.text);
+                        // Focus the composer so the loaded text is ready to edit
+                        // (imperative DOM in an event handler — not a lifecycle).
+                        document.getElementById('message-input')?.focus();
+                    }
+                    setActionsId(null);
+                }}
+                onDelete={() => {
+                    if (actionsMsg && onDeleteMessage)
+                        onDeleteMessage(actionsMsg.id, mediaUrlsOf(actionsMsg));
+                    setActionsId(null);
+                }}
+                onClose={() => setActionsId(null)}
+            />
         </Page>
     );
 }

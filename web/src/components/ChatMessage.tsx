@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { Message } from 'konsta/react';
+import { EllipsisVertical } from 'lucide-react';
 import type { MediaState } from '@/hooks/useMedia';
 import type { MediaFile } from '@/lib/media';
 import MediaAttachment from './MediaAttachment';
-import MessageActions from './MessageActions';
 
 interface Props {
     text: string;
@@ -20,13 +20,10 @@ interface Props {
     // Amendment state (set by the materializer).
     editedAt?: Date;
     deleted?: boolean;
-    // Amendment affordances (wired by the route for the user's own messages).
-    // onStartEdit is provided only when the message is editable.
-    editing?: boolean;
-    onStartEdit?: () => void;
-    onCancelEdit?: () => void;
-    onSaveEdit?: (newBody: string) => void;
-    onDelete?: () => void;
+    // Opens the per-bubble action sheet (edit/delete). Provided only for the
+    // user's own, amendable messages — its presence also gates the ⋮ trigger.
+    // Editing itself happens in the composer (ChatView), not here.
+    onRequestActions?: () => void;
 }
 
 // Relative phrasing for the gap between a message and its edit ("3 weeks
@@ -86,55 +83,21 @@ const EDITED_TIER_CLASS: Record<EditedTier, string> = {
     loud: 'font-medium text-amber-600 dark:text-amber-400',
 };
 
-// Inline edit form. A child component so its draft state initializes from the
-// current body each time editing begins (mount), with no effect needed.
-function InlineEdit({
-    initialValue,
-    onSave,
-    onCancel,
-}: {
-    initialValue: string;
-    onSave: (v: string) => void;
-    onCancel: () => void;
-}) {
-    const [value, setValue] = useState(initialValue);
-    return (
-        <form
-            onSubmit={(e) => {
-                e.preventDefault();
-                const v = value.trim();
-                if (v) onSave(v);
-            }}
-            className="flex flex-col gap-1.5"
-        >
-            <input
-                type="text"
-                // biome-ignore lint/a11y/noAutofocus: editing is an explicit user action
-                autoFocus
-                data-testid="message-edit-input"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                className="rounded border border-input bg-background px-2 py-1 text-sm text-foreground focus:border-ring focus:outline-none"
-            />
-            <div className="flex justify-end gap-2 text-xs">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="rounded px-2 py-0.5 hover:bg-black/10"
-                >
-                    Cancel
-                </button>
-                <button
-                    type="submit"
-                    data-testid="message-edit-save"
-                    className="rounded bg-primary px-2 py-0.5 text-primary-foreground hover:bg-primary/90"
-                >
-                    Save
-                </button>
-            </div>
-        </form>
-    );
-}
+// Konsta colours sent bubbles system-blue / received system-grey. A deleted
+// message overrides that to a neutral surface so the placeholder reads as
+// chrome, not content.
+const NEUTRAL_BUBBLE = {
+    messageSent: 'text-foreground',
+    bubbleSentIos: 'bg-muted',
+    bubbleSentMd: 'bg-muted',
+    bubbleReceivedIos: 'bg-muted',
+    bubbleReceivedMd: 'bg-muted',
+};
+
+// Bubble width cap — the single tune point. Konsta defaults k-message to
+// max-w-[70%]; the trailing `!` makes this win regardless of CSS source order.
+// Bump the percentage to give long content (e.g. wrapped log lines) more room.
+const BUBBLE_MAX_WIDTH = 'max-w-[85%]!';
 
 export default function ChatMessage({
     text,
@@ -147,17 +110,9 @@ export default function ChatMessage({
     mediaObserve,
     editedAt,
     deleted,
-    editing,
-    onStartEdit,
-    onCancelEdit,
-    onSaveEdit,
-    onDelete,
+    onRequestActions,
 }: Props) {
-    const bubbleClass = `group relative px-4 py-2.5 ${
-        sent
-            ? 'ml-8 rounded-tl-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-sent text-bubble-sent-foreground'
-            : 'mr-8 rounded-tr-2xl rounded-bl-2xl rounded-br-2xl bg-bubble-received text-bubble-received-foreground'
-    }`;
+    const type = sent ? 'sent' : 'received';
 
     const timeLabel =
         timestamp.getTime() === 0
@@ -168,78 +123,100 @@ export default function ChatMessage({
 
     if (deleted) {
         return (
-            <div data-testid="message" className={bubbleClass}>
-                <p className="text-sm italic opacity-50">[deleted]</p>
-                <p className="mt-1 text-xs opacity-50">{timeLabel}</p>
-            </div>
+            <Message
+                data-testid="message"
+                type={type}
+                className={BUBBLE_MAX_WIDTH}
+                colors={NEUTRAL_BUBBLE}
+                text={
+                    <>
+                        <p className="text-sm italic opacity-50">[deleted]</p>
+                        <p className="mt-1 text-xs opacity-50">{timeLabel}</p>
+                    </>
+                }
+            />
         );
     }
-
-    if (editing && onSaveEdit && onCancelEdit) {
-        return (
-            <div data-testid="message" className={bubbleClass}>
-                <InlineEdit
-                    initialValue={text}
-                    onSave={onSaveEdit}
-                    onCancel={onCancelEdit}
-                />
-            </div>
-        );
-    }
-
-    // Actions are shown for the user's own messages (onDelete provided).
-    const showActions = !!onDelete;
 
     return (
-        <div data-testid="message" className={bubbleClass}>
-            {showActions && (
-                <MessageActions onEdit={onStartEdit} onDelete={onDelete} />
-            )}
-            {media && onMediaRequest && (
-                <div className="mb-1">
-                    <MediaAttachment
-                        state={mediaState}
-                        fullState={mediaFullState}
-                        hasPreview={!!media.preview}
-                        name={media.name}
-                        size={media.size}
-                        width={media.width}
-                        height={media.height}
-                        // Chip/retry loads the displayed object (preview if any);
-                        // tap loads the full.
-                        onRequest={() =>
-                            onMediaRequest(media.preview?.url ?? media.url)
-                        }
-                        onRequestFull={() => onMediaRequest(media.url)}
-                        observe={
-                            mediaObserve
-                                ? (el) =>
-                                      mediaObserve(
-                                          media.preview?.url ?? media.url,
-                                          el,
-                                      )
-                                : undefined
-                        }
-                    />
-                </div>
-            )}
-            {text && (
-                <p className="whitespace-pre-wrap wrap-break-word text-sm">
-                    {text}
-                </p>
-            )}
-            <p className="mt-1 text-xs">
-                <span className="opacity-50">{timeLabel}</span>
-                {edited && (
-                    <span
-                        data-testid="edited-tag"
-                        title={edited.title}
-                        className={`ml-1 ${EDITED_TIER_CLASS[edited.tier]}`}
+        <Message
+            data-testid="message"
+            type={type}
+            className={BUBBLE_MAX_WIDTH}
+            text={
+                <>
+                    {onRequestActions && (
+                        <button
+                            type="button"
+                            data-testid="message-actions-trigger"
+                            aria-label="Message actions"
+                            aria-haspopup="menu"
+                            onClick={onRequestActions}
+                            // Visible affordance (an opacity-0 hover-only trigger
+                            // is invisible on touch). A faint scrim keeps the
+                            // glyph legible on the blue bubble. Lower-right corner
+                            // so it never sits over an image attachment (top).
+                            className="absolute bottom-1 right-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/10 text-current opacity-70 transition hover:bg-black/20 hover:opacity-100"
+                        >
+                            <EllipsisVertical className="size-4" />
+                        </button>
+                    )}
+                    {media && onMediaRequest && (
+                        <div className="mb-1">
+                            <MediaAttachment
+                                state={mediaState}
+                                fullState={mediaFullState}
+                                hasPreview={!!media.preview}
+                                name={media.name}
+                                size={media.size}
+                                width={media.width}
+                                height={media.height}
+                                // Chip/retry loads the displayed object (preview
+                                // if any); tap loads the full.
+                                onRequest={() =>
+                                    onMediaRequest(
+                                        media.preview?.url ?? media.url,
+                                    )
+                                }
+                                onRequestFull={() => onMediaRequest(media.url)}
+                                observe={
+                                    mediaObserve
+                                        ? (el) =>
+                                              mediaObserve(
+                                                  media.preview?.url ??
+                                                      media.url,
+                                                  el,
+                                              )
+                                        : undefined
+                                }
+                            />
+                        </div>
+                    )}
+                    {text && (
+                        <p className="wrap-anywhere whitespace-pre-wrap text-sm">
+                            {text}
+                        </p>
+                    )}
+                    {/* Reserve room on the timestamp row for the lower-right
+                        trigger so a long "edited …" tag doesn't run under it. */}
+                    <p
+                        className={`mt-1 text-xs ${
+                            onRequestActions ? 'pe-6' : ''
+                        }`}
                     >
-                        · {edited.label}
-                    </span>
-                )}
-            </p>
-        </div>
+                        <span className="opacity-50">{timeLabel}</span>
+                        {edited && (
+                            <span
+                                data-testid="edited-tag"
+                                title={edited.title}
+                                className={`ml-1 ${EDITED_TIER_CLASS[edited.tier]}`}
+                            >
+                                · {edited.label}
+                            </span>
+                        )}
+                    </p>
+                </>
+            }
+        />
     );
 }

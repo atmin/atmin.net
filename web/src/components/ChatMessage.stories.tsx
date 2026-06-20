@@ -122,10 +122,7 @@ export const Edited: Story = {
         timestamp: new Date('2025-01-15T14:30:00'),
         sent: true,
         editedAt: new Date('2025-01-15T14:31:00'),
-        onStartEdit: noop,
-        onCancelEdit: noop,
-        onSaveEdit: noop,
-        onDelete: noop,
+        onRequestActions: noop,
     },
 };
 
@@ -135,10 +132,7 @@ export const EditedRecently: Story = {
         timestamp: new Date('2025-01-15T14:30:00'),
         sent: true,
         editedAt: new Date('2025-01-15T14:30:20'),
-        onStartEdit: noop,
-        onCancelEdit: noop,
-        onSaveEdit: noop,
-        onDelete: noop,
+        onRequestActions: noop,
     },
 };
 
@@ -149,10 +143,7 @@ export const EditedHoursLater: Story = {
         timestamp: new Date('2025-01-15T14:30:00'),
         sent: true,
         editedAt: new Date('2025-01-15T19:30:00'),
-        onStartEdit: noop,
-        onCancelEdit: noop,
-        onSaveEdit: noop,
-        onDelete: noop,
+        onRequestActions: noop,
     },
 };
 
@@ -163,10 +154,7 @@ export const EditedLongAfter: Story = {
         timestamp: new Date('2025-01-15T14:30:00'),
         sent: true,
         editedAt: new Date('2025-02-05T09:00:00'),
-        onStartEdit: noop,
-        onCancelEdit: noop,
-        onSaveEdit: noop,
-        onDelete: noop,
+        onRequestActions: noop,
     },
 };
 
@@ -179,15 +167,5 @@ export const Deleted: Story = {
     },
 };
 
-export const EditingInline: Story = {
-    args: {
-        text: 'the current body, pre-filled',
-        timestamp: new Date('2025-01-15T14:30:00'),
-        sent: true,
-        editing: true,
-        onStartEdit: noop,
-        onCancelEdit: noop,
-        onSaveEdit: noop,
-        onDelete: noop,
-    },
-};
+// Editing no longer happens inline — picking Edit loads the message into the
+// composer (see ChatView's EditingInComposer story).

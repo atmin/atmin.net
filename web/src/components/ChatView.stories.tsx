@@ -115,6 +115,76 @@ export const WithMultilineMessage: Story = {
     },
 };
 
+// Regression: a long unbreakable token (server-log line) must wrap inside the
+// bubble (wrap-anywhere) rather than widen the column into a horizontal
+// scrollbar. A narrow sent bubble alongside shares the same small right margin.
+// onDeleteMessage makes these own bubbles amendable, so the ⋮ trigger shows.
+export const WideUnbreakableMessage: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'ok',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: true,
+            },
+            {
+                id: '2',
+                text: 'level=info msg=request request_id=01KVJKJQGEF90SE5PVF11AX33S method=GET path=/v1/store/object status=200 dur_ms=3 ip=127.0.0.1 user_id=01KVJJAH971RXNVEMHJ11F69BF',
+                timestamp: new Date('2024-01-15T10:31:00Z'),
+                sent: true,
+            },
+        ],
+        loading: false,
+        sending: false,
+        onStartEdit: fn(),
+        onDeleteMessage: fn(),
+    },
+};
+
+// A sent image attachment in its idle (not-yet-fetched) state: the reserved
+// aspect-ratio placeholder must fit inside the bubble, not overflow it; the ⋮
+// trigger sits in the lower-right, clear of the image (T4b fine-tuning).
+export const WithImageAttachment: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'check this out',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: true,
+                media: {
+                    url: 'media/01STORY/wide',
+                    key: new Uint8Array(32),
+                    iv: new Uint8Array(12),
+                    name: 'wide.jpg',
+                    size: 482_113,
+                    width: 2048,
+                    height: 1536,
+                },
+            },
+        ],
+        loading: false,
+        sending: false,
+        mediaStates: {
+            'media/01STORY/wide': {
+                status: 'idle',
+                blobUrl: null,
+                mime: null,
+            },
+        },
+        onMediaRequest: fn(),
+        onStartEdit: fn(),
+        onDeleteMessage: fn(),
+    },
+};
+
 export const Sending: Story = {
     args: {
         chatTitle: 'copper-falcon',
@@ -207,7 +277,7 @@ export const WithAmendments: Story = {
         ],
         loading: false,
         sending: false,
-        onEditMessage: fn(),
+        onStartEdit: fn(),
         onDeleteMessage: fn(),
     },
 };
@@ -293,9 +363,10 @@ export const ComposeStagedFile: Story = {
     },
 };
 
-// Confirms the "only one message edits at a time" invariant: bubble 2 is in
-// inline-edit mode (Save/Cancel visible) while the others render normally.
-export const WithOneMessageEditing: Story = {
+// Editing reuses the composer: bubble 2's body is loaded into the Messagebar and
+// the "Editing message" banner is shown (Send becomes a Save check). The bubbles
+// render normally — there is no longer an inline editor.
+export const EditingInComposer: Story = {
     args: {
         chatTitle: 'copper-falcon',
         isSaved: false,
@@ -322,13 +393,38 @@ export const WithOneMessageEditing: Story = {
         ],
         loading: false,
         sending: false,
-        onEditMessage: fn(),
+        editingId: '2',
+        editValue: 'This one is being edited',
+        onStartEdit: fn(),
+        onEditValueChange: fn(),
+        onCancelEdit: fn(),
+        onCommitEdit: fn(),
+        onDeleteMessage: fn(),
+    },
+};
+
+// The per-bubble action sheet, opened over the timeline. Verifies the Konsta
+// Actions overlay escapes its transform-ed bubble and fills the viewport rather
+// than clipping to a single bubble's box (T4b).
+export const WithActionSheet: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'Tap the ⋯ to edit or delete me',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: true,
+            },
+        ],
+        loading: false,
+        sending: false,
+        onStartEdit: fn(),
         onDeleteMessage: fn(),
     },
     play: async ({ canvas, userEvent }) => {
-        // Open message 2's action menu and click Edit.
-        const triggers = canvas.getAllByTestId('message-actions-trigger');
-        await userEvent.click(triggers[1]);
-        await userEvent.click(canvas.getByTestId('message-action-edit'));
+        await userEvent.click(canvas.getByTestId('message-actions-trigger'));
     },
 };

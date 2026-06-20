@@ -72,10 +72,6 @@
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-ring: var(--sidebar-ring);
-    --color-bubble-sent: var(--bubble-sent);
-    --color-bubble-sent-foreground: var(--bubble-sent-foreground);
-    --color-bubble-received: var(--bubble-received);
-    --color-bubble-received-foreground: var(--bubble-received-foreground);
 }
 
 :root {
@@ -111,10 +107,6 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
-    --bubble-sent: oklch(0.8 0 0);
-    --bubble-sent-foreground: oklch(0.145 0 0);
-    --bubble-received: oklch(0.9 0 0);
-    --bubble-received-foreground: oklch(0.145 0 0);
 }
 
 .dark {
@@ -149,10 +141,6 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
-    --bubble-sent: oklch(0.35 0 0);
-    --bubble-sent-foreground: oklch(0.985 0 0);
-    --bubble-received: oklch(0.25 0 0);
-    --bubble-received-foreground: oklch(0.92 0 0);
 }
 
 @layer base {
@@ -221,4 +209,13 @@ select {
 .k-messagebar .k-toolbar {
     padding-top: 0.5rem;
     padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+}
+
+/* Konsta Message (ADR-0023 / T4b): the bubble's flex content column defaults to
+   min-width:auto, so a child sized to its natural pixel width — an image
+   attachment's reserved aspect-ratio box — refuses to shrink and overflows the
+   k-message max-w cap. min-width:0 lets the column honour the cap; the box's own
+   max-width:100% then bounds it. (Text already shrinks via wrap-anywhere.) */
+.k-message > div {
+    min-width: 0;
 }
