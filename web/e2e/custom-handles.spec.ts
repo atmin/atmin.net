@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test';
 import {
     E2E_PASSWORD,
+    expectKonstaCheckboxChecked,
     openChat,
     registerUserWithPassword,
+    tickKonstaCheckbox,
     waitForChatList,
 } from './helpers';
 
@@ -21,22 +23,9 @@ test.describe('Custom handles', () => {
         const alice = await aliceCtx.newPage();
         const bob = await bobCtx.newPage();
 
-        // Alice claims "alice-1" — picks it deliberately, sees ✓ available.
-        await alice.goto('/register');
-        await alice.fill('#handle', 'alice-1');
-        await expect(alice.getByTestId('handle-availability')).toHaveText(
-            /Available/,
-            { timeout: 10_000 },
-        );
-        await alice.fill('#password', STRONG_PW);
-        await alice.fill('#confirm', STRONG_PW);
-        const ack = alice.getByRole('checkbox', { name: /I understand/i });
-        await ack.setChecked(true);
-        await expect(ack).toBeChecked({ timeout: 5_000 });
-        const register = alice.getByRole('button', { name: 'Register' });
-        await expect(register).toBeEnabled({ timeout: 5_000 });
-        await register.click();
-        await waitForChatList(alice);
+        // Alice claims "alice-1" — picks it deliberately; the helper waits on
+        // ✓ available, ticks the ack, and lands on the chat list.
+        await registerUserWithPassword(alice, STRONG_PW, 'alice-1');
 
         // Bob tries the same handle — the availability indicator turns ✗.
         await bob.goto('/register');
@@ -69,8 +58,8 @@ test.describe('Custom handles', () => {
         );
         await page.fill('#password', STRONG_PW);
         await page.fill('#confirm', STRONG_PW);
-        const ack = page.getByRole('checkbox', { name: /I understand/i });
-        await ack.setChecked(true);
+        await tickKonstaCheckbox(page, 'register-ack');
+        await expectKonstaCheckboxChecked(page, 'register-ack');
         const register = page.getByRole('button', { name: 'Register' });
         await expect(register).toBeEnabled({ timeout: 5_000 });
         await register.click();

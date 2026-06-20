@@ -69,16 +69,28 @@ checkmark radio-list, storage gains a `Progressbar`, sign-out is a red
 auth). Per-screen JS cost: **~+3 kB gzip** (new Konsta components, partly offset
 by dropping shadcn `Card`/`Checkbox`/`Button` here; CSS flat).
 
-1. **[konsta-t3-auth](konsta-t3-auth.md)** — landing / login / register; **kills
-   AuroraBackground**.
-2. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
+**T3 (auth) has landed** — the unauthenticated flow is Konsta. `LandingPage` is
+a bare splash (logo, wordmark, tagline, two buttons); **`AuroraBackground` is no
+longer used** — the `ui/AuroraBackground.tsx` primitive, its hook, and its story
+are now dead code, deleted in T6 with the rest of the dead shadcn. `LoginForm` /
+`RegisterForm` are Konsta `Page`s of grouped `Block strong inset` fields reusing
+the custom `PasswordInput` (eye toggle) + `PasswordStrengthMeter`; the register
+"I understand" ack is a Konsta `Checkbox`. Every long on-device crypto moment
+(register derive/PoW, password change, account deletion) now shares one
+`StatusCover` built on Konsta `Preloader` — which meant re-adding `preloader.css`
+(trimmed out in T0). Per-screen JS cost: **−4 kB gzip** (dropping shadcn
+`Card`/`Alert`/`Checkbox`/`Button` from auth outweighs Konsta, already bundled);
+CSS **+0.25 kB gzip** (preloader styles). T6 does the final measurement.
+
+1. **[konsta-t4a-chat-chrome](konsta-t4a-chat-chrome.md)** — chat navbar +
    `Messagebar` composer (preserves the compose tray).
-3. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
+2. **[konsta-t4b-chat-timeline](konsta-t4b-chat-timeline.md)** — message bubbles
    (`Messages`/`Message`) + media + edit/delete; needs T4a.
-4. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
+3. **[konsta-t5-overlays](konsta-t5-overlays.md)** — toasts / indicators /
    dialogs (can interleave any time now T0 is done).
-5. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn, final
-   bundle measurement, flip ADR-0023 Draft→Accepted, retire the spike branch.
+4. **[konsta-t6-cleanup](konsta-t6-cleanup.md)** — retire dead shadcn (incl.
+   `AuroraBackground`), final bundle measurement, flip ADR-0023 Draft→Accepted,
+   retire the spike branch.
 
 ### Parked / deferred
 

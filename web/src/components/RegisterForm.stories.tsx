@@ -35,6 +35,7 @@ const checking: HandleAvailability = {
 const meta = {
     title: 'Forms/RegisterForm',
     component: RegisterForm,
+    parameters: { layout: 'fullscreen' },
     args: {
         onHandleChange: fn(),
         onSurpriseMe: fn(),
@@ -163,6 +164,18 @@ export const Deriving: Story = {
         confirm: 'Tr0ub4dour&3xpl0re!Quokka',
         acknowledged: true,
         error: '',
+    },
+};
+
+export const Proving: Story = {
+    args: {
+        step: 'proving',
+        handle: 'alice-test',
+        password: 'Tr0ub4dour&3xpl0re!Quokka',
+        confirm: 'Tr0ub4dour&3xpl0re!Quokka',
+        acknowledged: true,
+        error: '',
+        provingMs: 2400,
     },
 };
 

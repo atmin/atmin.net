@@ -49,9 +49,9 @@ test.describe('I6 — bad credential / corrupt backup fails legibly', () => {
         await fresh.getByRole('button', { name: 'Sign In' }).click();
 
         // Wrong password derives the wrong auth key, so add-device's auth
-        // proof fails verification → 403 → the form shows "Login Failed"
-        // and stays on /login. No redirect, no session.
-        await expect(fresh.getByText('Login Failed')).toBeVisible({
+        // proof fails verification → 403 → the form shows a "Login failed"
+        // error and stays on /login. No redirect, no session.
+        await expect(fresh.getByText(/login failed/i)).toBeVisible({
             timeout: 60_000,
         });
         expect(fresh.url()).toContain('/login');

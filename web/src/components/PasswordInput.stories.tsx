@@ -22,7 +22,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Empty: Story = {
-    args: { value: '', placeholder: 'Password or recovery phrase' },
+    args: { value: '', placeholder: 'Password' },
 };
 
 export const Filled: Story = {

@@ -105,10 +105,10 @@ export async function registerUserWithPassword(
     await page.fill('#password', password);
     await page.fill('#confirm', password);
 
-    // setChecked, not click: Radix Checkbox is a <button role="checkbox">.
-    const ack = page.getByRole('checkbox', { name: /I understand/i });
-    await ack.setChecked(true);
-    await expect(ack).toBeChecked({ timeout: 5_000 });
+    // The "I understand" ack is a Konsta Checkbox (T3) — hidden native input,
+    // so tick via the label and assert on the input (see tickKonstaCheckbox).
+    await tickKonstaCheckbox(page, 'register-ack');
+    await expectKonstaCheckboxChecked(page, 'register-ack');
     const register = page.getByRole('button', { name: 'Register' });
     await expect(register).toBeEnabled({ timeout: 5_000 });
     await register.click();

@@ -1,12 +1,6 @@
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-} from '@/components/ui/card';
+import { Button, Page } from 'konsta/react';
+import { useNavigate } from 'react-router-dom';
+import Logo from '@/components/Logo';
 
 interface Props {
     // One-shot confirmation after a successful account deletion.
@@ -18,50 +12,48 @@ export default function LandingPage({
     accountDeleted = false,
     onDismiss = () => {},
 }: Props) {
+    const navigate = useNavigate();
+
+    const go = (path: string) => {
+        onDismiss();
+        navigate(path);
+    };
+
     return (
-        <div className="flex min-h-screen items-center justify-center bg-background p-8">
-            <div className="w-full max-w-md">
-                {accountDeleted && (
-                    <p
-                        className="mb-6 text-sm text-muted-foreground"
-                        data-testid="account-deleted-notice"
-                    >
-                        ✓ Your account has been deleted.
-                    </p>
-                )}
-                <h1 className="mb-8 text-3xl font-bold">atmin</h1>
-
-                <Card className="mb-6">
-                    <CardHeader>
-                        <CardTitle>End-to-end encrypted messenger</CardTitle>
-                        <CardDescription>
-                            Private conversations with no server access to your
-                            messages
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm text-muted-foreground">
-                        <p>
-                            • Messages encrypted with Megolm (Matrix protocol)
+        <Page>
+            {/* Bare splash (ADR-0023 T3): logo, wordmark, tagline, two actions,
+                version footer pinned to the bottom. The AuroraBackground hero
+                retired with the Konsta migration. */}
+            <div className="flex min-h-full flex-col px-8 py-10 text-center">
+                <div className="flex flex-1 flex-col items-center justify-center">
+                    {accountDeleted && (
+                        <p
+                            className="mb-8 text-sm opacity-60"
+                            data-testid="account-deleted-notice"
+                        >
+                            ✓ Your account has been deleted.
                         </p>
-                        <p>• Your keys, your data</p>
-                        <p>• Zero-knowledge architecture</p>
-                    </CardContent>
-                </Card>
+                    )}
 
-                <div className="flex gap-3">
-                    <Button asChild className="flex-1">
-                        <Link to="/register" onClick={onDismiss}>
-                            Create Account
-                        </Link>
-                    </Button>
-                    <Button asChild variant="outline" className="flex-1">
-                        <Link to="/login" onClick={onDismiss}>
-                            Sign In
-                        </Link>
-                    </Button>
+                    <Logo className="h-20 w-20" />
+                    <h1 className="mt-4 text-3xl font-bold tracking-tight">
+                        atmin
+                    </h1>
+                    <p className="mt-2 text-base opacity-60">
+                        End-to-end encrypted messenger
+                    </p>
+
+                    <div className="mt-10 w-full max-w-xs space-y-3">
+                        <Button large onClick={() => go('/register')}>
+                            Create account
+                        </Button>
+                        <Button large outline onClick={() => go('/login')}>
+                            Sign in
+                        </Button>
+                    </div>
                 </div>
 
-                <p className="mt-6 text-center text-xs text-muted-foreground">
+                <p className="mt-8 text-xs opacity-50">
                     {__APP_VERSION__} • Open source •{' '}
                     <a
                         href="https://github.com/yourusername/atmin"
@@ -71,6 +63,6 @@ export default function LandingPage({
                     </a>
                 </p>
             </div>
-        </div>
+        </Page>
     );
 }

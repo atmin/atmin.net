@@ -9,6 +9,7 @@ import {
 } from 'konsta/react';
 import { useState } from 'react';
 import PasswordInput from '@/components/PasswordInput';
+import StatusCover from '@/components/StatusCover';
 import type { DeleteStep } from '@/hooks/useDeleteAccount';
 
 interface Props {
@@ -22,19 +23,6 @@ interface Props {
     onHandleConfirmChange: (v: string) => void;
     onAcknowledgedChange: (v: boolean) => void;
     onSubmit: () => void;
-}
-
-function StatusCover({ label }: { label: string }) {
-    return (
-        <Block className="py-10 text-center">
-            <div className="mb-4 flex justify-center gap-2">
-                <span className="size-3 animate-pulse rounded-full bg-red-500 [animation-delay:-0.3s]" />
-                <span className="size-3 animate-pulse rounded-full bg-red-500 [animation-delay:-0.15s]" />
-                <span className="size-3 animate-pulse rounded-full bg-red-500" />
-            </div>
-            <p className="text-sm font-medium">{label}</p>
-        </Block>
-    );
 }
 
 export default function DeleteAccountPanel({
@@ -81,10 +69,16 @@ export default function DeleteAccountPanel({
             >
                 <div className="max-h-[85vh] overflow-y-auto">
                     {step === 'verifying' && (
-                        <StatusCover label="Verifying your password…" />
+                        <StatusCover
+                            label="Verifying your password…"
+                            destructive
+                        />
                     )}
                     {(step === 'deleting' || step === 'done') && (
-                        <StatusCover label="Deleting your account…" />
+                        <StatusCover
+                            label="Deleting your account…"
+                            destructive
+                        />
                     )}
 
                     {step === 'enter' && (

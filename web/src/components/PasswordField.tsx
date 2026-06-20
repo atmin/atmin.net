@@ -51,7 +51,7 @@ export default function PasswordField({
                     ariaInvalid={mismatch}
                 />
                 {mismatch && (
-                    <p className="mt-1 text-xs text-destructive">
+                    <p className="mt-1 text-xs text-red-500">
                         Passwords do not match.
                     </p>
                 )}

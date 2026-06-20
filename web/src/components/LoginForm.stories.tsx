@@ -5,8 +5,10 @@ import LoginForm from './LoginForm';
 const meta = {
     title: 'Forms/LoginForm',
     component: LoginForm,
+    parameters: { layout: 'fullscreen' },
     args: {
         onLogin: fn(),
+        onDismissNotice: fn(),
     },
 } satisfies Meta<typeof LoginForm>;
 
@@ -39,6 +41,13 @@ export const RotatedElsewhere: Story = {
         loading: false,
         error: '',
         notice: 'rotated_elsewhere',
-        onDismissNotice: fn(),
+    },
+};
+
+export const AccountDeleted: Story = {
+    args: {
+        loading: false,
+        error: '',
+        notice: 'account_deleted',
     },
 };

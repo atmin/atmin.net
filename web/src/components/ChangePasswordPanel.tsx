@@ -10,6 +10,7 @@ import {
 import { useState } from 'react';
 import PasswordInput from '@/components/PasswordInput';
 import PasswordStrengthMeter from '@/components/PasswordStrengthMeter';
+import StatusCover from '@/components/StatusCover';
 import type { PasswordStrength } from '@/hooks/usePasswordStrength';
 import type { RotateStep } from '@/hooks/useRotateKeys';
 
@@ -26,19 +27,6 @@ interface Props {
     onConfirmChange: (value: string) => void;
     onAcknowledgedChange: (value: boolean) => void;
     onSubmit: () => void;
-}
-
-function StatusCover({ label }: { label: string }) {
-    return (
-        <Block className="py-10 text-center">
-            <div className="mb-4 flex justify-center gap-2">
-                <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.3s]" />
-                <span className="size-3 animate-pulse rounded-full bg-primary [animation-delay:-0.15s]" />
-                <span className="size-3 animate-pulse rounded-full bg-primary" />
-            </div>
-            <p className="text-sm font-medium">{label}</p>
-        </Block>
-    );
 }
 
 export default function ChangePasswordPanel({

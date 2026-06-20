@@ -34,14 +34,14 @@ export default function PasswordInput({
                 disabled={disabled}
                 autoComplete={autoComplete}
                 aria-invalid={ariaInvalid}
-                className="w-full rounded border border-input bg-background px-3 py-2 pr-10 text-sm aria-invalid:border-destructive"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 pr-10 text-sm aria-invalid:border-red-500"
             />
             <button
                 type="button"
                 onClick={() => setShow((s) => !s)}
                 disabled={disabled}
                 aria-label={show ? 'Hide password' : 'Show password'}
-                className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+                className="absolute inset-y-0 right-0 flex items-center px-3 opacity-60 hover:opacity-100"
             >
                 {show ? (
                     <EyeOff className="size-4" />
