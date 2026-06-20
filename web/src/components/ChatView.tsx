@@ -1,18 +1,19 @@
-import { File as FileIcon } from 'lucide-react';
+import { Messagebar, Navbar, NavbarBackLink, Page } from 'konsta/react';
+import { File as FileIcon, Paperclip, SendHorizontal, X } from 'lucide-react';
 import { useState } from 'react';
 import type { Message } from '@/hooks/useChat';
 import type { PendingAttachment } from '@/hooks/useComposeAttachment';
 import type { MediaState } from '@/hooks/useMedia';
 import { formatBytes } from '@/lib/utils';
-import BackButton from './BackButton';
 import ChatMessage from './ChatMessage';
 import { JumpToBottomButton } from './JumpToBottomButton';
-import Layout from './Layout';
 
 interface Props {
     chatTitle: string;
     isSaved: boolean;
     handle: string;
+    /** Back to the conversation list. Plain navigate (no reverse transition). */
+    onBack: () => void;
     messages: Message[];
     loading: boolean;
     sending: boolean;
@@ -45,6 +46,7 @@ export default function ChatView({
     chatTitle,
     isSaved,
     handle,
+    onBack,
     messages,
     loading,
     sending,
@@ -75,8 +77,7 @@ export default function ChatView({
     // a valid send).
     const canSend = !inputsDisabled && (!!inputValue.trim() || !!pending);
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
+    const submit = () => {
         if (!canSend) return;
         if (pending && onSendMedia) {
             // One media message; the typed text becomes its caption (sendMedia
@@ -88,6 +89,18 @@ export default function ChatView({
         } else {
             onSend(inputValue.trim());
             setInputValue('');
+        }
+    };
+
+    // The Messagebar textarea is multi-line; Enter sends (Shift+Enter inserts a
+    // newline), matching desktop chat expectations. isComposing guards IME input
+    // so committing a CJK candidate with Enter doesn't fire a send. Konsta doesn't
+    // forward onKeyDown to the textarea, so this rides the messagebar root div and
+    // catches the bubbling event.
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            submit();
         }
     };
 
@@ -124,27 +137,78 @@ export default function ChatView({
         if (onAttach) e.preventDefault();
     };
 
-    const topBar = (
-        <>
-            <BackButton />
-            <h2 className="ml-1 font-mono text-sm font-medium">{chatTitle}</h2>
-        </>
+    const placeholder = pending
+        ? 'Add a caption…'
+        : online
+          ? 'Type a message...'
+          : 'You are offline';
+
+    // Attach + send ride the Messagebar's left/right slots. The attach <label>
+    // wraps the hidden file input (kept for the e2e setInputFiles path); send is
+    // a button with a stable "Send" accessible name even while disabled.
+    const attachControl = onAttach ? (
+        <label
+            data-testid="attach-button"
+            aria-label="Attach file"
+            aria-disabled={inputsDisabled}
+            className={`flex size-9 items-center justify-center rounded-full text-primary ${
+                inputsDisabled
+                    ? 'pointer-events-none opacity-40'
+                    : 'cursor-pointer hover:bg-black/5 dark:hover:bg-white/10'
+            }`}
+        >
+            <Paperclip className="size-5" />
+            <input
+                type="file"
+                className="hidden"
+                disabled={inputsDisabled}
+                onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onAttach(f);
+                    e.target.value = '';
+                }}
+            />
+        </label>
+    ) : undefined;
+
+    const sendControl = (
+        <button
+            type="button"
+            aria-label="Send"
+            disabled={!canSend}
+            onClick={submit}
+            className="flex size-9 items-center justify-center rounded-full text-primary disabled:opacity-40"
+        >
+            <SendHorizontal className="size-5" />
+        </button>
     );
 
     return (
-        <Layout fullHeight topBar={topBar}>
-            {/* Messages area */}
+        // Flex column instead of Konsta's default page scroll: the inner messages
+        // div owns the scroll (so useChatScroll's contract is unchanged) and the
+        // composer flows in-document at the bottom (Messagebar is forced relative,
+        // overriding its fixed-bottom default — see the override below).
+        <Page className="flex flex-col overflow-hidden!">
+            <Navbar
+                title={
+                    isSaved ? (
+                        chatTitle
+                    ) : (
+                        <span className="font-mono">{chatTitle}</span>
+                    )
+                }
+                left={<NavbarBackLink text="Chats" onClick={onBack} />}
+            />
+
             <div className="relative flex flex-1 flex-col overflow-hidden">
                 <div
                     ref={scrollContainerRef}
                     className="flex-1 overflow-y-auto"
                 >
-                    <div className="mx-auto max-w-2xl px-4 pb-4 pt-14">
+                    <div className="mx-auto max-w-2xl px-4 py-4">
                         {loading ? (
                             <div className="flex h-96 items-center justify-center text-muted-foreground">
-                                <div className="text-center">
-                                    <p>Loading messages...</p>
-                                </div>
+                                <p>Loading messages...</p>
                             </div>
                         ) : messages.length === 0 ? (
                             <div className="flex h-96 items-center justify-center text-center text-muted-foreground">
@@ -254,25 +318,20 @@ export default function ChatView({
                 )}
             </div>
 
-            {/* Compose area — staged attachment tray (when any) above the row */}
-            <div className="bg-background px-4 py-3">
-                <form
-                    onSubmit={handleSubmit}
-                    onDrop={handleDrop}
-                    onDragOver={handleDragOver}
-                    className="mx-auto flex max-w-2xl flex-col gap-2"
-                >
-                    {pending && (
+            {/* Composer — staged attachment tray (when any) above the Messagebar */}
+            <div className="bg-background">
+                {pending && (
+                    <div className="px-3 pt-3">
                         <div
                             data-testid="compose-tray"
-                            className="flex items-center gap-3 rounded-lg border border-input bg-muted/40 p-2"
+                            className="flex items-center gap-3 rounded-xl bg-black/5 p-2 dark:bg-white/10"
                         >
                             {pending.isImage ? (
                                 <img
                                     data-testid="compose-thumb"
                                     src={pending.previewUrl}
                                     alt={pending.file.name}
-                                    className="size-16 rounded object-cover"
+                                    className="size-16 rounded-lg object-cover"
                                 />
                             ) : (
                                 <div
@@ -298,62 +357,29 @@ export default function ChatView({
                                 data-testid="compose-remove"
                                 aria-label="Remove attachment"
                                 onClick={() => onClearAttachment?.()}
-                                className="ml-auto rounded px-2 py-1 text-sm hover:bg-accent"
+                                className="ml-auto flex size-8 items-center justify-center rounded-full hover:bg-black/10 dark:hover:bg-white/10"
                             >
-                                ✕
+                                <X className="size-4" />
                             </button>
                         </div>
-                    )}
-                    <div className="flex gap-2">
-                        {onAttach && (
-                            <label
-                                data-testid="attach-button"
-                                aria-label="Attach file"
-                                aria-disabled={inputsDisabled}
-                                className={`rounded border border-input px-3 py-2 text-sm hover:bg-accent ${
-                                    inputsDisabled
-                                        ? 'pointer-events-none opacity-50'
-                                        : 'cursor-pointer'
-                                }`}
-                            >
-                                📎
-                                <input
-                                    type="file"
-                                    className="hidden"
-                                    disabled={inputsDisabled}
-                                    onChange={(e) => {
-                                        const f = e.target.files?.[0];
-                                        if (f) onAttach(f);
-                                        e.target.value = '';
-                                    }}
-                                />
-                            </label>
-                        )}
-                        <input
-                            type="text"
-                            data-testid="message-input"
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                            onPaste={handlePaste}
-                            placeholder={
-                                pending
-                                    ? 'Add a caption…'
-                                    : online
-                                      ? 'Type a message...'
-                                      : 'You are offline'
-                            }
-                            className="flex-1 rounded border border-input bg-background px-3 py-2 text-sm focus:border-ring focus:outline-none"
-                        />
-                        <button
-                            type="submit"
-                            disabled={!canSend}
-                            className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-                        >
-                            {sending ? 'Sending...' : 'Send'}
-                        </button>
                     </div>
-                </form>
+                )}
+                <Messagebar
+                    className="relative!"
+                    value={inputValue}
+                    placeholder={placeholder}
+                    textareaId="message-input"
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        setInputValue(e.target.value)
+                    }
+                    onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    left={attachControl}
+                    right={sendControl}
+                />
             </div>
-        </Layout>
+        </Page>
     );
 }

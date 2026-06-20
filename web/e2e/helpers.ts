@@ -226,7 +226,7 @@ export async function sendMedia(
         timeout: 15_000,
     });
     if (caption !== undefined) {
-        await page.getByTestId('message-input').fill(caption);
+        await page.locator('#message-input').fill(caption);
     }
     const send = page.getByRole('button', { name: 'Send' });
     await expect(send).toBeEnabled({ timeout: 15_000 });

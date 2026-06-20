@@ -31,7 +31,7 @@ test.describe('Compose tray', () => {
         // the constructor). This drives ChatView's onPaste exactly like a real
         // screenshot paste.
         const b64 = readFileSync(PHOTO).toString('base64');
-        const input = alice.getByTestId('message-input');
+        const input = alice.locator('#message-input');
         await input.click();
         await input.evaluate((el, data) => {
             const bin = atob(data);

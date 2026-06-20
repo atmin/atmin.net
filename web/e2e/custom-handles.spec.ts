@@ -127,11 +127,12 @@ test.describe('Custom handles', () => {
     }) => {
         await registerUserWithPassword(page, E2E_PASSWORD, 'saved-tester-1');
         await page.goto('/saved');
-        // Saved Messages renders the chat input — same component, just with
+        // Saved Messages renders the chat composer — same component, just with
         // a self-conversation. The 404 element would render a "404" heading
-        // instead, so the message input's presence is a sufficient probe.
+        // instead, so the composer's presence is a sufficient probe. (Tag-agnostic:
+        // the Konsta Messagebar is a textarea, not an input.)
         await expect(
-            page.locator('input[placeholder="Type a message..."]'),
+            page.getByPlaceholder('Type a message...'),
         ).toBeVisible({ timeout: 15_000 });
     });
 

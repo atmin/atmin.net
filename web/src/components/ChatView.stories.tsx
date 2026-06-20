@@ -5,8 +5,10 @@ import ChatView from './ChatView';
 const meta = {
     title: 'Chat/ChatView',
     component: ChatView,
+    parameters: { layout: 'fullscreen' },
     args: {
         onSend: fn(),
+        onBack: fn(),
         encryptionReady: true,
         online: true,
         inputValue: '',

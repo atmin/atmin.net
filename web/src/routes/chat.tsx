@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ChatView from '@/components/ChatView';
 import { useChat } from '@/hooks/useChat';
 import { useChatAmendments } from '@/hooks/useChatAmendments';
@@ -59,11 +60,16 @@ export default function ChatRoute({
     const [inputValue, setInputValue] = useDraft(handle ?? '');
     const compose = useComposeAttachment();
 
+    // Plain navigate for back — directional/reverse View Transitions are the
+    // parked data-router task (ADR-0023), so no animation on the way back.
+    const navigate = useNavigate();
+
     return (
         <ChatView
             chatTitle={chatTitle}
             isSaved={handle === 'saved'}
             handle={handle}
+            onBack={() => navigate('/')}
             messages={messages}
             loading={loading}
             sending={sending}
