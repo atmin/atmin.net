@@ -309,3 +309,11 @@ keys/bob01/live/S1             ← Bob's own session key
   "jump to latest" indicator. A long chat (≥20 messages) re-opened from
   the chats list still opens scrolled to the bottom — the oldest message
   must be out of view.
+- The timeline carries a date divider (`day-separator`) before the first
+  message of each viewer-local calendar day. A conversation sent entirely
+  now shows exactly one divider, labelled **Today**. The remaining label
+  buckets — **Yesterday**, **D MMMM** (this year), **D MMMM YYYY** (earlier
+  year) — are pure date arithmetic and are specified deterministically by
+  `web/src/lib/timeline.test.ts` and visually by the `WithDaySeparators`
+  Storybook story, since a live send can't be back-dated without faking the
+  client clock.

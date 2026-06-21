@@ -95,6 +95,66 @@ export const WithMessages: Story = {
     },
 };
 
+// Day-dividers across a multi-day timeline. Timestamps are anchored relative to
+// render time so the labels always read Today / Yesterday / an older date no
+// matter when the story is opened (the divider label is viewer-local + relative
+// to now). Verifies the "<date>" / "Yesterday" / "Today" buckets in one frame
+// and in both ios/material × light/dark.
+const DAY = 86_400_000;
+const at = (daysAgo: number, hh: number, mm: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    d.setHours(hh, mm, 0, 0);
+    return d;
+};
+export const WithDaySeparators: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        messages: [
+            {
+                id: '1',
+                text: 'Way back when we first set this up.',
+                timestamp: new Date(Date.now() - 400 * DAY), // earlier year
+                sent: false,
+            },
+            {
+                id: '2',
+                text: 'A note from a few days ago.',
+                timestamp: at(4, 9, 15), // this year, dated label
+                sent: true,
+            },
+            {
+                id: '3',
+                text: 'Did you see the deploy went out?',
+                timestamp: at(1, 18, 30), // yesterday
+                sent: false,
+            },
+            {
+                id: '4',
+                text: 'Yep — green across the board.',
+                timestamp: at(1, 18, 32), // still yesterday, no new divider
+                sent: true,
+            },
+            {
+                id: '5',
+                text: 'Morning! Starting on the revamp today.',
+                timestamp: at(0, 8, 5), // today
+                sent: false,
+            },
+            {
+                id: '6',
+                text: 'The date dividers look great.',
+                timestamp: at(0, 8, 10), // still today, no new divider
+                sent: true,
+            },
+        ],
+        loading: false,
+        sending: false,
+    },
+};
+
 // A received message with newlines — the bubble must preserve them (whitespace-
 // pre-wrap), now that the composer can produce multi-line sends.
 export const WithMultilineMessage: Story = {

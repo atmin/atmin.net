@@ -1,6 +1,7 @@
 import {
     Messagebar,
     Messages,
+    MessagesTitle,
     Navbar,
     NavbarBackLink,
     Page,
@@ -13,10 +14,11 @@ import {
     SendHorizontal,
     X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { Message } from '@/hooks/useChat';
 import type { PendingAttachment } from '@/hooks/useComposeAttachment';
 import type { MediaState } from '@/hooks/useMedia';
+import { dayKey, dayLabel } from '@/lib/timeline';
 import { formatBytes } from '@/lib/utils';
 import ChatMessage from './ChatMessage';
 import { JumpToBottomButton } from './JumpToBottomButton';
@@ -103,6 +105,10 @@ export default function ChatView({
 
     const editing = editingId !== null;
     const inputsDisabled = sending || !encryptionReady || !online;
+    // Reference point for the timeline day-dividers ("Today" / "Yesterday" / a
+    // date). Read once per render — recomputing in the map would be the same
+    // wall-clock for every row anyway.
+    const now = new Date();
     // Editing commits a text amendment; composing sends text OR a staged image
     // (a caption-less image is a valid send).
     const canSend = editing
@@ -290,44 +296,69 @@ export default function ChatView({
                             </div>
                         ) : (
                             <Messages className="mb-2! bg-transparent">
-                                {messages.map((msg) => {
+                                {messages.map((msg, i) => {
                                     // Own, non-deleted messages can be amended
                                     // via the action sheet (lifted to ChatView).
                                     const canAmend =
                                         msg.sent &&
                                         !msg.deleted &&
                                         !!onDeleteMessage;
+                                    // A divider precedes the first message of
+                                    // each local calendar day. messages are
+                                    // ordered oldest→newest, so compare against
+                                    // the previous row's day (the first row
+                                    // always opens a day). Plain in-map
+                                    // derivation — no lifecycle hook.
+                                    const prev = messages[i - 1];
+                                    const newDay =
+                                        !prev ||
+                                        dayKey(msg.timestamp) !==
+                                            dayKey(prev.timestamp);
                                     return (
-                                        <ChatMessage
-                                            key={msg.id}
-                                            text={msg.text}
-                                            timestamp={msg.timestamp}
-                                            sent={msg.sent}
-                                            media={msg.media}
-                                            mediaState={
-                                                msg.media
-                                                    ? mediaStates[
-                                                          msg.media.preview
-                                                              ?.url ??
+                                        <Fragment key={msg.id}>
+                                            {newDay && (
+                                                <MessagesTitle data-testid="day-separator">
+                                                    {dayLabel(
+                                                        msg.timestamp,
+                                                        now,
+                                                    )}
+                                                </MessagesTitle>
+                                            )}
+                                            <ChatMessage
+                                                text={msg.text}
+                                                timestamp={msg.timestamp}
+                                                sent={msg.sent}
+                                                media={msg.media}
+                                                mediaState={
+                                                    msg.media
+                                                        ? mediaStates[
+                                                              msg.media.preview
+                                                                  ?.url ??
+                                                                  msg.media.url
+                                                          ]
+                                                        : undefined
+                                                }
+                                                mediaFullState={
+                                                    msg.media
+                                                        ? mediaStates[
                                                               msg.media.url
-                                                      ]
-                                                    : undefined
-                                            }
-                                            mediaFullState={
-                                                msg.media
-                                                    ? mediaStates[msg.media.url]
-                                                    : undefined
-                                            }
-                                            onMediaRequest={onMediaRequest}
-                                            mediaObserve={mediaObserve}
-                                            editedAt={msg.editedAt}
-                                            deleted={msg.deleted}
-                                            onRequestActions={
-                                                canAmend
-                                                    ? () => setActionsId(msg.id)
-                                                    : undefined
-                                            }
-                                        />
+                                                          ]
+                                                        : undefined
+                                                }
+                                                onMediaRequest={onMediaRequest}
+                                                mediaObserve={mediaObserve}
+                                                editedAt={msg.editedAt}
+                                                deleted={msg.deleted}
+                                                onRequestActions={
+                                                    canAmend
+                                                        ? () =>
+                                                              setActionsId(
+                                                                  msg.id,
+                                                              )
+                                                        : undefined
+                                                }
+                                            />
+                                        </Fragment>
                                     );
                                 })}
                             </Messages>

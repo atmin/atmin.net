@@ -5,8 +5,6 @@ The **frontier** — active and upcoming work, one line each. A task earns a
 *shipped* is recorded in the diary, [docs/releases/](../docs/releases/) — keep
 this file forward-looking, never a changelog.
 
-- **[date-separators](date-separators.md)** — Today/Yesterday timeline dividers;
-  the last **v0.2** task before cutting `v0.2.0`.
 - **Group chats** — membership + rekey (Megolm is already a group ratchet);
   needs an ADR, **v0.3**. Pairs with
   [ADR-0024](../docs/decisions/adr-0024-chat-url-fragments.md) (fragment rooms).

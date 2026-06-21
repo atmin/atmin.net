@@ -48,6 +48,13 @@ test.describe('First Conversation', () => {
         await expect(alice.getByText('Hey Bob')).toBeInViewport();
         await expect(alice.getByTestId('jump-to-bottom')).toBeHidden();
 
+        // ── A single "Today" divider heads the timeline ─────────────
+        // Both messages were sent now, so they share one calendar day:
+        // exactly one separator, labelled "Today" (strict-mode single
+        // match also proves a same-day chat shows no spurious dividers).
+        await expect(alice.getByTestId('day-separator')).toHaveText('Today');
+        await expect(bob.getByTestId('day-separator')).toHaveText('Today');
+
         // ── Cleanup ──────────────────────────────────────────────
         await aliceContext.close();
         await bobContext.close();
