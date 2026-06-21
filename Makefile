@@ -3,6 +3,7 @@ DOCKER ?= docker
 .PHONY: all build test lint fmt clean dev run e2e e2e-local install
 .PHONY: server-test server-lint server-fmt server-build
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
+.PHONY: icons
 .PHONY: up down
 
 # --- Setup ---
@@ -85,6 +86,23 @@ web-storybook:
 
 web-fmt:
 	cd web && pnpm lint:fix
+
+# --- Branding ---
+
+FAVICON := web/public/favicon.svg
+# Flatten onto white (matches the manifest background_color) and pad the 100×100
+# page by 13 units each side so the full-bleed mark clears the maskable crop.
+ICON_EXPORT := --export-area=-13:-13:113:113 --export-background=white --export-background-opacity=1
+
+# Regenerate the PWA raster icons from favicon.svg — the single source of truth
+# for the logo (web/src/components/Logo.tsx shares the same path). Re-run after
+# editing favicon.svg.
+icons:
+	@command -v inkscape >/dev/null 2>&1 || { echo "ERROR: inkscape not found — install https://inkscape.org/ and re-run 'make icons'."; exit 1; }
+	inkscape $(FAVICON) -o web/public/icons/icon-512.png        -w 512 -h 512 $(ICON_EXPORT)
+	inkscape $(FAVICON) -o web/public/icons/icon-192.png        -w 192 -h 192 $(ICON_EXPORT)
+	inkscape $(FAVICON) -o web/public/icons/apple-touch-icon.png -w 180 -h 180 $(ICON_EXPORT)
+	@echo "Regenerated PWA icons from $(FAVICON). If the artwork changed, sync the <path> in web/src/components/Logo.tsx too."
 
 # --- Dev (all-in-one) ---
 

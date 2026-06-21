@@ -2,42 +2,19 @@ interface Props {
     className?: string;
 }
 
+// Brand mark — path copied from web/public/favicon.svg, the single source of
+// truth (`make icons` regenerates the PWA rasters from it). currentColor so the
+// mark themes; the favicon itself stays black-filled for the browser tab.
 export default function Logo({ className }: Props) {
     return (
         <svg
-            viewBox="6 12 92 77"
-            fill="none"
-            stroke="currentColor"
+            viewBox="0 0 100 100"
+            fill="currentColor"
             className={className}
             xmlns="http://www.w3.org/2000/svg"
         >
             <title>atmin.net logo</title>
-            <path
-                strokeWidth="5"
-                strokeLinejoin="round"
-                d="m 44.344,17.038 c -18.404,0 -33.324,14.92 -33.324,33.324 -0.001,18.405 14.919,33.326 33.324,33.326 9.662,0 13.399,-1.549 22.348,-8.363 6.331,7.355 8.657,9.047 26.826,8.36 -11.684,-7.889 -19.089,-6.848 -16.429,-31.034 2.304,-20.953 -14.503,-35.614 -32.745,-35.613 z"
-            />
-            <circle
-                cx="34.22"
-                cy="61.12"
-                r="4"
-                fill="currentColor"
-                stroke="none"
-            />
-            <circle
-                cx="45.24"
-                cy="61.12"
-                r="4"
-                fill="currentColor"
-                stroke="none"
-            />
-            <circle
-                cx="56.26"
-                cy="61.12"
-                r="4"
-                fill="currentColor"
-                stroke="none"
-            />
+            <path d="M 66,35 C 65,42 63,48 63,55 61,65 79,67 82,46 89,7 15,4 17,54 16,84 55,93 84,75 79,81 65,92 41,89 14,85 4,60 12,36 31,-9 104,8 87,54 80,73 57,72 56.5,59 53,65 48,69 40,67.5 26,65 31,19 66,35 Z m -13,3 C 46,37 42,44.5 41,51 38,80 68,39 53,38 Z" />
         </svg>
     );
 }
