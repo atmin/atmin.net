@@ -18,7 +18,7 @@
  *   browsing (ADR-0022 §7). Best-effort — a miss re-fetches from S3.
  */
 
-import { isAmendment } from './payload';
+import { isAmendment, parseInner } from './payload';
 
 const DB_NAME = 'atmin';
 const DB_VERSION = 9;
@@ -388,6 +388,146 @@ export function deleteDatabase(): Promise<void> {
 
 // ── Message storage ─────────────────────────────────────────────────
 
+/**
+ * Recompute a conversation's preview + sort timestamp from its full message
+ * history, applying edit/delete amendments the same way the chat materializer
+ * does (ADR-0014, `toMessages` in hooks/useChat). Returns the materialized
+ * latest *surviving* message's stored plaintext and timestamp.
+ *
+ * The summary tracks the latest surviving message, not the latest amendment, so
+ * this never advances the sort timestamp past an existing message: amending an
+ * *older* message yields the same summary the conversation already had (caller
+ * skips the write, no reorder), while deleting the latest message falls the
+ * preview back to the previous survivor and editing it updates the preview text
+ * in place. Returns null when the conversation has no originals at all (orphan
+ * amendments only). When every original is deleted, returns an empty preview but
+ * keeps the latest original's timestamp so the row holds its place.
+ */
+function summarizeConversation(
+    msgs: StoredMessage[],
+): { lastMessageText: string; lastMessageTimestamp: number } | null {
+    const amendmentsByTarget = new Map<string, StoredMessage[]>();
+    const originals: StoredMessage[] = [];
+    for (const m of msgs) {
+        const p = parseInner(m.text);
+        if (p.kind === 'amendment') {
+            const list = amendmentsByTarget.get(p.targetMsgId) ?? [];
+            list.push(m);
+            amendmentsByTarget.set(p.targetMsgId, list);
+        } else if (p.kind !== 'unknown') {
+            originals.push(m);
+        }
+    }
+    if (originals.length === 0) return null;
+
+    let best: { text: string; ts: number } | null = null;
+    let latestTs = 0; // fallback position when every message is deleted
+    for (const m of originals) {
+        latestTs = Math.max(latestTs, m.timestamp);
+        const orig = parseInner(m.text);
+        let deleted = false;
+        let editedBody: string | undefined;
+        const chain = (amendmentsByTarget.get(m.id) ?? [])
+            .slice()
+            .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        for (const am of chain) {
+            const a = parseInner(am.text);
+            if (a.kind !== 'amendment') continue;
+            if (am.fromUser !== m.fromUser) continue; // authorization
+            if (a.action === 'delete') {
+                deleted = true;
+                break; // terminal — delete trumps later amendments
+            }
+            // Edits only move a text message's preview; a media message's
+            // preview stays its <photo>/<file> placeholder (caption-agnostic).
+            if (
+                a.action === 'edit' &&
+                a.body !== undefined &&
+                orig.kind === 'text'
+            ) {
+                editedBody = a.body; // last edit in the chain wins
+            }
+        }
+        if (deleted) continue;
+        const text =
+            editedBody !== undefined
+                ? JSON.stringify({ type: 'text', body: editedBody })
+                : m.text;
+        if (!best || m.timestamp > best.ts) best = { text, ts: m.timestamp };
+    }
+
+    return best
+        ? { lastMessageText: best.text, lastMessageTimestamp: best.ts }
+        : { lastMessageText: '', lastMessageTimestamp: latestTs };
+}
+
+/**
+ * After a batch of amendments lands, recompute the summary of each affected
+ * conversation so a deleted/edited *latest* message no longer shows stale
+ * preview text in the chat list. Runs only on the amendment path, so normal
+ * sends/receives keep their cheap additive summary update. messageCount is
+ * carried through unchanged (amendments never change the count).
+ */
+async function recomputeAmendedSummaries(
+    database: IDBDatabase,
+    userId: string,
+    convIds: Set<string>,
+): Promise<void> {
+    // Read all of the user's messages once + the current summaries (readonly).
+    const txR = database.transaction(
+        [MESSAGES_STORE, CONVERSATIONS_STORE],
+        'readonly',
+    );
+    const allMsgs = await awaitReq<StoredMessage[]>(
+        txR
+            .objectStore(MESSAGES_STORE)
+            .index('userId')
+            .getAll(IDBKeyRange.only(userId)),
+    );
+    const currentByID = new Map<string, StoredConversation>();
+    for (const convId of convIds) {
+        const c = await awaitReq<StoredConversation | undefined>(
+            txR.objectStore(CONVERSATIONS_STORE).get(convId),
+        );
+        if (c) currentByID.set(convId, c);
+    }
+    await awaitTx(txR);
+
+    const byConv = new Map<string, StoredMessage[]>();
+    for (const m of allMsgs) {
+        if (!convIds.has(m.conversationId)) continue;
+        const list = byConv.get(m.conversationId) ?? [];
+        list.push(m);
+        byConv.set(m.conversationId, list);
+    }
+
+    const writes: StoredConversation[] = [];
+    for (const convId of convIds) {
+        const current = currentByID.get(convId);
+        if (!current) continue; // no summary yet → nothing to correct
+        const summary = summarizeConversation(byConv.get(convId) ?? []);
+        if (!summary) continue; // no originals → leave the summary untouched
+        if (
+            summary.lastMessageText === current.lastMessageText &&
+            summary.lastMessageTimestamp === current.lastMessageTimestamp
+        ) {
+            continue; // amended an older message → no change, no reorder
+        }
+        writes.push({
+            conversationId: convId,
+            lastMessageText: summary.lastMessageText,
+            lastMessageTimestamp: summary.lastMessageTimestamp,
+            messageCount: current.messageCount,
+        });
+    }
+    if (writes.length === 0) return;
+
+    const txW = database.transaction(CONVERSATIONS_STORE, 'readwrite');
+    const store = txW.objectStore(CONVERSATIONS_STORE);
+    for (const w of writes) store.put(w);
+    return awaitTx(txW);
+}
+
 export async function saveMessages(
     userId: string,
     messages: Array<{
@@ -408,12 +548,20 @@ export async function saveMessages(
         string,
         { text: string; ts: number; count: number }
     >();
+    // Conversations that received an amendment in this batch — their latest
+    // message may have changed (delete/edit), so their summary is recomputed
+    // from full history after the writes land (see recomputeAmendedSummaries).
+    const amendedConvs = new Set<string>();
 
     for (const msg of messages) {
         // Amendments (edit/delete) are stored, but must not bump a
-        // conversation's preview/timestamp/count — editing an old message
-        // should not reorder the chat list. They are still written below.
-        if (isAmendment(msg.text)) continue;
+        // conversation's timestamp/count — amending an old message should not
+        // reorder the chat list. They are still written below, and the affected
+        // conversation's preview is reconciled in the recompute pass.
+        if (isAmendment(msg.text)) {
+            amendedConvs.add(msg.conversationId);
+            continue;
+        }
         const ts = msg.timestamp.getTime();
         const prev = convUpdates.get(msg.conversationId);
         if (!prev || ts > prev.ts) {
@@ -476,7 +624,13 @@ export async function saveMessages(
         } satisfies StoredConversation);
     }
 
-    return awaitTx(tx2);
+    await awaitTx(tx2);
+
+    // Reconcile conversations whose latest message was edited/deleted, so the
+    // chat list never shows a deleted message as the last message.
+    if (amendedConvs.size > 0) {
+        await recomputeAmendedSummaries(database, userId, amendedConvs);
+    }
 }
 
 export async function loadMessages(userId: string): Promise<StoredMessage[]> {

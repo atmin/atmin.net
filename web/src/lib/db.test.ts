@@ -327,7 +327,7 @@ describe('db - Conversations', () => {
         expect(convs[0].messageCount).toBe(3);
     });
 
-    it('amendments do not bump the conversation summary', async () => {
+    it('editing the latest message updates its preview without reordering', async () => {
         await saveMessages(userId, [
             {
                 id: 'msg-1',
@@ -339,7 +339,8 @@ describe('db - Conversations', () => {
             },
         ]);
 
-        // A later edit amendment must not change the preview, timestamp, or count.
+        // Editing the latest message updates the preview text, but the sort
+        // timestamp (and count) stay put — an amendment never bumps a chat.
         await saveMessages(userId, [
             {
                 id: 'msg-2',
@@ -359,13 +360,143 @@ describe('db - Conversations', () => {
         const convs = await loadConversations();
         expect(convs).toHaveLength(1);
         expect(convs[0].lastMessageText).toBe(
-            JSON.stringify({ type: 'text', body: 'original' }),
+            JSON.stringify({ type: 'text', body: 'edited' }),
         );
         expect(convs[0].lastMessageTimestamp).toBe(
             new Date('2024-01-01T10:00:00Z').getTime(),
         );
         // Count reflects only the original, not the amendment.
         expect(convs[0].messageCount).toBe(1);
+    });
+
+    it('deleting the latest message falls the preview back to the previous one', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'first' }),
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+            {
+                id: 'msg-2',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'second' }),
+                timestamp: new Date('2024-01-01T11:00:00Z'),
+            },
+        ]);
+
+        await saveMessages(userId, [
+            {
+                id: 'amd-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({
+                    type: 'amendment',
+                    target_msg_id: 'msg-2',
+                    action: 'delete',
+                }),
+                timestamp: new Date('2024-01-01T12:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        // Preview + sort time fall back to the surviving previous message.
+        expect(convs[0].lastMessageText).toBe(
+            JSON.stringify({ type: 'text', body: 'first' }),
+        );
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-01T10:00:00Z').getTime(),
+        );
+    });
+
+    it('deleting the only message empties the preview but keeps the row position', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'lonely' }),
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+        ]);
+
+        await saveMessages(userId, [
+            {
+                id: 'amd-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({
+                    type: 'amendment',
+                    target_msg_id: 'msg-1',
+                    action: 'delete',
+                }),
+                timestamp: new Date('2024-01-01T11:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        expect(convs[0].lastMessageText).toBe('');
+        // Position preserved via the deleted message's original timestamp.
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-01T10:00:00Z').getTime(),
+        );
+    });
+
+    it('amending an older message leaves the summary unchanged', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'first' }),
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+            {
+                id: 'msg-2',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'second' }),
+                timestamp: new Date('2024-01-01T11:00:00Z'),
+            },
+        ]);
+
+        // Delete the OLDER message — the latest is untouched, so the preview,
+        // sort time, and count must all stay exactly as they were.
+        await saveMessages(userId, [
+            {
+                id: 'amd-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({
+                    type: 'amendment',
+                    target_msg_id: 'msg-1',
+                    action: 'delete',
+                }),
+                timestamp: new Date('2024-01-01T12:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        expect(convs[0].lastMessageText).toBe(
+            JSON.stringify({ type: 'text', body: 'second' }),
+        );
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-01T11:00:00Z').getTime(),
+        );
+        expect(convs[0].messageCount).toBe(2);
     });
 
     it('returns empty array when no conversations exist', async () => {

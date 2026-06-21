@@ -18,7 +18,11 @@ import { messagePreview } from '@/lib/payload';
 // Conversation-list preview: a typed payload reduced to one line (or "<photo>"),
 // clamped so a long body never wraps past a single row.
 function Preview({ text }: { text: string }) {
-    return <span className="line-clamp-1">{messagePreview(text)}</span>;
+    return (
+        <span className="line-clamp-1" data-testid="conversation-preview">
+            {messagePreview(text)}
+        </span>
+    );
 }
 
 function timeAgo(ts: number): string {

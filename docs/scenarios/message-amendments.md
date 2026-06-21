@@ -97,8 +97,14 @@ downloaded the blob sees `404 → unavailable`.
   context and being honest about the redaction.
 - Editing opens an inline input pre-filled with the current body; only one
   message edits at a time. Pure-media messages (no caption) expose only Delete.
-- Amendments never bump a conversation in the chat list (no preview/timestamp/
-  count change) — editing an old message must not reorder conversations.
+- Amendments never **reorder** a conversation in the chat list — the sort
+  timestamp only advances on a genuinely new message, so editing or deleting any
+  message keeps the conversation in place (it never jumps to the top). The list
+  preview always reflects the materialized *latest* message, though: editing the
+  latest message updates its preview text, and deleting the latest message falls
+  the preview (and sort position) back to the previous surviving message. If
+  every message in a conversation is deleted the preview is empty and the row
+  holds its place. Amending an *older* message changes nothing in the list.
 
 ## What to test
 
@@ -113,3 +119,6 @@ downloaded the blob sees `404 → unavailable`.
 - Authorization: an amendment whose `from_user` differs from the original's is
   ignored (materializer-level defensive check).
 - Media delete: the bubble becomes `[deleted]` and the underlying blob is gone.
+- Chat-list preview: deleting the latest message in a conversation drops it from
+  the list preview (falling back to the previous message, or empty if it was the
+  only one); the conversation does not jump to the top on any amendment.

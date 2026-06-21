@@ -317,6 +317,28 @@ export async function waitForDeleted(
 }
 
 /**
+ * Return to the conversation list and wait for it to render.
+ */
+export async function gotoChatList(page: Page): Promise<void> {
+    await page.goto('/');
+    await waitForChatList(page, 15_000);
+}
+
+/**
+ * Assert the chat-list preview for the conversation with `handle` reads `text`.
+ * Each row is a Konsta ListItem (`<li>`) titled with the peer handle; its
+ * one-line preview carries the `conversation-preview` testid.
+ */
+export async function expectConversationPreview(
+    page: Page,
+    handle: string,
+    text: string,
+): Promise<void> {
+    const row = page.locator('li').filter({ hasText: handle });
+    await expect(row.getByTestId('conversation-preview')).toHaveText(text);
+}
+
+/**
  * Read Megolm session state from IndexedDB.
  */
 export async function getMegolmState(page: Page) {

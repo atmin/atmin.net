@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 import {
     deleteMessage,
     editMessage,
+    expectConversationPreview,
     getMessageCount,
+    gotoChatList,
     loginUser,
     openChat,
     registerUserWithPassword,
@@ -50,6 +52,36 @@ test.describe('Message amendments', () => {
         await waitForDeleted(bob);
         // Still one bubble — the placeholder occupies the original's slot.
         expect(await getMessageCount(bob)).toBe(1);
+
+        await aliceCtx.close();
+        await bobCtx.close();
+    });
+
+    test('deleting the latest message updates the chat-list preview', async ({
+        browser,
+    }) => {
+        const aliceCtx = await browser.newContext();
+        const bobCtx = await browser.newContext();
+        const alice = await aliceCtx.newPage();
+        const bob = await bobCtx.newPage();
+
+        const { handle: aliceHandle } = await registerUserWithPassword(alice);
+        const { handle: bobHandle } = await registerUserWithPassword(bob);
+
+        // Alice sends two messages; Bob's row preview shows the latest.
+        await openChat(alice, bobHandle);
+        await sendMessage(alice, 'first');
+        await sendMessage(alice, 'second');
+        await gotoChatList(alice);
+        await expectConversationPreview(alice, bobHandle, 'second');
+
+        // Alice deletes the latest message — the preview must fall back to the
+        // previous one, not keep showing the deleted message.
+        await openChat(alice, bobHandle);
+        await deleteMessage(alice, 'second');
+        await waitForDeleted(alice);
+        await gotoChatList(alice);
+        await expectConversationPreview(alice, bobHandle, 'first');
 
         await aliceCtx.close();
         await bobCtx.close();
