@@ -16,11 +16,12 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 │   └── .storybook/   Visual spec for components/
 ├── docs/
 │   ├── vision.md         Goals, non-goals, threat model
-│   ├── specs/            Milestone specs — source of truth for protocol/API/storage (mvp-v0.1 shipped; v0.2 draft. Milestones from v0.2 on are named for the minor they ship as — see ADR-0017)
+│   ├── specs/            Milestone specs — source of truth for protocol/API/storage (mvp-v0.1 shipped; v0.2 locked = UI revamp; v0.3 draft. Milestones from v0.2 on are named for the minor they ship as — see ADR-0017)
 │   ├── decisions/        ADRs — *why* a decision was made (immutable, append-only)
 │   ├── scenarios/        Step-by-step user flows (e2e specs) and system invariants (invariants/)
+│   ├── releases/         The diary — what shipped per milestone, when, at what cost (past tense)
 │   └── evolution/        Speculative future work, not commitments
-├── tasks/            Active TODOs with spec ↔ current ↔ change ↔ verify sections
+├── tasks/            The frontier — active/upcoming TODOs (spec ↔ current ↔ change ↔ verify); deleted once landed
 ├── src-tauri/        Native desktop wrapper (ADR-0009)
 ├── scripts/          Repo-wide scripts (e.g. pre-commit hook)
 ├── Makefile          Single source of truth for every command (CI calls these)
@@ -205,7 +206,8 @@ Full schema and lifecycle: `docs/specs/mvp-v0.1.md`.
 - **Scenarios** double as e2e specs. New user-facing flow → new scenario file → matching `web/e2e/*.spec.ts`.
 - **Invariants** describe what must hold under adverse conditions (faults, retries, concurrency). One file per invariant under `docs/scenarios/invariants/`, indexed by [`invariants/README.md`](docs/scenarios/invariants/README.md). New invariant → row in the README prioritisation table → a new `i{N}-<name>.md` using the Statement / Fault construction / Assertions / Permitted divergence template → `web/e2e/invariants/<name>.spec.ts`. See the "Adding a new invariant" checklist in the index.
 - **Evolution notes** are deliberately speculative; nothing in `docs/evolution/` is a commitment. Don't reference an evolution note as if it were a spec.
-- **Tasks** in `tasks/` are intent-to-implement docs. They get deleted once landed. Use the `Spec → Current → Change → Verify` template the existing files use. Keep `tasks/README.md` in sync: update it when adding a task, deleting a landed one, or changing priority order.
+- **Tasks** in `tasks/` are intent-to-implement docs — the *frontier*. They get deleted once landed. Use the `Spec → Current → Change → Verify` template the existing files use. Keep `tasks/README.md` a forward-looking one-line-per-item list (active/upcoming/parked); **never let it accrete "T1 landed…" changelog prose** — that belongs in the diary.
+- **Releases** in `docs/releases/` are the *diary*: a past-tense record of what shipped per milestone (`v0.N.md`, patches as subsections), with highlights and bundle/cost deltas. Append-only after a tag; a file may exist before its tag is cut. This is where landed-work narrative lives — not in specs (current-state) or tasks (frontier). The automated changelog/cut process is still open in [ADR-0017](docs/decisions/adr-0017-versioning-and-releases.md).
 
 Reference style:
 - Mermaid diagrams for sequence flows in scenarios.

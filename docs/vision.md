@@ -89,13 +89,18 @@ OS-level device lock (PIN, biometrics) is the first line of defense — not the 
   (Megolm + ECIES), S3 inbox sync, media, password credentials
   (Argon2id) with change-password rotation, user-chosen handles,
   message edit/delete, account deletion, server-side cleanup, and
-  storage-usage visibility. Detailed in
-  [specs/mvp-v0.1.md](specs/mvp-v0.1.md). Nearly complete — remaining
-  work tracked in [tasks/](../tasks/README.md).
-- **v0.2** — group chats, background delivery, reach, and a UX refresh.
-  Group conversations (the headline, sketched), background delivery and
-  iOS reach (both via native apps), message-list virtualization, a
-  UX pass (polish, simplification, a time-aware timeline, broader
-  theming), history export, and (still firming up) opt-in discovery,
-  better abuse controls, and optional realtime hints. Drafted in
-  [specs/v0.2.md](specs/v0.2.md); scope iterates.
+  storage-usage visibility. Complete and frozen — detailed in
+  [specs/mvp-v0.1.md](specs/mvp-v0.1.md).
+- **v0.2 — the UI revamp.** Every screen rebuilt on a native-feel
+  component system (Konsta UI, motion via View Transitions), the
+  single-image media quality suite (optimized send, EXIF strip,
+  previews, offline cache), a memory-hard registration proof-of-work,
+  and a time-aware timeline. A meaningful, non-big-bang release.
+  Locked in [specs/v0.2.md](specs/v0.2.md).
+- **v0.3 — group chats & data portability.** Group conversations (the
+  headline; Megolm already a group ratchet, the hard parts are
+  membership + rekey) with fragment-addressed rooms, multipart-media
+  albums, history export/import, broader theming, and (still firming
+  up) opt-in discovery, rate-limiting, and realtime hints. Drafted in
+  [specs/v0.3.md](specs/v0.3.md); scope iterates. Background delivery
+  and iOS reach remain on the native-apps track.

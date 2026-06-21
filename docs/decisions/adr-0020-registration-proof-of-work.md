@@ -1,7 +1,7 @@
 # ADR-0020 — Registration proof-of-work (memory-hard)
 
 **Date:** 2026-06-12
-**Status:** Accepted (implementation pending). Supersedes [ADR-0007](./adr-0007-registration-abuse-prevention.md).
+**Status:** Accepted — implemented & enforced (2026-06, `server/src/pow.rs`; ships in v0.2). Supersedes [ADR-0007](./adr-0007-registration-abuse-prevention.md).
 **Relates to:** [ADR-0001](./adr-0001-sync-first-s3-mailbox.md) (no PII), [ADR-0016](./adr-0016-server-enforced-kdf-floor.md) (the _credential_ KDF — distinct from this), [ADR-0019](./adr-0019-adopt-rust-backend.md) (single in-process backend), [ops.md](../ops.md) (EU-resident infrastructure), [evolution/telemetry-and-analytics.md](../evolution/telemetry-and-analytics.md) (registration-rate signal).
 
 ## Context
