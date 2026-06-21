@@ -100,11 +100,14 @@ downloaded the blob sees `404 → unavailable`.
 - Amendments never **reorder** a conversation in the chat list — the sort
   timestamp only advances on a genuinely new message, so editing or deleting any
   message keeps the conversation in place (it never jumps to the top). The list
-  preview always reflects the materialized *latest* message, though: editing the
-  latest message updates its preview text, and deleting the latest message falls
-  the preview (and sort position) back to the previous surviving message. If
-  every message in a conversation is deleted the preview is empty and the row
-  holds its place. Amending an *older* message changes nothing in the list.
+  preview mirrors the chat's *last bubble*: editing the latest message updates
+  its preview text, and deleting the latest message shows a muted `[deleted]`
+  placeholder (matching the in-chat bubble) in its slot — it does not resurrect
+  an earlier message. Amending an *older* message changes nothing in the list.
+- A conversation with an unsent **draft** previews that draft instead, prefixed
+  with a red `Draft:` (as other messengers do); the draft wins over the stored
+  last message until it is sent or cleared. Drafts are device-local
+  (`useDraft`/`useDrafts`, localStorage) — not synced, never reordering the row.
 
 ## What to test
 
@@ -119,6 +122,6 @@ downloaded the blob sees `404 → unavailable`.
 - Authorization: an amendment whose `from_user` differs from the original's is
   ignored (materializer-level defensive check).
 - Media delete: the bubble becomes `[deleted]` and the underlying blob is gone.
-- Chat-list preview: deleting the latest message in a conversation drops it from
-  the list preview (falling back to the previous message, or empty if it was the
-  only one); the conversation does not jump to the top on any amendment.
+- Chat-list preview: deleting the latest message shows `[deleted]` in the list
+  preview (mirroring the in-chat placeholder), keeping the row in place; the
+  conversation does not jump to the top on any amendment.

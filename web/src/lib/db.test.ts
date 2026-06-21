@@ -369,7 +369,7 @@ describe('db - Conversations', () => {
         expect(convs[0].messageCount).toBe(1);
     });
 
-    it('deleting the latest message falls the preview back to the previous one', async () => {
+    it('deleting the latest message marks the preview deleted, keeping its position', async () => {
         await saveMessages(userId, [
             {
                 id: 'msg-1',
@@ -406,16 +406,16 @@ describe('db - Conversations', () => {
 
         const convs = await loadConversations();
         expect(convs).toHaveLength(1);
-        // Preview + sort time fall back to the surviving previous message.
-        expect(convs[0].lastMessageText).toBe(
-            JSON.stringify({ type: 'text', body: 'first' }),
-        );
+        // The deleted message stays the latest bubble → "[deleted]" preview, in
+        // its own slot (not resurrecting the previous surviving message).
+        expect(convs[0].lastMessageText).toBe('');
+        expect(convs[0].lastMessageDeleted).toBe(true);
         expect(convs[0].lastMessageTimestamp).toBe(
-            new Date('2024-01-01T10:00:00Z').getTime(),
+            new Date('2024-01-01T11:00:00Z').getTime(),
         );
     });
 
-    it('deleting the only message empties the preview but keeps the row position', async () => {
+    it('deleting the only message marks it deleted but keeps the row position', async () => {
         await saveMessages(userId, [
             {
                 id: 'msg-1',
@@ -445,9 +445,59 @@ describe('db - Conversations', () => {
         const convs = await loadConversations();
         expect(convs).toHaveLength(1);
         expect(convs[0].lastMessageText).toBe('');
+        expect(convs[0].lastMessageDeleted).toBe(true);
         // Position preserved via the deleted message's original timestamp.
         expect(convs[0].lastMessageTimestamp).toBe(
             new Date('2024-01-01T10:00:00Z').getTime(),
+        );
+    });
+
+    it('a new message after a deleted latest clears the deleted flag', async () => {
+        await saveMessages(userId, [
+            {
+                id: 'msg-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'lonely' }),
+                timestamp: new Date('2024-01-01T10:00:00Z'),
+            },
+        ]);
+        await saveMessages(userId, [
+            {
+                id: 'amd-1',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({
+                    type: 'amendment',
+                    target_msg_id: 'msg-1',
+                    action: 'delete',
+                }),
+                timestamp: new Date('2024-01-01T11:00:00Z'),
+            },
+        ]);
+
+        // A genuinely new latest message resets the preview to a live one.
+        await saveMessages(userId, [
+            {
+                id: 'msg-2',
+                conversationId: convDm,
+                fromUser: 'other-user',
+                fromDevice: 'dev2',
+                text: JSON.stringify({ type: 'text', body: 'back again' }),
+                timestamp: new Date('2024-01-01T12:00:00Z'),
+            },
+        ]);
+
+        const convs = await loadConversations();
+        expect(convs).toHaveLength(1);
+        expect(convs[0].lastMessageText).toBe(
+            JSON.stringify({ type: 'text', body: 'back again' }),
+        );
+        expect(convs[0].lastMessageDeleted).toBe(false);
+        expect(convs[0].lastMessageTimestamp).toBe(
+            new Date('2024-01-01T12:00:00Z').getTime(),
         );
     });
 

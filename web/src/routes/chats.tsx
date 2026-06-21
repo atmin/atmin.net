@@ -1,5 +1,6 @@
 import ChatsView from '@/components/ChatsView';
 import { useConversations } from '@/hooks/useConversations';
+import { useDrafts } from '@/hooks/useDrafts';
 import { useViewTransitionNavigate } from '@/hooks/useViewTransitionNavigate';
 import type { Session } from '@/lib/auth';
 import type { SessionManager } from '@/lib/megolm-session';
@@ -12,6 +13,7 @@ interface Props {
 export default function ChatsRoute({ session, sessionManager }: Props) {
     const { conversations, contacts, displayNames, serverOk } =
         useConversations(session, sessionManager);
+    const drafts = useDrafts();
     // Drive forward View Transitions for list → chat / settings (ADR-0023).
     const onOpen = useViewTransitionNavigate();
 
@@ -21,6 +23,7 @@ export default function ChatsRoute({ session, sessionManager }: Props) {
             conversations={conversations}
             contacts={contacts}
             displayNames={displayNames}
+            drafts={drafts}
             userId={session.userId}
             onOpen={onOpen}
             onNewChat={(handle) =>

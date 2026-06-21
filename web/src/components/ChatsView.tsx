@@ -15,9 +15,37 @@ import { useState } from 'react';
 import type { StoredConversation } from '@/lib/db';
 import { messagePreview } from '@/lib/payload';
 
-// Conversation-list preview: a typed payload reduced to one line (or "<photo>"),
-// clamped so a long body never wraps past a single row.
-function Preview({ text }: { text: string }) {
+// Conversation-list preview, clamped to a single row. An unsent draft wins (red
+// "Draft:" prefix, as other messengers show); else a deleted latest message
+// renders a muted italic "[deleted]" mirroring the in-chat placeholder; else the
+// typed payload reduced to one line (or "<photo>").
+function Preview({
+    text,
+    deleted,
+    draft,
+}: {
+    text: string;
+    deleted?: boolean;
+    draft?: string;
+}) {
+    if (draft) {
+        return (
+            <span className="line-clamp-1" data-testid="conversation-preview">
+                <span className="text-destructive">Draft:</span>{' '}
+                {draft.replace(/\s+/g, ' ').trim()}
+            </span>
+        );
+    }
+    if (deleted) {
+        return (
+            <span
+                className="line-clamp-1 italic opacity-50"
+                data-testid="conversation-preview"
+            >
+                [deleted]
+            </span>
+        );
+    }
     return (
         <span className="line-clamp-1" data-testid="conversation-preview">
             {messagePreview(text)}
@@ -47,6 +75,8 @@ interface Props {
     conversations: StoredConversation[];
     contacts: Map<string, string>;
     displayNames: Map<string, string>;
+    /** Unsent drafts keyed by conversation handle ("saved" for Saved Messages). */
+    drafts?: Map<string, string>;
     userId: string;
     /** Navigate (forward View Transition) to a chat / settings route. */
     onOpen: (path: string) => void;
@@ -58,6 +88,7 @@ export default function ChatsView({
     conversations,
     contacts,
     displayNames,
+    drafts = new Map(),
     userId,
     onOpen,
     onNewChat,
@@ -84,6 +115,7 @@ export default function ChatsView({
     const savedConv = conversations.find((c) =>
         c.conversationId.startsWith('self:'),
     );
+    const savedDraft = drafts.get('saved');
     const dmConvs = conversations.filter(
         (c) => !c.conversationId.startsWith('self:'),
     );
@@ -149,8 +181,12 @@ export default function ChatsView({
                     link
                     title="Saved Messages"
                     subtitle={
-                        savedConv ? (
-                            <Preview text={savedConv.lastMessageText} />
+                        savedConv || savedDraft ? (
+                            <Preview
+                                text={savedConv?.lastMessageText ?? ''}
+                                deleted={savedConv?.lastMessageDeleted}
+                                draft={savedDraft}
+                            />
                         ) : (
                             'Your private notes'
                         )
@@ -171,7 +207,13 @@ export default function ChatsView({
                             key={conv.conversationId}
                             link
                             title={peerLabel(uid)}
-                            subtitle={<Preview text={conv.lastMessageText} />}
+                            subtitle={
+                                <Preview
+                                    text={conv.lastMessageText}
+                                    deleted={conv.lastMessageDeleted}
+                                    draft={drafts.get(h)}
+                                />
+                            }
                             after={timeAgo(conv.lastMessageTimestamp)}
                             media={avatar('💬')}
                             onClick={() => onOpen(`/@${encodeURIComponent(h)}`)}

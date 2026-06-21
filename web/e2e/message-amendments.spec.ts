@@ -75,13 +75,13 @@ test.describe('Message amendments', () => {
         await gotoChatList(alice);
         await expectConversationPreview(alice, bobHandle, 'second');
 
-        // Alice deletes the latest message — the preview must fall back to the
-        // previous one, not keep showing the deleted message.
+        // Alice deletes the latest message — the preview must show "[deleted]"
+        // (mirroring the in-chat placeholder), not keep the deleted text.
         await openChat(alice, bobHandle);
         await deleteMessage(alice, 'second');
         await waitForDeleted(alice);
         await gotoChatList(alice);
-        await expectConversationPreview(alice, bobHandle, 'first');
+        await expectConversationPreview(alice, bobHandle, '[deleted]');
 
         await aliceCtx.close();
         await bobCtx.close();

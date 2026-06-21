@@ -78,6 +78,55 @@ export const WithConversations: Story = {
     },
 };
 
+// Two special previews: a deleted latest message shows a muted "[deleted]"
+// (mirroring the in-chat placeholder), and an unsent draft shows a red "Draft:"
+// prefix that wins over the stored last message.
+export const DraftsAndDeleted: Story = {
+    args: {
+        serverOk: true,
+        conversations: [
+            {
+                conversationId: 'dm:01USER123:01OTHER456',
+                // Stored last message — overridden in the row by the live draft.
+                lastMessageText: JSON.stringify({
+                    type: 'text',
+                    body: 'See you tomorrow!',
+                }),
+                lastMessageTimestamp: Date.now() - 1000 * 60 * 5,
+                messageCount: 12,
+            },
+            {
+                conversationId: 'dm:01USER123:01ALICE789',
+                // Latest message was deleted — the row shows "[deleted]".
+                lastMessageText: '',
+                lastMessageDeleted: true,
+                lastMessageTimestamp: Date.now() - 1000 * 60 * 30,
+                messageCount: 8,
+            },
+            {
+                conversationId: 'self:01USER123',
+                lastMessageText: JSON.stringify({
+                    type: 'text',
+                    body: 'Buy milk',
+                }),
+                lastMessageTimestamp: Date.now() - 1000 * 60 * 60 * 24,
+                messageCount: 3,
+            },
+        ],
+        contacts: new Map([
+            ['01OTHER456', 'silver-hawk'],
+            ['01ALICE789', 'gentle-breeze'],
+        ]),
+        displayNames: new Map([['01ALICE789', 'Alice Wonderland']]),
+        // Keyed by conversation handle ("saved" for Saved Messages).
+        drafts: new Map([
+            ['silver-hawk', 'actually, let me check my calendar first'],
+            ['saved', 'todo: renew passport'],
+        ]),
+        userId: '01USER123',
+    },
+};
+
 export const ServerDown: Story = {
     args: {
         serverOk: false,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
-const DRAFT_KEY = (handle: string) => `atmin:draft:${handle}`;
+export const DRAFT_PREFIX = 'atmin:draft:';
+const DRAFT_KEY = (handle: string) => `${DRAFT_PREFIX}${handle}`;
 
 // Persist an unsent message draft per conversation across reloads (including
 // PWA service-worker auto-updates). The API mirrors useState<string> so the

@@ -70,6 +70,11 @@ export interface StoredConversation {
     lastMessageText: string;
     lastMessageTimestamp: number; // ms epoch
     messageCount: number;
+    // True when the latest message is a delete amendment's target — the chat
+    // list then shows a "[deleted]" placeholder (matching the in-chat bubble)
+    // instead of the empty preview an amendment payload would yield. Additive:
+    // pre-existing rows lack it and read as not-deleted.
+    lastMessageDeleted?: boolean;
 }
 
 export interface StoredContact {
@@ -390,22 +395,22 @@ export function deleteDatabase(): Promise<void> {
 
 /**
  * Recompute a conversation's preview + sort timestamp from its full message
- * history, applying edit/delete amendments the same way the chat materializer
- * does (ADR-0014, `toMessages` in hooks/useChat). Returns the materialized
- * latest *surviving* message's stored plaintext and timestamp.
+ * history, applying edit/delete amendments the way the chat materializer does
+ * (ADR-0014, `toMessages` in hooks/useChat). The summary mirrors the chat's
+ * *last bubble*: the latest original by (timestamp, id), materialized.
  *
- * The summary tracks the latest surviving message, not the latest amendment, so
- * this never advances the sort timestamp past an existing message: amending an
- * *older* message yields the same summary the conversation already had (caller
- * skips the write, no reorder), while deleting the latest message falls the
- * preview back to the previous survivor and editing it updates the preview text
- * in place. Returns null when the conversation has no originals at all (orphan
- * amendments only). When every original is deleted, returns an empty preview but
- * keeps the latest original's timestamp so the row holds its place.
+ * Amendments never reorder — the sort timestamp is always the latest message's
+ * own timestamp, so editing or deleting any message leaves the row in place.
+ * Editing the latest text message updates the preview; deleting the latest
+ * message marks it `lastMessageDeleted` (the list shows "[deleted]", matching
+ * the in-chat placeholder) rather than resurrecting an older message. Returns
+ * null when there are no originals at all (orphan amendments only).
  */
-function summarizeConversation(
-    msgs: StoredMessage[],
-): { lastMessageText: string; lastMessageTimestamp: number } | null {
+function summarizeConversation(msgs: StoredMessage[]): {
+    lastMessageText: string;
+    lastMessageTimestamp: number;
+    lastMessageDeleted: boolean;
+} | null {
     const amendmentsByTarget = new Map<string, StoredMessage[]>();
     const originals: StoredMessage[] = [];
     for (const m of msgs) {
@@ -420,45 +425,60 @@ function summarizeConversation(
     }
     if (originals.length === 0) return null;
 
-    let best: { text: string; ts: number } | null = null;
-    let latestTs = 0; // fallback position when every message is deleted
+    // The chat's last bubble: the latest original, ULID id breaking timestamp
+    // ties (same ordering the materializer renders).
+    let latest = originals[0];
     for (const m of originals) {
-        latestTs = Math.max(latestTs, m.timestamp);
-        const orig = parseInner(m.text);
-        let deleted = false;
-        let editedBody: string | undefined;
-        const chain = (amendmentsByTarget.get(m.id) ?? [])
-            .slice()
-            .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-        for (const am of chain) {
-            const a = parseInner(am.text);
-            if (a.kind !== 'amendment') continue;
-            if (am.fromUser !== m.fromUser) continue; // authorization
-            if (a.action === 'delete') {
-                deleted = true;
-                break; // terminal — delete trumps later amendments
-            }
-            // Edits only move a text message's preview; a media message's
-            // preview stays its <photo>/<file> placeholder (caption-agnostic).
-            if (
-                a.action === 'edit' &&
-                a.body !== undefined &&
-                orig.kind === 'text'
-            ) {
-                editedBody = a.body; // last edit in the chain wins
-            }
+        if (
+            m.timestamp > latest.timestamp ||
+            (m.timestamp === latest.timestamp && m.id > latest.id)
+        ) {
+            latest = m;
         }
-        if (deleted) continue;
-        const text =
-            editedBody !== undefined
-                ? JSON.stringify({ type: 'text', body: editedBody })
-                : m.text;
-        if (!best || m.timestamp > best.ts) best = { text, ts: m.timestamp };
     }
 
-    return best
-        ? { lastMessageText: best.text, lastMessageTimestamp: best.ts }
-        : { lastMessageText: '', lastMessageTimestamp: latestTs };
+    // Apply the latest message's authorized amendment chain (oldest id first).
+    const orig = parseInner(latest.text);
+    let deleted = false;
+    let editedBody: string | undefined;
+    const chain = (amendmentsByTarget.get(latest.id) ?? [])
+        .slice()
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (const am of chain) {
+        const a = parseInner(am.text);
+        if (a.kind !== 'amendment') continue;
+        if (am.fromUser !== latest.fromUser) continue; // authorization
+        if (a.action === 'delete') {
+            deleted = true;
+            break; // terminal — delete trumps later amendments
+        }
+        // Edits only move a text message's preview; a media message's preview
+        // stays its <photo>/<file> placeholder (caption-agnostic).
+        if (
+            a.action === 'edit' &&
+            a.body !== undefined &&
+            orig.kind === 'text'
+        ) {
+            editedBody = a.body; // last edit in the chain wins
+        }
+    }
+
+    if (deleted) {
+        return {
+            lastMessageText: '',
+            lastMessageTimestamp: latest.timestamp,
+            lastMessageDeleted: true,
+        };
+    }
+    const text =
+        editedBody !== undefined
+            ? JSON.stringify({ type: 'text', body: editedBody })
+            : latest.text;
+    return {
+        lastMessageText: text,
+        lastMessageTimestamp: latest.timestamp,
+        lastMessageDeleted: false,
+    };
 }
 
 /**
@@ -509,7 +529,8 @@ async function recomputeAmendedSummaries(
         if (!summary) continue; // no originals → leave the summary untouched
         if (
             summary.lastMessageText === current.lastMessageText &&
-            summary.lastMessageTimestamp === current.lastMessageTimestamp
+            summary.lastMessageTimestamp === current.lastMessageTimestamp &&
+            summary.lastMessageDeleted === (current.lastMessageDeleted ?? false)
         ) {
             continue; // amended an older message → no change, no reorder
         }
@@ -517,6 +538,7 @@ async function recomputeAmendedSummaries(
             conversationId: convId,
             lastMessageText: summary.lastMessageText,
             lastMessageTimestamp: summary.lastMessageTimestamp,
+            lastMessageDeleted: summary.lastMessageDeleted,
             messageCount: current.messageCount,
         });
     }
@@ -610,16 +632,23 @@ export async function saveMessages(
 
     for (const [convId, update] of convUpdates) {
         const existing = existingByID.get(convId);
+        // When an *older* out-of-order message loses to the existing (newer)
+        // summary, keep that summary verbatim — including its deleted flag. A
+        // genuinely new latest message is never itself a deleted placeholder.
+        const keepExisting =
+            existing !== undefined && existing.lastMessageTimestamp > update.ts;
         convStore.put({
             conversationId: convId,
-            lastMessageText:
-                existing && existing.lastMessageTimestamp > update.ts
-                    ? existing.lastMessageText
-                    : update.text,
+            lastMessageText: keepExisting
+                ? existing.lastMessageText
+                : update.text,
             lastMessageTimestamp: Math.max(
                 existing?.lastMessageTimestamp ?? 0,
                 update.ts,
             ),
+            lastMessageDeleted: keepExisting
+                ? (existing.lastMessageDeleted ?? false)
+                : false,
             messageCount: (existing?.messageCount ?? 0) + update.count,
         } satisfies StoredConversation);
     }
