@@ -96,7 +96,9 @@ OS-level device lock (PIN, biometrics) is the first line of defense — not the 
   single-image media quality suite (optimized send, EXIF strip,
   previews, offline cache), a memory-hard registration proof-of-work,
   and a time-aware timeline. A meaningful, non-big-bang release.
-  Locked in [specs/v0.2.md](specs/v0.2.md).
+  Shipped as `v0.2.0` (2026-06) — surface in
+  [specs/v0.2.md](specs/v0.2.md), what shipped in
+  [releases/v0.2.md](releases/v0.2.md).
 - **v0.3 — group chats & data portability.** Group conversations (the
   headline; Megolm already a group ratchet, the hard parts are
   membership + rekey) with fragment-addressed rooms, multipart-media

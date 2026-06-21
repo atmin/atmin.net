@@ -20,4 +20,4 @@ file may exist (and accumulate) before its tag is cut.
 
 ## Index
 
-- [v0.2 — the UI revamp](v0.2.md) — in progress (unreleased).
+- [v0.2 — the UI revamp](v0.2.md) — released `v0.2.0`, 2026-06-21.

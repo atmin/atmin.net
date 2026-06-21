@@ -16,7 +16,7 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 │   └── .storybook/   Visual spec for components/
 ├── docs/
 │   ├── vision.md         Goals, non-goals, threat model
-│   ├── specs/            Milestone specs — source of truth for protocol/API/storage (mvp-v0.1 shipped; v0.2 locked = UI revamp; v0.3 draft. Milestones from v0.2 on are named for the minor they ship as — see ADR-0017)
+│   ├── specs/            Milestone specs — source of truth for protocol/API/storage (mvp-v0.1 + v0.2 shipped; v0.3 draft. Milestones from v0.2 on are named for the minor they ship as — see ADR-0017)
 │   ├── decisions/        ADRs — *why* a decision was made (immutable, append-only)
 │   ├── scenarios/        Step-by-step user flows (e2e specs) and system invariants (invariants/)
 │   ├── releases/         The diary — what shipped per milestone, when, at what cost (past tense)
