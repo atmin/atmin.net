@@ -1,0 +1,49 @@
+---
+import '../styles/global.css';
+
+interface Props {
+    title?: string;
+    description?: string;
+}
+
+const {
+    title = 'atmin — end-to-end encrypted messenger',
+    description = 'A sync-first, end-to-end encrypted messenger. The server is a dumb relay and mailbox; clients own their keys, history, and trust. No plaintext on the server, no phone number required.',
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site);
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <link rel="canonical" href={canonical} />
+        <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+        <meta
+            name="theme-color"
+            content="#ffffff"
+            media="(prefers-color-scheme: light)"
+        />
+        <meta
+            name="theme-color"
+            content="#0a0a0a"
+            media="(prefers-color-scheme: dark)"
+        />
+        <meta name="generator" content={Astro.generator} />
+
+        <!-- Open Graph / social -->
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+        <meta property="og:url" content={canonical} />
+        <meta property="og:site_name" content="atmin" />
+        <meta name="twitter:card" content="summary" />
+    </head>
+    <body>
+        <slot />
+    </body>
+</html>

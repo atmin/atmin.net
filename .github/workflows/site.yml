@@ -1,0 +1,79 @@
+name: Site
+
+# Marketing site at the apex (ADR-0025). Deliberately separate from deploy.yml:
+# path-filtered to site/** so brochure edits never rebuild or redeploy the
+# messenger, and vice versa. Master push publishes — a static brochure has no
+# e2e gate to clear, so no tag ceremony.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'site/**'
+      - '.github/workflows/site.yml'
+
+env:
+  # Public-read bucket fronted by Edge Services (see docs/ops.md "Marketing site").
+  SITE_BUCKET: atmin-site
+  S3_HOST: s3.fr-par.scw.cloud
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.0.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 25
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: cd site && pnpm install --frozen-lockfile
+
+      - name: Build (astro check + build)
+        run: cd site && pnpm build
+
+      - name: Install s3cmd
+        run: sudo apt-get update && sudo apt-get install -y s3cmd
+
+      - name: Sync to Scaleway Object Storage
+        env:
+          # Scaleway API keys double as S3 credentials; reusing the existing
+          # pair (see docs/ops.md). Swap for a bucket-scoped key later if wanted.
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+        run: |
+          s3cmd sync \
+            --acl-public \
+            --delete-removed \
+            --no-mime-magic --guess-mime-type \
+            --add-header="Cache-Control: public, max-age=300" \
+            --host="$S3_HOST" \
+            --host-bucket='%(bucket)s.'"$S3_HOST" \
+            --access_key="$SCW_ACCESS_KEY" \
+            --secret_key="$SCW_SECRET_KEY" \
+            site/dist/ "s3://$SITE_BUCKET/"
+
+      # Optional cache purge. The 300s Cache-Control above means updates appear
+      # within ~5 min without it, so this is best-effort and inert until the
+      # pipeline-id secret exists. Verify the exact verb with `scw edge-services -h`
+      # before relying on it.
+      - name: Purge Edge Services cache
+        if: ${{ secrets.SCW_SITE_EDGE_PIPELINE_ID != '' }}
+        env:
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_ORGANIZATION_ID }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_PROJECT_ID }}
+          SCW_DEFAULT_REGION: fr-par
+        run: |
+          SCW_URL=$(curl -s https://api.github.com/repos/scaleway/scaleway-cli/releases/latest | grep -o '"browser_download_url": *"[^"]*linux_amd64"' | cut -d'"' -f4)
+          curl -fsSL "$SCW_URL" -o /usr/local/bin/scw && chmod +x /usr/local/bin/scw
+          scw edge-services purge-request create \
+            pipeline-id="${{ secrets.SCW_SITE_EDGE_PIPELINE_ID }}" \
+            assets='["/*"]'

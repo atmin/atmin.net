@@ -357,6 +357,75 @@ docker build -t atmin .
 docker run --env-file .env -p 8080:8080 atmin
 ```
 
+## Marketing site (`atmin.net`)
+
+The apex is a static brochure ([ADR-0025](decisions/adr-0025-marketing-site.md)),
+**separate from the app container**. The build (`site/dist`, Astro) is synced to
+a public Object Storage bucket fronted by Edge Services (CDN + apex TLS). Source
+in [`site/`](../../site/); deploy is path-filtered CI
+(`.github/workflows/site.yml`), independent of the app's `deploy.yml`.
+
+Kept on the same EU-resident Scaleway footprint as the app by design — the
+privacy product's front door should match its pitch (`storybook.atmin.net` is on
+GitHub Pages because it's an internal dev artifact, not the public face).
+
+### One-time setup
+
+```bash
+# 1. Public bucket for the built site (distinct from the app's data bucket).
+#    Create "atmin-site" in fr-par (console or s3cmd), then enable static
+#    website hosting with index + error documents:
+s3cmd ws-create --ws-index=index.html --ws-error=404.html s3://atmin-site
+
+#    Objects are made public per-object by the deploy (`s3cmd sync --acl-public`).
+#    No CORS needed — the site issues no presigned-PUT/cross-origin calls.
+```
+
+2. **Edge Services** (console → Edge Services → Create pipeline):
+   - Origin: the `atmin-site` bucket (its website endpoint).
+   - Cache: enabled (the deploy sets `Cache-Control: max-age=300`, so updates
+     appear within ~5 min without a manual purge).
+   - Custom domain: `atmin.net`, with the managed (Let's Encrypt) certificate.
+   - Note the **pipeline endpoint** (`<id>.svc.edge.scw.cloud`) for DNS, and the
+     **pipeline ID** if you want CI to purge on deploy (see secrets below).
+
+3. **DNS** — apex can't be a bare CNAME, so:
+
+   | Record | Type | Value |
+   |--------|------|-------|
+   | `atmin.net` | `ALIAS`/`ANAME` (or `A` to the Edge IPs) | Edge Services pipeline endpoint |
+   | `www.atmin.net` | `CNAME` | `atmin.net` (redirect www → apex) |
+
+   `app.` and `staging.` are unchanged (they CNAME to their Serverless
+   Containers). Only the apex + `www` are new.
+
+### GitHub Secrets
+
+The deploy reuses the existing Scaleway key pair (Scaleway API keys double as S3
+credentials) — no new required secrets:
+
+| Secret | Use |
+|--------|-----|
+| `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` | bucket sync (already present for registry/deploy) |
+| `SCW_SITE_EDGE_PIPELINE_ID` | *optional* — set to enable the CI cache-purge step (inert until set) |
+
+The bucket name (`atmin-site`) and S3 host (`s3.fr-par.scw.cloud`) are plain
+`env` in the workflow; change both there if the bucket is named differently. A
+bucket-scoped key can replace the shared pair later for least privilege.
+
+### Deploying
+
+Automatic on every push to `master` that touches `site/**`:
+
+```bash
+git push origin master
+```
+
+Builds (`astro check` + build), `s3cmd sync`s `dist/` to the bucket (with
+`--delete-removed`), and — if `SCW_SITE_EDGE_PIPELINE_ID` is set — purges the
+Edge cache. App-only changes don't trigger it; site-only changes don't rebuild
+the app.
+
 ## Troubleshooting
 
 ```bash

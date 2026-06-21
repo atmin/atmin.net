@@ -1,0 +1,18 @@
+---
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+---
+
+<Base title="Not found — atmin">
+    <main class="mx-auto flex min-h-dvh max-w-5xl flex-col items-center justify-center px-6 text-center">
+        <Logo class="h-14 w-14 text-foreground" />
+        <h1 class="mt-6 text-2xl font-bold tracking-tight">Page not found</h1>
+        <p class="mt-2 text-muted-foreground">That page doesn’t exist.</p>
+        <a
+            href="/"
+            class="mt-8 inline-flex h-11 items-center rounded-full bg-accent px-6 font-semibold text-accent-foreground transition-opacity hover:opacity-90"
+        >
+            Back home
+        </a>
+    </main>
+</Base>

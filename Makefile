@@ -3,6 +3,7 @@ DOCKER ?= docker
 .PHONY: all build test lint fmt clean dev run e2e e2e-local install
 .PHONY: server-test server-lint server-fmt server-build
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
+.PHONY: site-dev site-build site-check
 .PHONY: icons
 .PHONY: up down
 
@@ -25,6 +26,7 @@ install:
 		echo "WARNING: rustup not detected — ensure the 'wasm32-unknown-unknown' target is available for your Rust install"; \
 	fi
 	cd web && pnpm install
+	cd site && pnpm install
 	@test -f .env || cp .env.example .env
 	cp scripts/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 	@echo "Done. Run 'make dev' to start."
@@ -86,6 +88,21 @@ web-storybook:
 
 web-fmt:
 	cd web && pnpm lint:fix
+
+# --- Site (marketing, ADR-0025) ---
+# Independent of the app: its own deploy (.github/workflows/site.yml → Scaleway
+# static bucket), so it's deliberately NOT wired into all/build/lint/test.
+# `site-build` runs `astro check` first, so type errors fail the build like
+# web's `tsc && vite build`.
+
+site-dev:
+	cd site && pnpm dev
+
+site-build:
+	cd site && pnpm build
+
+site-check:
+	cd site && pnpm check
 
 # --- Branding ---
 

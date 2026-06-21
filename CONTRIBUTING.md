@@ -14,6 +14,7 @@ Read it first; it points at the canonical specs/ADRs/scenarios for everything el
 │   ├── e2e/          Playwright specs — scenario tests (one per docs/scenarios/*.md)
 │   │                 and fault-injection invariant tests (invariants/, docs/scenarios/invariants/)
 │   └── .storybook/   Visual spec for components/
+├── site/             Static marketing site at the apex atmin.net (Astro) — ADR-0025
 ├── docs/
 │   ├── vision.md         Goals, non-goals, threat model
 │   ├── specs/            Milestone specs — source of truth for protocol/API/storage (mvp-v0.1 + v0.2 shipped; v0.3 draft. Milestones from v0.2 on are named for the minor they ship as — see ADR-0017)
@@ -126,6 +127,14 @@ The unit project runs in **node** — DOM is opt-in per file via `// @vitest-env
 ### WASM crypto crate (`web/crypto/`)
 
 `vodozemac` Megolm is wrapped via `wasm-bindgen` and consumed from `web/src/lib/wasm.ts` / `megolm-session.ts`. Rebuild with `make web-wasm` whenever `web/crypto/src/**` changes; `make web-build` does it transitively. The generated `pkg/` is gitignored — build artefacts must not be committed.
+
+## Marketing site (`site/`)
+
+The public-facing apex `atmin.net` — static brochureware (Astro + Tailwind v4), separate from the app ([ADR-0025](docs/decisions/adr-0025-marketing-site.md)). No backend, no user data; it links out to the web app and, later, the native/desktop builds. The token palette mirrors `web/src/index.css` so site and app read as one product.
+
+- `make site-dev` / `make site-build` / `make site-check` (deps installed by `make install`).
+- It's **independent of the app's gates** — not in `make all/build/lint/test`. `site-build` runs `astro check` as its own gate.
+- Deploy is path-filtered CI (`.github/workflows/site.yml`) → Scaleway public bucket behind Edge Services; pushing to `master` with `site/**` changes publishes. Infra + DNS in [docs/ops.md](docs/ops.md) "Marketing site".
 
 ## Backend (`server/`)
 

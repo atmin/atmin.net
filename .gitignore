@@ -42,6 +42,8 @@ web/crypto/pkg-node/
 # Build output
 server/target/
 web/dist/
+site/dist/
+site/.astro/
 
 # Playwright
 test-results/

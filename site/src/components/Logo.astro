@@ -1,0 +1,21 @@
+---
+// Brand mark — path copied from web/public/favicon.svg, the single source of
+// truth (shared with web/src/components/Logo.tsx). currentColor so it themes.
+interface Props {
+    class?: string;
+}
+const { class: className } = Astro.props;
+---
+
+<svg
+    viewBox="0 0 100 100"
+    fill="currentColor"
+    class={className}
+    xmlns="http://www.w3.org/2000/svg"
+    role="img"
+    aria-label="atmin logo"
+>
+    <path
+        d="M 66,35 C 65,42 63,48 63,55 61,65 79,67 82,46 89,7 15,4 17,54 16,84 55,93 84,75 79,81 65,92 41,89 14,85 4,60 12,36 31,-9 104,8 87,54 80,73 57,72 56.5,59 53,65 48,69 40,67.5 26,65 31,19 66,35 Z m -13,3 C 46,37 42,44.5 41,51 38,80 68,39 53,38 Z"
+    ></path>
+</svg>

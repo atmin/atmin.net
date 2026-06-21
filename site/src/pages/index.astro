@@ -1,0 +1,193 @@
+---
+import Base from '../layouts/Base.astro';
+import Logo from '../components/Logo.astro';
+
+const APP_URL = 'https://app.atmin.net';
+const REPO_URL = 'https://github.com/atmin/atmin.net';
+
+const principles = [
+    {
+        title: 'No plaintext on the server',
+        body: 'Messages are end-to-end encrypted on your device before they leave it. The server stores ciphertext it cannot read — and there is no central message database to breach.',
+    },
+    {
+        title: 'No phone number, no email',
+        body: 'Your identity is a handle you choose. Nothing ties your account to a real-world identifier, and discovery is invite-based.',
+    },
+    {
+        title: 'Your keys, your history',
+        body: 'Keys and message history live on your devices. Backup is optional and encrypted with a secret only you hold.',
+    },
+];
+
+const howItWorks = [
+    {
+        title: 'The server is a relay, not a brain',
+        body: 'It routes encrypted envelopes and holds your encrypted mailbox in S3-compatible storage. It cannot read content; it only moves it.',
+    },
+    {
+        title: 'Clients own the state',
+        body: 'Your devices hold the keys, the trust, and the history. Lose every device with no backup and it is gone — by design, not by accident.',
+    },
+    {
+        title: 'Sync-first, offline-friendly',
+        body: 'Messages sync from your encrypted mailbox. The client is explicit about what has been delivered and what is still pending.',
+    },
+];
+
+// The native clients are on a deliberate later track — "Planned" is honest, not
+// a roadmap promise. The web app is a real, installable PWA today.
+const clients = [
+    { name: 'Web', status: 'available', note: 'Installable PWA — works in any modern browser.' },
+    { name: 'iOS', status: 'planned', note: 'On the native-apps track.' },
+    { name: 'Android', status: 'planned', note: 'On the native-apps track.' },
+    { name: 'Desktop', status: 'planned', note: 'On the native-apps track.' },
+];
+---
+
+<Base>
+    <div class="mx-auto flex min-h-dvh max-w-5xl flex-col px-6">
+        <!-- Hero -->
+        <header class="flex flex-1 flex-col items-center justify-center py-24 text-center">
+            <Logo class="h-20 w-20 text-foreground" />
+            <h1 class="mt-6 text-5xl font-bold tracking-tight sm:text-6xl">atmin</h1>
+            <p class="mt-3 text-lg text-muted-foreground">End-to-end encrypted messenger</p>
+            <p class="mt-6 max-w-xl text-balance text-base leading-relaxed text-muted-foreground">
+                Sync-first and private by construction. The server is a dumb relay and
+                mailbox — you keep the keys, the history, and the trust.
+            </p>
+
+            <div class="mt-10 flex flex-col items-center gap-3 sm:flex-row">
+                <a
+                    href={APP_URL}
+                    class="inline-flex h-12 items-center justify-center rounded-full bg-accent px-8 text-base font-semibold text-accent-foreground transition-opacity hover:opacity-90"
+                >
+                    Open the web app
+                </a>
+                <a
+                    href={REPO_URL}
+                    class="inline-flex h-12 items-center justify-center rounded-full border border-border px-8 text-base font-semibold transition-colors hover:bg-card"
+                >
+                    View the source
+                </a>
+            </div>
+
+            <p class="mt-8 text-xs uppercase tracking-widest text-muted-foreground">
+                Early development · Open source
+            </p>
+        </header>
+
+        <!-- Principles -->
+        <section class="border-t border-border py-20">
+            <p class="text-sm font-medium uppercase tracking-widest text-muted-foreground">
+                What it refuses to do
+            </p>
+            <div class="mt-10 grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-3">
+                {
+                    principles.map((p) => (
+                        <div class="bg-background p-6">
+                            <h2 class="text-base font-semibold">{p.title}</h2>
+                            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+                                {p.body}
+                            </p>
+                        </div>
+                    ))
+                }
+            </div>
+        </section>
+
+        <!-- How it works -->
+        <section class="border-t border-border py-20">
+            <p class="text-sm font-medium uppercase tracking-widest text-muted-foreground">
+                How it works
+            </p>
+            <dl class="mt-10 space-y-8">
+                {
+                    howItWorks.map((h) => (
+                        <div class="grid gap-2 sm:grid-cols-[1fr_2fr] sm:gap-8">
+                            <dt class="text-lg font-semibold tracking-tight">{h.title}</dt>
+                            <dd class="text-base leading-relaxed text-muted-foreground">
+                                {h.body}
+                            </dd>
+                        </div>
+                    ))
+                }
+            </dl>
+        </section>
+
+        <!-- Get the app -->
+        <section class="border-t border-border py-20">
+            <p class="text-sm font-medium uppercase tracking-widest text-muted-foreground">
+                Get atmin
+            </p>
+            <ul class="mt-10 divide-y divide-border overflow-hidden rounded-2xl border border-border">
+                {
+                    clients.map((c) => (
+                        <li class="flex items-center justify-between gap-4 p-5">
+                            <div class="flex items-center gap-3">
+                                <span
+                                    class:list={[
+                                        'h-2.5 w-2.5 shrink-0 rounded-full',
+                                        c.status === 'available' ? 'bg-accent' : 'bg-border',
+                                    ]}
+                                    aria-hidden="true"
+                                />
+                                <div>
+                                    <p class="font-semibold">{c.name}</p>
+                                    <p class="text-sm text-muted-foreground">{c.note}</p>
+                                </div>
+                            </div>
+                            {c.status === 'available' ? (
+                                <a
+                                    href={APP_URL}
+                                    class="shrink-0 rounded-full bg-accent px-5 py-2 text-sm font-semibold text-accent-foreground transition-opacity hover:opacity-90"
+                                >
+                                    Open
+                                </a>
+                            ) : (
+                                <span class="shrink-0 text-sm font-medium uppercase tracking-widest text-muted-foreground">
+                                    Planned
+                                </span>
+                            )}
+                        </li>
+                    ))
+                }
+            </ul>
+        </section>
+
+        <!-- Ethos -->
+        <section class="border-t border-border py-20">
+            <blockquote class="max-w-2xl text-xl font-medium leading-relaxed tracking-tight sm:text-2xl">
+                <p>Simple is better than clever.</p>
+                <p>Explicit is better than assumed.</p>
+                <p>Boring is better than surprising.</p>
+                <p>Recoverable is better than magical.</p>
+            </blockquote>
+            <p class="mt-6 text-sm text-muted-foreground">
+                — from
+                <a href={`${REPO_URL}#the-zen-of-atmin`} class="underline underline-offset-4 hover:text-foreground">
+                    the project's guiding principles
+                </a>
+            </p>
+        </section>
+
+        <!-- Footer -->
+        <footer class="mt-auto border-t border-border py-10">
+            <div class="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
+                <div class="flex items-center gap-2.5">
+                    <Logo class="h-6 w-6 text-foreground" />
+                    <span class="font-semibold tracking-tight">atmin</span>
+                </div>
+                <nav class="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+                    <a href={APP_URL} class="hover:text-foreground">Web app</a>
+                    <a href={REPO_URL} class="hover:text-foreground">Source</a>
+                    <a href={`${REPO_URL}/blob/master/docs/vision.md`} class="hover:text-foreground">Vision</a>
+                    <a href={`${REPO_URL}/blob/master/LICENSE`} class="hover:text-foreground">Apache-2.0</a>
+                </nav>
+            </div>
+            <p class="mt-8 text-xs text-muted-foreground">
+                Runs on EU-resident infrastructure. © 2026 atmin.
+            </p>
+        </footer>
+    </div>
+</Base>
