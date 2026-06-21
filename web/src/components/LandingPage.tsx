@@ -61,7 +61,7 @@ export default function LandingPage({
                 <p className="mt-8 text-xs opacity-50">
                     {__APP_VERSION__} • Open source •{' '}
                     <a
-                        href="https://github.com/yourusername/atmin"
+                        href="https://github.com/atmin/atmin.net"
                         className="underline"
                     >
                         Documentation
