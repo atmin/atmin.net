@@ -1,82 +1,73 @@
-# ADR-0025: Marketing site — in-repo, static, on Scaleway
+# ADR-0025: Marketing site — in-repo, static, on GitHub Pages
 
 Status: Accepted
-Date: 2026-06-21
+Date: 2026-06-22
 
 ## Context
 
 `app.atmin.net` (production) and `staging.atmin.net` are the Rust container
-serving the embedded SPA. The apex `atmin.net` points nowhere. It needs a
-public face: what the project is, why its privacy stance matters, and where to
-get the clients — the web app today, app-store and desktop builds later.
+serving the embedded SPA. The apex `atmin.net` points nowhere and needs a public
+face: what the project is, why its privacy stance matters, and where to get the
+clients — the web app today, app-store and desktop builds later.
 
-Three questions: where the source lives, what serves it, and what it's built
-with.
-
-A marketing page carries no user data and has no request/data path — it is
-static brochureware that links out to `app.atmin.net`. That makes the
-[ops.md](../ops.md) "EU-resident infrastructure" stance look, at first, like it
-doesn't apply. But the stance is about *where the product lives*, and the apex
-is the product's front door. `storybook.atmin.net` already ships from CI to
-GitHub Pages — and that is fine precisely because Storybook is an internal
-developer artifact, not the public face of a privacy product. The front door is
-the one static surface where serving it from EU infra, on the same provider as
-everything else, is a brand statement rather than an incidental hosting choice.
+Three questions: where the source lives, what builds it, and what serves it. The
+hard constraint is the **apex** — `atmin.net` itself must serve over HTTPS,
+because that's the address people type and the one the brand uses.
 
 ## Decision
 
 **Source — same repo, new top-level `site/`.** The repo is already a deliberate
-monorepo (`server/`, `web/`, `docs/`, `tasks/`); a new top-level area is the
-established move. The payoff is atomic cross-cutting edits: when a native build
-ships, the download CTA, a release note, and any scenario change in one commit,
-with no cross-repo drift. The mark, the token palette, and the tagline are
-shared with `web/` rather than re-derived.
+monorepo (`server/`, `web/`, `docs/`, `tasks/`); a new top-level area fits. The
+payoff is atomic cross-cutting edits: when a native build ships, the download
+CTA, a release note, and any scenario change land in one commit, no cross-repo
+drift. The mark, token palette, and tagline are shared with `web/`.
 
-**Build — Astro, static output.** Content-first, ships ~zero JS by default
-(on-brand for a project that tracks gzip deltas), Tailwind-v4-native so the
-`web/` token set carries over, and a React island remains available if a live
-demo is ever wanted. The app's Vite/React stack would also work but pulls a
-client runtime onto a brochure for no benefit.
+**Build — Astro, static output.** Content-first, ~zero JS by default (on-brand
+for a project that tracks gzip deltas), Tailwind-v4-native so the `web/` token
+set carries over, with a React island available if a live demo is ever wanted.
 
-**Serve — Scaleway Object Storage + Edge Services.** A public-read bucket holds
-the built site; Edge Services fronts it as the CDN and terminates TLS for the
-apex. Keeps the entire footprint EU-resident and single-provider, consistent
-with the operational stance. `www.atmin.net` redirects to the apex. Deploy is a
-path-filtered GitHub Actions workflow (`site/**` only) that builds and
-`s3cmd sync`s to the bucket — independent of the app's `deploy.yml`, so brochure
-edits never rebuild the messenger. Master push publishes; no tag ceremony (a
-landing page has no e2e gate to clear).
+**Serve — GitHub Pages.** It serves the **bare apex** `atmin.net` over HTTPS with
+an auto-provisioned (Let's Encrypt) certificate — apex `A`/`AAAA` records to
+GitHub's addresses plus a `www` `CNAME` — at zero cost and zero infrastructure.
+It's CI-native (the repo is already on GitHub) and the exact mechanism already
+in use for `storybook.atmin.net` (`peaceiris/actions-gh-pages` + a `CNAME`).
+Deploy is a path-filtered workflow on `site/**`, independent of the app's
+`deploy.yml`; a master push publishes.
 
 ## Consequences
 
-- **+** Apex stays EU-resident and single-provider — the privacy product's
-  front door matches its pitch.
-- **+** In-repo + same toolchain conventions (`make site-*`, the shared token
-  palette) keep the site a first-class citizen, not a side project that rots.
-- **+** A separate workflow with a `site/**` path filter fully decouples the
-  brochure's cadence from the messenger's deploy pipeline.
-- **−** More one-time setup than GitHub Pages (bucket + public-read policy +
-  Edge Services + apex DNS) — documented in [ops.md](../ops.md) "Marketing
-  site"; a one-time cost.
-- **−** Edge Services cache invalidation is a manual/scripted purge (or TTL
-  expiry); the deploy syncs reliably, the purge is best-effort until wired to a
-  secret. Acceptable for a low-churn brochure.
-- **−** A second front-end project to keep on a current toolchain. Mitigated by
-  the small surface and `astro check` gating the build.
+- **+** The apex works, with free managed TLS — the address people type
+  resolves, no Load Balancer, no per-month cost.
+- **+** Zero infrastructure to operate; the same deploy path already proven for
+  Storybook.
+- **+** In-repo + shared toolchain keep the site a first-class citizen, not a
+  side project that rots.
+- **−** US-hosted (Microsoft/Fastly). Accepted: the brochure carries **no user
+  data and has no request/data path** — it's static HTML linking to
+  `app.atmin.net`. The EU-resident stance ([ops.md](../ops.md)) is about the
+  product's *data path*, where GitHub/CI is already an acknowledged exception.
+  For a no-PII front door, shipping on the apex beats provider purity —
+  **pragmatic is better than pure**.
+- **−** A second front-end project to keep on a current toolchain; mitigated by
+  its small surface and `astro check` gating the build.
 
 ## Alternatives considered
 
-- **GitHub Pages** — fastest, free, CI-native, and already in use for
-  `storybook.atmin.net`. Rejected *for the apex*: it puts the privacy product's
-  public face on US infra (Microsoft/Fastly), a weaker-brand choice when the
-  same CI can publish to the EU stack already in use. The Storybook precedent
-  stands — an internal dev artifact, not the front door.
-- **Serve the site from the existing app container at the apex** — one origin,
-  one deploy. Rejected: couples brochure-copy edits to messenger redeploys (the
-  container is always-on serving the SPA), and the apex/`www`/`app` routing
-  split gets awkward.
+- **Scaleway Object Storage + Edge Services** — would keep the marketing front
+  door on the same EU-resident footprint as the app. **Rejected: Edge Services
+  is subdomain-only and cannot serve a bare apex** — its mechanism is a CNAME,
+  which by definition can't exist at an apex
+  ([Scaleway docs](https://www.scaleway.com/en/docs/edge-services/reference-content/cname-record/),
+  [open feature request](https://feature-request.scaleway.com/posts/983/add-support-for-root-apex-custom-domains-for-edge-services)).
+  The only Scaleway path to apex HTTPS is a Load Balancer (~10× the app's
+  monthly cost) — disproportionate for a brochure. Verify that a provider
+  actually supports what a decision needs *before* relying on it (see the
+  [ADR process notes](README.md)).
+- **Serve the site from the app container at the apex** — one origin, but
+  couples brochure edits to messenger redeploys, and container custom domains
+  are CNAME-only too (same apex problem). Rejected.
 - **A separate repository** — cleaner isolation, but loses the atomic
-  cross-cutting edit (the whole reason download links and product copy want to
-  move together) and fragments the single documentation-first surface.
+  cross-cutting edit (download links + product copy moving together) and
+  fragments the documentation-first surface. Rejected.
 - **Reuse the Vite/React app stack** — stack uniformity, but a client runtime on
-  a static brochure with no interactivity to justify it.
+  a static brochure with no interactivity to justify it. Rejected.

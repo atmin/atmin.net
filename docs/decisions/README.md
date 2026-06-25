@@ -38,6 +38,9 @@ adr-0002-short-title.md
 
 Numbers are monotonically increasing.  
 Never renumber or rewrite old ADRs — add a new one if the decision changes.
+**Narrow exception:** an ADR accepted prematurely that never shipped and was
+never relied upon may be overwritten rather than superseded — pragmatism over
+ceremony, not license to rewrite load-bearing history.
 
 ## Status
 
@@ -49,6 +52,12 @@ An ADR may be:
 - **Deprecated** (no longer relevant)
 
 If superseded, link to the replacing ADR at the top.
+
+**Flip to Accepted only after verifying the decision is feasible.** Don't
+enshrine an assumption that an external dependency supports what the decision
+needs — check it first. (ADR-0025 was first accepted assuming a host could serve
+an apex domain; it couldn't, and was overwritten.) Accepting on optimism is how
+a rewrite happens.
 
 ## Tone
 
