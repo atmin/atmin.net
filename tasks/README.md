@@ -5,6 +5,15 @@ The **frontier** — active and upcoming work, one line each. A task earns a
 *shipped* is recorded in the diary, [docs/releases/](../docs/releases/) — keep
 this file forward-looking, never a changelog.
 
+- **[clear-local-state-on-auth](clear-local-state-on-auth.md)** — cross-account
+  IndexedDB leak: login/register don't wipe local state (only logout does), and
+  crypto keys aren't user-scoped. **Bug, active.**
+- **[marketing-site-github-pages](marketing-site-github-pages.md)** — pivot the
+  site host Scaleway → GitHub Pages (apex + free TLS; Edge is subdomain-only).
+  [ADR-0025](../docs/decisions/adr-0025-marketing-site.md) rewritten;
+  "pragmatic is better than pure". **In flight.**
+- **[registration-pow-difficulty](registration-pow-difficulty.md)** — confirm
+  PoW is real off-test, decide the bit target, document the per-env matrix.
 - **Group chats** — membership + rekey (Megolm is already a group ratchet);
   needs an ADR, **v0.3**. Pairs with
   [ADR-0024](../docs/decisions/adr-0024-chat-url-fragments.md) (fragment rooms).
