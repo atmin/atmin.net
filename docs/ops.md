@@ -357,13 +357,21 @@ docker build -t atmin .
 docker run --env-file .env -p 8080:8080 atmin
 ```
 
-## Marketing site (`atmin.net`)
+## Marketing site (`www.atmin.net`)
 
-The apex is a static brochure ([ADR-0025](decisions/adr-0025-marketing-site.md)),
+A static brochure ([ADR-0025](decisions/adr-0025-marketing-site.md)),
 **separate from the app container**. The build (`site/dist`, Astro) is synced to
-a public Object Storage bucket fronted by Edge Services (CDN + apex TLS). Source
+a public Object Storage bucket fronted by Edge Services (CDN + TLS). Source
 in [`site/`](../../site/); deploy is path-filtered CI
 (`.github/workflows/site.yml`), independent of the app's `deploy.yml`.
+
+**Canonical host is `www.atmin.net`, not the bare apex.** Edge Services is
+subdomain-only — it can't serve a root/apex domain (a CNAME can't exist at an
+apex; [Scaleway docs](https://www.scaleway.com/en/docs/edge-services/reference-content/cname-record/),
+[open feature request](https://feature-request.scaleway.com/posts/983/add-support-for-root-apex-custom-domains-for-edge-services)).
+The bare `atmin.net` is **deferred** (see the ADR-0025 update and
+[tasks](../../tasks/README.md)); reaching it would need an A-record resource
+(e.g. a Load Balancer) since every Scaleway custom-domain product is CNAME-only.
 
 Kept on the same EU-resident Scaleway footprint as the app by design — the
 privacy product's front door should match its pitch (`storybook.atmin.net` is on
@@ -371,33 +379,35 @@ GitHub Pages because it's an internal dev artifact, not the public face).
 
 ### One-time setup
 
-```bash
-# 1. Public bucket for the built site (distinct from the app's data bucket).
-#    Create "atmin-site" in fr-par (console or s3cmd), then enable static
-#    website hosting with index + error documents:
-s3cmd ws-create --ws-index=index.html --ws-error=404.html s3://atmin-site
+1. **Public bucket + static website hosting** (console). Create `atmin-site` in
+   `fr-par`, then enable static website hosting in the bucket's settings with
+   index document `index.html` and error document `404.html`. The Scaleway
+   console exposes this directly — **no local S3 keys required**. (API
+   equivalent if you have keys configured: `s3cmd ws-create
+   --ws-index=index.html --ws-error=404.html s3://atmin-site`, or `aws s3
+   website s3://atmin-site/ --index-document index.html --error-document
+   404.html --endpoint-url https://s3.fr-par.scw.cloud`.)
 
-#    Objects are made public per-object by the deploy (`s3cmd sync --acl-public`).
-#    No CORS needed — the site issues no presigned-PUT/cross-origin calls.
-```
+   Objects are made public per-object by the deploy (`s3cmd sync --acl-public`).
+   No CORS needed — the site issues no presigned-PUT / cross-origin calls. The
+   object upload runs in CI with the `SCW_*` GitHub secrets, so **no S3 keys
+   need to live on a workstation** — the only manual steps are this bucket
+   setting, the Edge Services pipeline, and DNS, all console-side.
 
 2. **Edge Services** (console → Edge Services → Create pipeline):
    - Origin: the `atmin-site` bucket (its website endpoint).
    - Cache: enabled (the deploy sets `Cache-Control: max-age=300`, so updates
      appear within ~5 min without a manual purge).
-   - Custom domain: `atmin.net`, with the managed (Let's Encrypt) certificate.
-   - Note the **pipeline endpoint** (`<id>.svc.edge.scw.cloud`) for DNS, and the
-     **pipeline ID** if you want CI to purge on deploy (see secrets below).
+   - Custom domain: **`www.atmin.net`** (subdomain — Edge can't take the apex),
+     with the managed (Let's Encrypt) certificate.
 
-3. **DNS** — apex can't be a bare CNAME, so:
-
-   | Record | Type | Value |
-   |--------|------|-------|
-   | `atmin.net` | `ALIAS`/`ANAME` (or `A` to the Edge IPs) | Edge Services pipeline endpoint |
-   | `www.atmin.net` | `CNAME` | `atmin.net` (redirect www → apex) |
-
-   `app.` and `staging.` are unchanged (they CNAME to their Serverless
-   Containers). Only the apex + `www` are new.
+3. **DNS** — the zone is on Scaleway DNS (`ns*.dom.scw.cloud`), so when you set
+   the custom domain above, **Scaleway auto-creates the `www` CNAME and
+   provisions the cert** — no manual record, no verify step. (If the zone were
+   on an external provider you'd add `www.atmin.net CNAME <id>.svc.edge.scw.cloud`
+   yourself.) `app.` and `staging.` are unchanged. Leave the bare `atmin.net`
+   unconfigured for now — an apex ALIAS pointing at Edge resolves but has no cert
+   for `atmin.net`, so it would serve a TLS error; better absent than broken.
 
 ### GitHub Secrets
 
