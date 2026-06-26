@@ -15,8 +15,8 @@ this file forward-looking, never a changelog.
   to the leak fix.**
 - **[marketing-site-github-pages](marketing-site-github-pages.md)** — pivot the
   site host Scaleway → GitHub Pages (apex + free TLS; Edge is subdomain-only).
-  [ADR-0025](../docs/decisions/adr-0025-marketing-site.md) rewritten;
-  "pragmatic is better than pure". **In flight.**
+  Repo side done (workflow, ADR, ops/DNS docs, Zen line); **manual go-live +
+  Scaleway decommission remain** before the apex is live.
 - **[registration-pow-difficulty](registration-pow-difficulty.md)** — confirm
   PoW is real off-test, decide the bit target, document the per-env matrix.
 - **Group chats** — membership + rekey (Megolm is already a group ratchet);

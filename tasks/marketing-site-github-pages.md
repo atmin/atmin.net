@@ -1,50 +1,35 @@
-# Pivot the marketing site from Scaleway to GitHub Pages
+# Marketing site on GitHub Pages — go-live
 
-> Decided: drop Scaleway as the marketing-site host, use GitHub Pages. Edge
-> Services can't serve the bare apex (subdomain-only) — that's the deal-breaker,
-> and DNS still isn't working. It's just marketing. **Pragmatism beats purity**
-> — a principle to encode in the Zen of atmin.
+> Pivot from Scaleway → GitHub Pages (apex + free TLS; Edge is subdomain-only,
+> the deal-breaker). **Repo side done; manual go-live + decommission remain.**
+> Delete this file once `https://atmin.net` is live with a valid cert.
 
-## Current
+## Done (repo)
 
-- [site/](../site/) (Astro) builds static `dist/` — unchanged, keep it.
-- Deploy is [.github/workflows/site.yml](../.github/workflows/site.yml):
-  `s3cmd sync` to the Scaleway `atmin-site` bucket behind Edge Services (the
-  now-overwritten Scaleway version of
-  [ADR-0025](../docs/decisions/adr-0025-marketing-site.md)). `www.atmin.net`
-  CNAMEs to the Edge endpoint; cert was still pending.
-- A precedent already exists: the `deploy-storybook` job in
-  [deploy.yml](../.github/workflows/deploy.yml) publishes
-  `storybook.atmin.net` to GitHub Pages (external repo + CNAME) via
-  `peaceiris/actions-gh-pages`.
+- [ADR-0025](../docs/decisions/adr-0025-marketing-site.md) is the GitHub Pages
+  decision (overwritten earlier — accepted on optimism, never deployed).
+- [site.yml](../.github/workflows/site.yml): builds `site/` → publishes `dist/`
+  to this repo's `gh-pages` branch via `peaceiris/actions-gh-pages`, `cname:
+  atmin.net`, default `GITHUB_TOKEN` (same-repo, no PAT).
+- [astro.config.mjs](../site/astro.config.mjs) `site` = `https://atmin.net`.
+- [ops.md](../docs/ops.md) "Marketing site" rewritten for GitHub Pages (setup +
+  DNS records + Scaleway decommission); [CONTRIBUTING.md](../CONTRIBUTING.md)
+  host reference updated.
+- "Pragmatic is better than pure." added to the Zen of atmin
+  ([README.md](../README.md)).
 
-## Change
+## Remaining (manual — console / DNS, see ops.md "Marketing site")
 
-1. **ADR-0025 — done** (overwritten to the GitHub Pages decision). It was
-   accepted on optimism, never deployed, never relied upon, so it was rewritten
-   in place rather than ceremonially superseded (the
-   [ADR README](../docs/decisions/README.md) narrow overwrite exception). The
-   remaining steps are the implementation pivot.
-2. **Replace `site.yml`** with a GH-Pages deploy (mirror `deploy-storybook`):
-   build `site/`, publish `dist/`, set the custom-domain CNAME. Apex works here.
-3. **DNS** (Scaleway DNS stays the zone host): apex `atmin.net` → GitHub Pages
-   `A` (`185.199.108–111.153`) + `AAAA` (`2606:50c0:8000–8003::153`); `www`
-   `CNAME` → `<user>.github.io` (**not** the apex — GitHub's docs warn that
-   breaks Enforce-HTTPS). GH auto-provisions the cert for apex + www (up to 24h).
-4. **`astro.config.mjs`** `site` → `https://atmin.net` again (apex is canonical
-   once more — GH Pages does apex).
-5. **Decommission Scaleway site infra**: delete the Edge pipeline + the
-   `atmin-site` bucket + the `www`→Edge CNAME. Rewrite [docs/ops.md](../docs/ops.md)
-   "Marketing site" for GH Pages (drop the s3cmd / Edge / bucket setup); update
-   [CONTRIBUTING.md](../CONTRIBUTING.md) if it names the host.
-6. **Zen of atmin** ([README.md](../README.md)): add the principle. Proposed
-   wording to match the existing "_X_ is better than _Y_" cadence: **"Pragmatic
-   is better than pure."** — confirm exact phrasing (it's the project's voice).
+1. Push so `site.yml` runs once and creates `gh-pages`; then repo → Settings →
+   Pages: source = `gh-pages` / root, custom domain `atmin.net`, Enforce HTTPS
+   (cert up to 24h).
+2. DNS (Scaleway zone): apex `A` ×4 + `AAAA` ×4 → GitHub; `www` `CNAME` →
+   `atmin.github.io.` (**not** the apex).
+3. Decommission Scaleway: delete the Edge Services pipeline + `atmin-site`
+   bucket + any `www`→Edge CNAME; drop the `SCW_SITE_EDGE_PIPELINE_ID` secret.
 
-## Verify
+## Verify (then delete this file)
 
-- Push → GH Pages builds & deploys; both `https://atmin.net` and
-  `https://www.atmin.net` load with a valid cert; canonical/OG = apex.
-- ADR-0025 reads as the GitHub Pages decision; ops.md/CONTRIBUTING describe GH
-  Pages, no stale Scaleway-site instructions.
-- Scaleway Edge pipeline + bucket removed (no orphaned, paid-for resources).
+- `https://atmin.net` **and** `https://www.atmin.net` load with a valid cert;
+  canonical/OG = apex.
+- No orphaned (paid-for) Scaleway site resources remain.
