@@ -10,6 +10,7 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 - End-to-end encryption by default (no plaintext on the server).
 - Sync-first delivery model (offline-friendly by design).
 - Browser-first client (PWA) with minimal friction.
+- Frictionless, privacy-preserving discovery — no real-world identifier required to join; opt-in contact matching never uploads your address book.
 - Simple, horizontally scalable server (stateless where possible).
 - S3-compatible storage for messages and media.
 
@@ -17,7 +18,7 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 
 **Deferred** (likely future, not v0.1):
 
-- Phone number or address book based discovery.
+- Phone or address-book discovery — opt-in and privacy-preserving, on the native-apps track.
 - Groups, presence (typing/online), read receipts.
 
 **Out of scope** (no plans):
@@ -27,7 +28,7 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
 
 ## Principles
 
-- **Client-owned data**: history and keys live on the client; backup is optional and encrypted.
+- **Client-owned data**: history and keys live on the client and are backed up to the server encrypted, openable only with your password.
 - **Minimal metadata**: store only what is needed for routing and abuse prevention.
 - **Incremental complexity**: add shared state (Redis/DB) only when justified by concrete needs.
 
@@ -53,7 +54,7 @@ the server is a dumb relay + mailbox, while clients own keys, history, and trust
     coming back" from "never used"; collapsing `410`→`404` would hide that
     an account ever existed at the cost of that UX nicety. Revisit if
     deletion-privacy ever becomes a goal.
-- If all devices are lost and no backup key exists, history is unrecoverable by design.
+- Lose every device and forget your password, and the encrypted backup can never be opened — account and history are unrecoverable by design. There is no recovery mechanism.
 
 ### Device compromise
 
