@@ -134,7 +134,7 @@ The public-facing apex `atmin.net` — static brochureware (Astro + Tailwind v4)
 
 - `make site-dev` / `make site-build` / `make site-check` (deps installed by `make install`).
 - It's **independent of the app's gates** — not in `make all/build/lint/test`. `site-build` runs `astro check` as its own gate.
-- Deploy is path-filtered CI (`.github/workflows/site.yml`) → Scaleway public bucket behind Edge Services; pushing to `master` with `site/**` changes publishes. Infra + DNS in [docs/ops.md](docs/ops.md) "Marketing site".
+- Deploy is path-filtered CI (`.github/workflows/site.yml`) → GitHub Pages at the apex (free managed TLS); pushing to `master` with `site/**` changes publishes. Pages + DNS setup in [docs/ops.md](docs/ops.md) "Marketing site".
 
 ## Backend (`server/`)
 

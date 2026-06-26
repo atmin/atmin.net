@@ -357,71 +357,61 @@ docker build -t atmin .
 docker run --env-file .env -p 8080:8080 atmin
 ```
 
-## Marketing site (`www.atmin.net`)
+## Marketing site (`atmin.net`)
 
 A static brochure ([ADR-0025](decisions/adr-0025-marketing-site.md)),
-**separate from the app container**. The build (`site/dist`, Astro) is synced to
-a public Object Storage bucket fronted by Edge Services (CDN + TLS). Source
-in [`site/`](../../site/); deploy is path-filtered CI
+**separate from the app container**. The build (`site/dist`, Astro) is published
+to **GitHub Pages**, which serves the **bare apex** `atmin.net` over HTTPS with
+an auto-provisioned (Let's Encrypt) certificate. Source in
+[`site/`](../../site/); deploy is path-filtered CI
 (`.github/workflows/site.yml`), independent of the app's `deploy.yml`.
 
-**Canonical host is `www.atmin.net`, not the bare apex.** Edge Services is
-subdomain-only — it can't serve a root/apex domain (a CNAME can't exist at an
-apex; [Scaleway docs](https://www.scaleway.com/en/docs/edge-services/reference-content/cname-record/),
-[open feature request](https://feature-request.scaleway.com/posts/983/add-support-for-root-apex-custom-domains-for-edge-services)).
-The bare `atmin.net` is **deferred** (see the ADR-0025 update and
-[tasks](../../tasks/README.md)); reaching it would need an A-record resource
-(e.g. a Load Balancer) since every Scaleway custom-domain product is CNAME-only.
-
-Kept on the same EU-resident Scaleway footprint as the app by design — the
-privacy product's front door should match its pitch (`storybook.atmin.net` is on
-GitHub Pages because it's an internal dev artifact, not the public face).
+**Why GitHub Pages, not Scaleway.** The hard constraint is the apex. Scaleway's
+custom-domain products (Edge Services, Containers) are CNAME-based, and a CNAME
+can't exist at an apex, so none can serve the bare `atmin.net` (the only Scaleway
+path is a Load Balancer at ~10× the app's monthly cost). GitHub Pages serves an
+apex via `A`/`AAAA` records with free managed TLS. It's US-hosted
+(Microsoft/Fastly), accepted because the brochure carries **no user data and has
+no request/data path** — the EU-resident stance is about the product's *data
+path*, where GitHub/CI is already an acknowledged exception. **Pragmatic is
+better than pure** (see ADR-0025).
 
 ### One-time setup
 
-1. **Public bucket + static website hosting** (console). Create `atmin-site` in
-   `fr-par`, then enable static website hosting in the bucket's settings with
-   index document `index.html` and error document `404.html`. The Scaleway
-   console exposes this directly — **no local S3 keys required**. (API
-   equivalent if you have keys configured: `s3cmd ws-create
-   --ws-index=index.html --ws-error=404.html s3://atmin-site`, or `aws s3
-   website s3://atmin-site/ --index-document index.html --error-document
-   404.html --endpoint-url https://s3.fr-par.scw.cloud`.)
+1. **Enable Pages** (repo → Settings → Pages): Source = *Deploy from a branch*,
+   branch = `gh-pages` / `(root)`. The first `site.yml` run creates `gh-pages`
+   (peaceiris), so let it run once, then set this.
 
-   Objects are made public per-object by the deploy (`s3cmd sync --acl-public`).
-   No CORS needed — the site issues no presigned-PUT / cross-origin calls. The
-   object upload runs in CI with the `SCW_*` GitHub secrets, so **no S3 keys
-   need to live on a workstation** — the only manual steps are this bucket
-   setting, the Edge Services pipeline, and DNS, all console-side.
+2. **Custom domain**: set `atmin.net` in Settings → Pages → Custom domain — the
+   deploy already writes the `CNAME` file (the workflow's `cname:`), so this
+   confirms it and triggers cert provisioning. Tick **Enforce HTTPS** once the
+   cert is ready (up to 24h).
 
-2. **Edge Services** (console → Edge Services → Create pipeline):
-   - Origin: the `atmin-site` bucket (its website endpoint).
-   - Cache: enabled (the deploy sets `Cache-Control: max-age=300`, so updates
-     appear within ~5 min without a manual purge).
-   - Custom domain: **`www.atmin.net`** (subdomain — Edge can't take the apex),
-     with the managed (Let's Encrypt) certificate.
+3. **DNS** (zone on Scaleway DNS, `ns*.dom.scw.cloud`):
+   - Apex `atmin.net` → four **A** records: `185.199.108.153`,
+     `185.199.109.153`, `185.199.110.153`, `185.199.111.153`.
+   - Apex `atmin.net` → four **AAAA** records: `2606:50c0:8000::153`,
+     `2606:50c0:8001::153`, `2606:50c0:8002::153`, `2606:50c0:8003::153`.
+   - `www.atmin.net` → **CNAME** `atmin.github.io.` — the Pages host, **not** the
+     apex (GitHub warns an apex-pointing `www` breaks Enforce-HTTPS).
+   - `app.` and `staging.` are unchanged (they front the Rust container).
 
-3. **DNS** — the zone is on Scaleway DNS (`ns*.dom.scw.cloud`), so when you set
-   the custom domain above, **Scaleway auto-creates the `www` CNAME and
-   provisions the cert** — no manual record, no verify step. (If the zone were
-   on an external provider you'd add `www.atmin.net CNAME <id>.svc.edge.scw.cloud`
-   yourself.) `app.` and `staging.` are unchanged. Leave the bare `atmin.net`
-   unconfigured for now — an apex ALIAS pointing at Edge resolves but has no cert
-   for `atmin.net`, so it would serve a TLS error; better absent than broken.
+### Decommissioning the old Scaleway path
+
+The site previously synced to a Scaleway bucket behind Edge Services. After the
+GitHub Pages cutover, remove the orphaned (paid) resources:
+
+- Delete the **Edge Services pipeline** for the site (console → Edge Services).
+- Delete the **`atmin-site` bucket** (console → Object Storage).
+- Remove any **`www` CNAME → `<id>.svc.edge.scw.cloud`** record left from the
+  Edge attempt (replace with the `atmin.github.io` CNAME above).
+- Drop the now-unused **`SCW_SITE_EDGE_PIPELINE_ID`** GitHub secret if it was set.
 
 ### GitHub Secrets
 
-The deploy reuses the existing Scaleway key pair (Scaleway API keys double as S3
-credentials) — no new required secrets:
-
-| Secret | Use |
-|--------|-----|
-| `SCW_ACCESS_KEY` / `SCW_SECRET_KEY` | bucket sync (already present for registry/deploy) |
-| `SCW_SITE_EDGE_PIPELINE_ID` | *optional* — set to enable the CI cache-purge step (inert until set) |
-
-The bucket name (`atmin-site`) and S3 host (`s3.fr-par.scw.cloud`) are plain
-`env` in the workflow; change both there if the bucket is named differently. A
-bucket-scoped key can replace the shared pair later for least privilege.
+**None.** The deploy publishes to this repo's own `gh-pages` branch using the
+default `GITHUB_TOKEN` — no PAT (unlike `storybook.atmin.net`, which publishes to
+an external repo and needs `STORYBOOK_DEPLOY_TOKEN`).
 
 ### Deploying
 
@@ -431,10 +421,10 @@ Automatic on every push to `master` that touches `site/**`:
 git push origin master
 ```
 
-Builds (`astro check` + build), `s3cmd sync`s `dist/` to the bucket (with
-`--delete-removed`), and — if `SCW_SITE_EDGE_PIPELINE_ID` is set — purges the
-Edge cache. App-only changes don't trigger it; site-only changes don't rebuild
-the app.
+Builds (`astro check` + build) and publishes `dist/` to `gh-pages` (peaceiris,
+which writes `.nojekyll` so Astro's `_astro/` assets survive Jekyll's
+leading-underscore stripping). App-only changes don't trigger it; site-only
+changes don't rebuild the app.
 
 ## Troubleshooting
 
