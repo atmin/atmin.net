@@ -88,6 +88,7 @@ links the implementing Playwright file, or marks it as not-yet-written.
 | [I8](./i8-sync-idempotent.md) | Sync is idempotent | **P2** | `sync-idempotent.spec.ts` |
 | [I9](./i9-chain-walker.md) | Chain walker recovers history across N rotations | **P1** | `credential-rotation-continuity.spec.ts` |
 | [I10](./i10-key-backup-object-name-safe.md) | Key backups survive any session_id, and never fail silently | **P1** | `key-backup-object-name.spec.ts` |
+| [I11](./i11-no-cross-account-local-leak.md) | A new session never inherits a prior account's local state | **P1** | `no-cross-account-leak.spec.ts` |
 
 ## Adding a new invariant
 

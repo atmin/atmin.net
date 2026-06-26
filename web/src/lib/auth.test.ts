@@ -103,6 +103,86 @@ describe('session - Session management', () => {
         });
     });
 
+    describe('saveSession - cross-account isolation', () => {
+        // A second, distinct account: its own userId and freshly-derived keys.
+        async function makeSession(
+            overrides: Partial<Session>,
+        ): Promise<Session> {
+            const keys = await deriveKeys(generateBackupSecret());
+            return {
+                token: 'tok',
+                userId: 'placeholder',
+                deviceId: 'dev',
+                handle: 'handle',
+                sharingPrivateKey: keys.sharing.privateKey,
+                sharingPublicKeyBytes: keys.sharing.publicKeyBytes,
+                backupKey: keys.backupKey,
+                keyVersion: 1,
+                ...overrides,
+            };
+        }
+
+        const selfNote = (userId: string) => [
+            {
+                id: 'm1',
+                conversationId: `self:${userId}`,
+                fromUser: userId,
+                fromDevice: 'dev',
+                text: 'saved message',
+                timestamp: new Date(),
+            },
+        ];
+
+        it('wipes a prior account’s cached data when a different account is persisted', async () => {
+            const { saveMessages, loadMessages } = await import('./db');
+
+            // Account A logs in and caches a self-note.
+            const accountA = await makeSession({
+                userId: 'A-user',
+                handle: 'alice',
+            });
+            await saveSession(accountA);
+            await saveMessages('A-user', selfNote('A-user'));
+            expect(await loadMessages('A-user')).toHaveLength(1);
+
+            // Account B authenticates on the same browser WITHOUT an explicit
+            // logout — the exact flow that leaked stale "Saved messages".
+            const accountB = await makeSession({
+                userId: 'B-user',
+                handle: 'bob',
+                token: 'tok-b',
+            });
+            await saveSession(accountB);
+
+            // A's cached messages are gone; the live session is B's own.
+            expect(await loadMessages('A-user')).toHaveLength(0);
+            const loaded = await loadSession();
+            expect(loaded?.userId).toBe('B-user');
+            expect(loaded?.token).toBe('tok-b');
+        });
+
+        it('preserves the cache when the same account re-authenticates', async () => {
+            const { saveMessages, loadMessages } = await import('./db');
+
+            const accountA = await makeSession({
+                userId: 'A-user',
+                handle: 'alice',
+            });
+            await saveSession(accountA);
+            await saveMessages('A-user', selfNote('A-user'));
+
+            // Re-login as A (new device + token, same userId).
+            await saveSession({
+                ...accountA,
+                token: 'tok-a2',
+                deviceId: 'dev2',
+            });
+
+            // Cache survives — no needless full re-sync for the same account.
+            expect(await loadMessages('A-user')).toHaveLength(1);
+        });
+    });
+
     describe('loadSession', () => {
         it('loads complete session from localStorage and IndexedDB', async () => {
             // Save session first

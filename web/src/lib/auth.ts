@@ -19,7 +19,33 @@ export interface Session {
 
 const LS_PREFIX = 'atmin:';
 
+/**
+ * Wipe local IndexedDB when the session being persisted belongs to a *different*
+ * account than the one whose data is currently on disk.
+ *
+ * The DB is a single shared `'atmin'` store, not per-account (see db.ts), and
+ * the `keys` store holds `sharingPrivateKey`/`backupKey` under fixed names with
+ * no userId scoping. Without this guard, authenticating as account B on a
+ * browser that last held account A inherits A's cached messages, conversations,
+ * and — worse — A's private keys. Logout wipes; login/register did not. This
+ * closes that gap at the single chokepoint every auth entry flows through.
+ *
+ * Wipe only on an owner *change*: re-login as the same account (or in-place key
+ * rotation, which keeps the userId) preserves the local cache, so no needless
+ * full re-sync from S3. A null owner (fresh browser, or a token cleared without
+ * a DB wipe) counts as a mismatch and wipes — we can't prove the on-disk data
+ * belongs to the incoming account, so we don't trust it.
+ */
+async function wipeIfAccountChanged(userId: string): Promise<void> {
+    const owner = localStorage.getItem(`${LS_PREFIX}userId`);
+    if (owner !== userId) {
+        await deleteDatabase();
+    }
+}
+
 export async function saveSession(session: Session): Promise<void> {
+    await wipeIfAccountChanged(session.userId);
+
     localStorage.setItem(`${LS_PREFIX}token`, session.token);
     localStorage.setItem(`${LS_PREFIX}userId`, session.userId);
     localStorage.setItem(`${LS_PREFIX}deviceId`, session.deviceId);
