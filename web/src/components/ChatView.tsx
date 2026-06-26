@@ -1,7 +1,6 @@
 import {
     Messagebar,
     Messages,
-    MessagesTitle,
     Navbar,
     NavbarBackLink,
     Page,
@@ -317,12 +316,28 @@ export default function ChatView({
                                     return (
                                         <Fragment key={msg.id}>
                                             {newDay && (
-                                                <MessagesTitle data-testid="day-separator">
-                                                    {dayLabel(
-                                                        msg.timestamp,
-                                                        now,
-                                                    )}
-                                                </MessagesTitle>
+                                                // Day divider — a centered pill
+                                                // that pins to the top of the
+                                                // timeline as you scroll, so the
+                                                // current day is always in view.
+                                                // Not Konsta's MessagesTitle: it
+                                                // drops className (so no margin /
+                                                // sticky) and crowds the bubbles.
+                                                // The row is transparent + full
+                                                // width to catch the top edge;
+                                                // only the blurred pill paints, so
+                                                // bubbles scroll legibly under it.
+                                                <div
+                                                    data-testid="day-separator"
+                                                    className="sticky top-2 z-10 my-3 flex justify-center"
+                                                >
+                                                    <span className="w-36 rounded-full bg-background/80 px-3 py-1 text-center text-xs font-medium whitespace-nowrap text-muted-foreground backdrop-blur-sm">
+                                                        {dayLabel(
+                                                            msg.timestamp,
+                                                            now,
+                                                        )}
+                                                    </span>
+                                                </div>
                                             )}
                                             <ChatMessage
                                                 text={msg.text}

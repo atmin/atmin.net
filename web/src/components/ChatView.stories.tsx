@@ -99,7 +99,10 @@ export const WithMessages: Story = {
 // render time so the labels always read Today / Yesterday / an older date no
 // matter when the story is opened (the divider label is viewer-local + relative
 // to now). Verifies the "<date>" / "Yesterday" / "Today" buckets in one frame
-// and in both ios/material × light/dark.
+// and in both ios/material × light/dark. Each divider is a centered pill with
+// vertical margin; at runtime it pins to the top of the scroll container
+// (`sticky`), so the current day stays in view — exercise the pinning by
+// scrolling a taller timeline in the app, not here.
 const DAY = 86_400_000;
 const at = (daysAgo: number, hh: number, mm: number) => {
     const d = new Date();
