@@ -78,6 +78,12 @@ interface Props {
     /** Unsent drafts keyed by conversation handle ("saved" for Saved Messages). */
     drafts?: Map<string, string>;
     userId: string;
+    /**
+     * False until the first IndexedDB read resolves. Gates the empty state so a
+     * populated account never flashes "No conversations yet" on reload while the
+     * local read is in flight.
+     */
+    hydrated: boolean;
     /** Navigate (forward View Transition) to a chat / settings route. */
     onOpen: (path: string) => void;
     onNewChat: (handle: string) => void;
@@ -90,6 +96,7 @@ export default function ChatsView({
     displayNames,
     drafts = new Map(),
     userId,
+    hydrated,
     onOpen,
     onNewChat,
 }: Props) {
@@ -222,7 +229,7 @@ export default function ChatsView({
                 })}
             </List>
 
-            {dmConvs.length === 0 && (
+            {hydrated && dmConvs.length === 0 && (
                 <Block className="text-center text-sm opacity-60">
                     No conversations yet — tap the compose button to start one.
                 </Block>

@@ -7,6 +7,7 @@ const meta = {
     component: ChatsView,
     parameters: { layout: 'fullscreen' },
     args: {
+        hydrated: true,
         onNewChat: fn(),
         onOpen: fn(),
     },
@@ -22,6 +23,20 @@ export const Empty: Story = {
         contacts: new Map(),
         displayNames: new Map(),
         userId: '01USER123',
+    },
+};
+
+// Pre-hydration on reload: the IndexedDB read hasn't resolved yet, so the empty
+// "No conversations yet" CTA is suppressed (a populated account must never flash
+// it). Only the always-present Saved Messages row shows until `hydrated` flips.
+export const Hydrating: Story = {
+    args: {
+        serverOk: true,
+        conversations: [],
+        contacts: new Map(),
+        displayNames: new Map(),
+        userId: '01USER123',
+        hydrated: false,
     },
 };
 

@@ -40,8 +40,6 @@ const fakeSession: Session = {
     keyVersion: 1,
 };
 
-const fakeMgr = { destroy: vi.fn() };
-
 describe('useConversations', () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -51,7 +49,10 @@ describe('useConversations', () => {
         vi.unstubAllGlobals();
     });
 
-    it('renders cached conversations from IDB immediately', async () => {
+    it('hydrates cached conversations from IDB immediately, with no session manager needed', async () => {
+        // The list is purely local data — reading it must not be gated on the
+        // Megolm session manager (WASM init + S3 key-restore). useConversations
+        // takes only the session; the read fires on mount regardless.
         const { loadConversations } = await import('@/lib/db');
         vi.mocked(loadConversations).mockResolvedValue([
             {
@@ -66,15 +67,18 @@ describe('useConversations', () => {
         vi.stubGlobal('fetch', mockFetch);
 
         const { useConversations } = await import('./useConversations');
-        const { result } = renderHook(() =>
-            useConversations(fakeSession, fakeMgr as never),
-        );
+        const { result } = renderHook(() => useConversations(fakeSession));
+
+        // Before the async IDB read resolves: not yet hydrated, so the view can
+        // suppress its empty state instead of flashing it.
+        expect(result.current.hydrated).toBe(false);
 
         await act(async () => {
             await new Promise((r) => setTimeout(r, 0));
         });
 
         expect(loadConversations).toHaveBeenCalled();
+        expect(result.current.hydrated).toBe(true);
         expect(result.current.conversations).toHaveLength(1);
         expect(result.current.conversations[0].conversationId).toBe(
             'self:user1',
@@ -86,9 +90,7 @@ describe('useConversations', () => {
         vi.stubGlobal('fetch', mockFetch);
 
         const { useConversations } = await import('./useConversations');
-        const { result } = renderHook(() =>
-            useConversations(fakeSession, fakeMgr as never),
-        );
+        const { result } = renderHook(() => useConversations(fakeSession));
 
         expect(result.current.serverOk).toBeNull();
 
@@ -105,9 +107,7 @@ describe('useConversations', () => {
         vi.stubGlobal('fetch', mockFetch);
 
         const { useConversations } = await import('./useConversations');
-        const { result } = renderHook(() =>
-            useConversations(fakeSession, fakeMgr as never),
-        );
+        const { result } = renderHook(() => useConversations(fakeSession));
 
         await act(async () => {
             await new Promise((r) => setTimeout(r, 0));
@@ -121,29 +121,12 @@ describe('useConversations', () => {
         vi.stubGlobal('fetch', mockFetch);
 
         const { useConversations } = await import('./useConversations');
-        const { result } = renderHook(() =>
-            useConversations(fakeSession, fakeMgr as never),
-        );
+        const { result } = renderHook(() => useConversations(fakeSession));
 
         await act(async () => {
             await new Promise((r) => setTimeout(r, 0));
         });
 
         expect(result.current.serverOk).toBe(false);
-    });
-
-    it('does not load conversations when sessionManager is null', async () => {
-        const { loadConversations } = await import('@/lib/db');
-        const mockFetch = vi.fn().mockResolvedValue({ ok: true });
-        vi.stubGlobal('fetch', mockFetch);
-
-        const { useConversations } = await import('./useConversations');
-        renderHook(() => useConversations(fakeSession, null));
-
-        await act(async () => {
-            await new Promise((r) => setTimeout(r, 0));
-        });
-
-        expect(loadConversations).not.toHaveBeenCalled();
     });
 });

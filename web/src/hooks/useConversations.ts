@@ -9,7 +9,6 @@ import {
     saveContact,
 } from '@/lib/db';
 import { onInboxUpdated } from '@/lib/inbox-sync';
-import type { SessionManager } from '@/lib/megolm-session';
 import { path } from '@/lib/paths';
 
 export interface ConversationsState {
@@ -17,12 +16,16 @@ export interface ConversationsState {
     contacts: Map<string, string>;
     displayNames: Map<string, string>;
     serverOk: boolean | null;
+    /**
+     * True once the first IndexedDB read has resolved. The list is local data,
+     * so this flips within a frame of mount — it exists only to suppress the
+     * "no conversations" empty state during that read, so a populated account
+     * never flashes it on reload.
+     */
+    hydrated: boolean;
 }
 
-export function useConversations(
-    session: Session,
-    sessionManager: SessionManager | null,
-): ConversationsState {
+export function useConversations(session: Session): ConversationsState {
     const [serverOk, setServerOk] = useState<boolean | null>(null);
     const [conversations, setConversations] = useState<StoredConversation[]>(
         [],
@@ -31,6 +34,7 @@ export function useConversations(
     const [displayNames, setDisplayNames] = useState<Map<string, string>>(
         new Map(),
     );
+    const [hydrated, setHydrated] = useState(false);
 
     useEffect(() => {
         fetch('/healthz')
@@ -38,10 +42,15 @@ export function useConversations(
             .catch(() => setServerOk(false));
     }, []);
 
-    // Load conversations + contacts from IndexedDB, then sync from server
+    // Hydrate the conversation list straight from IndexedDB on mount. It's
+    // purely local data, so it must NOT wait on the Megolm session manager —
+    // that only goes live after WASM init + the S3 key-restore round-trips, and
+    // gating the list behind it left it blank for seconds on reload. The
+    // background inbox sync reconciles afterwards via onInboxUpdated. Keyed on
+    // stable session primitives (not the session object, which gets a fresh
+    // reference each loadSession) so StrictMode's double-invoke doesn't refire.
+    const { userId, token, backupKey, keyVersion } = session;
     useEffect(() => {
-        if (!sessionManager) return;
-
         const refresh = async () => {
             const [convs, contactMap] = await Promise.all([
                 loadConversations(),
@@ -49,14 +58,14 @@ export function useConversations(
             ]);
             setConversations(convs);
             setContacts(contactMap);
+            setHydrated(true);
 
             // Collect all conversation peer IDs
             const peerIds: string[] = [];
             for (const conv of convs) {
                 if (conv.conversationId.startsWith('self:')) continue;
                 const parts = conv.conversationId.split(':');
-                const peerUserId =
-                    parts[1] === session.userId ? parts[2] : parts[1];
+                const peerUserId = parts[1] === userId ? parts[2] : parts[1];
                 peerIds.push(peerUserId);
             }
 
@@ -69,7 +78,7 @@ export function useConversations(
                     peerIds.map(async (uid) => {
                         try {
                             const buf = await storeGet(
-                                session.token,
+                                token,
                                 path.profile(uid),
                             );
                             const profile = JSON.parse(
@@ -96,13 +105,8 @@ export function useConversations(
                 setDisplayNames(resolvedNames);
                 if (contactsChanged) {
                     setContacts(resolvedContacts);
-                    uploadContacts(
-                        session.token,
-                        session.userId,
-                        session.backupKey,
-                        session.keyVersion,
-                    ).catch((err) =>
-                        console.error('Contact backup failed:', err),
+                    uploadContacts(token, userId, backupKey, keyVersion).catch(
+                        (err) => console.error('Contact backup failed:', err),
                     );
                 }
             }
@@ -111,7 +115,7 @@ export function useConversations(
         // Show cached data immediately, then re-read whenever inbox syncs
         refresh();
         return onInboxUpdated(refresh);
-    }, [session, sessionManager]);
+    }, [userId, token, backupKey, keyVersion]);
 
-    return { conversations, contacts, displayNames, serverOk };
+    return { conversations, contacts, displayNames, serverOk, hydrated };
 }

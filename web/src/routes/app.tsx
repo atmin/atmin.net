@@ -146,10 +146,7 @@ export default function App() {
                         path="/"
                         element={
                             session ? (
-                                <Chats
-                                    session={session}
-                                    sessionManager={sessionManager}
-                                />
+                                <Chats session={session} />
                             ) : (
                                 <Landing
                                     notice={notice}
