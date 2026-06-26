@@ -9,6 +9,11 @@ this file forward-looking, never a changelog.
   me" checkbox + idle session expiry (30d / 1h, checked-by-default). Needs an
   ADR: the token never expires server-side, so client expiry is UX. **Follow-on
   to the leak fix.**
+- **[unread-and-badges](unread-and-badges.md)** — per-chat unread counts, an
+  installed-PWA app-icon badge, a Slack-style `── New ──` divider, and
+  zero-knowledge cross-device read sync (encrypted `read-markers.json`, monotone
+  `max()` merge — no server change). Needs a tight ADR for the merge model;
+  closed-app push deferred.
 - **Group chats** — membership + rekey (Megolm is already a group ratchet);
   needs an ADR, **v0.3**. Pairs with
   [ADR-0024](../docs/decisions/adr-0024-chat-url-fragments.md) (fragment rooms).
