@@ -5,10 +5,6 @@ The **frontier** — active and upcoming work, one line each. A task earns a
 *shipped* is recorded in the diary, [docs/releases/](../docs/releases/) — keep
 this file forward-looking, never a changelog.
 
-- **[clear-local-state-on-auth](clear-local-state-on-auth.md)** — cross-account
-  IndexedDB leak fixed: `saveSession` wipes on owner-mismatch (model (c)),
-  closing the key leak too. Invariant I11 + e2e added. **Implemented, pending
-  commit + real-device check.**
 - **[remember-me-session-expiry](remember-me-session-expiry.md)** — "Remember
   me" checkbox + idle session expiry (30d / 1h, checked-by-default). Needs an
   ADR: the token never expires server-side, so client expiry is UX. **Follow-on
