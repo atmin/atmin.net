@@ -50,7 +50,8 @@ Understandable is better than convenient.
 Documented is better than remembered.  
 Tested is better than hoped for.  
 Deleted is better than unused.  
-Not yet is better than accidental.
+Not yet is better than accidental.  
+Pragmatic is better than pure.
 
 Agents optimise locally.  
 Architecture defines what "better" means globally.
