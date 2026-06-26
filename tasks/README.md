@@ -6,8 +6,13 @@ The **frontier** — active and upcoming work, one line each. A task earns a
 this file forward-looking, never a changelog.
 
 - **[clear-local-state-on-auth](clear-local-state-on-auth.md)** — cross-account
-  IndexedDB leak: login/register don't wipe local state (only logout does), and
-  crypto keys aren't user-scoped. **Bug, active.**
+  IndexedDB leak fixed: `saveSession` wipes on owner-mismatch (model (c)),
+  closing the key leak too. Invariant I11 + e2e added. **Implemented, pending
+  commit + real-device check.**
+- **[remember-me-session-expiry](remember-me-session-expiry.md)** — "Remember
+  me" checkbox + idle session expiry (30d / 1h, checked-by-default). Needs an
+  ADR: the token never expires server-side, so client expiry is UX. **Follow-on
+  to the leak fix.**
 - **[marketing-site-github-pages](marketing-site-github-pages.md)** — pivot the
   site host Scaleway → GitHub Pages (apex + free TLS; Edge is subdomain-only).
   [ADR-0025](../docs/decisions/adr-0025-marketing-site.md) rewritten;
