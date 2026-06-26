@@ -13,10 +13,6 @@ this file forward-looking, never a changelog.
   me" checkbox + idle session expiry (30d / 1h, checked-by-default). Needs an
   ADR: the token never expires server-side, so client expiry is UX. **Follow-on
   to the leak fix.**
-- **[marketing-site-github-pages](marketing-site-github-pages.md)** — pivot the
-  site host Scaleway → GitHub Pages (apex + free TLS; Edge is subdomain-only).
-  Repo side done (workflow, ADR, ops/DNS docs, Zen line); **manual go-live +
-  Scaleway decommission remain** before the apex is live.
 - **[registration-pow-difficulty](registration-pow-difficulty.md)** — confirm
   PoW is real off-test, decide the bit target, document the per-env matrix.
 - **Group chats** — membership + rekey (Megolm is already a group ratchet);
