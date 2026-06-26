@@ -13,8 +13,6 @@ this file forward-looking, never a changelog.
   me" checkbox + idle session expiry (30d / 1h, checked-by-default). Needs an
   ADR: the token never expires server-side, so client expiry is UX. **Follow-on
   to the leak fix.**
-- **[registration-pow-difficulty](registration-pow-difficulty.md)** — confirm
-  PoW is real off-test, decide the bit target, document the per-env matrix.
 - **Group chats** — membership + rekey (Megolm is already a group ratchet);
   needs an ADR, **v0.3**. Pairs with
   [ADR-0024](../docs/decisions/adr-0024-chat-url-fragments.md) (fragment rooms).
