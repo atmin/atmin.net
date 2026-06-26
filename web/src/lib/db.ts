@@ -21,7 +21,7 @@
 import { isAmendment, parseInner } from './payload';
 
 const DB_NAME = 'atmin';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 const KEYS_STORE = 'keys';
 const MESSAGES_STORE = 'messages';
 const CONVERSATIONS_STORE = 'conversations';
@@ -75,6 +75,14 @@ export interface StoredConversation {
     // instead of the empty preview an amendment payload would yield. Additive:
     // pre-existing rows lack it and read as not-deleted.
     lastMessageDeleted?: boolean;
+    // Read watermark: the timestamp of the newest message considered read in
+    // this conversation (ADR-0026). Unread = incoming originals newer than this.
+    // Monotone — only ever advances. Synced across devices as an encrypted blob
+    // via lib/read-markers.ts. The v10 upgrade backfills existing rows to
+    // lastMessageTimestamp so a returning user isn't flooded with "all new".
+    // Absent on a freshly synced conversation → reads as 0 (everything unread)
+    // until the first mark-read / marker merge.
+    lastReadTimestamp?: number;
 }
 
 export interface StoredContact {
@@ -274,6 +282,34 @@ async function openDB(): Promise<IDBDatabase> {
                 database.createObjectStore(MEDIA_CACHE_STORE, {
                     keyPath: 'url',
                 });
+            }
+
+            // v10: Read watermarks (ADR-0026). No new store — adds an optional
+            // lastReadTimestamp to existing conversation rows. Backfill it to
+            // each row's lastMessageTimestamp so a returning user sees their
+            // whole synced history as already read (no "everything is new"
+            // flood). New conversations created after the upgrade start absent
+            // (= unread) and are marked read on open. Runs inside the
+            // versionchange tx; on a fresh DB the store is empty → no-op.
+            if (event.oldVersion < 10) {
+                const upgradeTx = (event.target as IDBOpenDBRequest)
+                    .transaction;
+                const convStore = upgradeTx?.objectStore(CONVERSATIONS_STORE);
+                if (convStore) {
+                    const cursorReq = convStore.openCursor();
+                    cursorReq.onsuccess = () => {
+                        const cursor = cursorReq.result;
+                        if (!cursor) return;
+                        const row = cursor.value as StoredConversation;
+                        if (row.lastReadTimestamp === undefined) {
+                            cursor.update({
+                                ...row,
+                                lastReadTimestamp: row.lastMessageTimestamp,
+                            });
+                        }
+                        cursor.continue();
+                    };
+                }
             }
         };
     });
@@ -740,6 +776,106 @@ export async function loadConversations(): Promise<StoredConversation[]> {
     const result = await awaitReq<StoredConversation[]>(index.getAll());
     // Index returns ascending; reverse for most-recent-first
     return result.reverse();
+}
+
+// ── Read watermarks (ADR-0026) ────────────────────────────────────
+
+/** This conversation's read watermark, or 0 if the row or field is absent. */
+export async function getConversationLastRead(
+    conversationId: string,
+): Promise<number> {
+    const database = await openDB();
+    const tx = database.transaction(CONVERSATIONS_STORE, 'readonly');
+    const row = await awaitReq<StoredConversation | undefined>(
+        tx.objectStore(CONVERSATIONS_STORE).get(conversationId),
+    );
+    return row?.lastReadTimestamp ?? 0;
+}
+
+/**
+ * Advance a conversation's read watermark to `timestamp`. Monotone — never
+ * lowers an existing watermark (the read-marker CRDT is per-conversation
+ * `max()`; see ADR-0026). A no-op if the conversation row doesn't exist yet
+ * (no messages synced) or the watermark wouldn't advance. Returns true only
+ * when it actually advanced, so callers can decide whether to schedule a
+ * cross-device push. Read + write split across two transactions (the
+ * saveMessages pattern); a concurrent advance is self-healing under `max()`.
+ */
+export async function markConversationRead(
+    conversationId: string,
+    timestamp: number,
+): Promise<boolean> {
+    const database = await openDB();
+    const tx1 = database.transaction(CONVERSATIONS_STORE, 'readonly');
+    const existing = await awaitReq<StoredConversation | undefined>(
+        tx1.objectStore(CONVERSATIONS_STORE).get(conversationId),
+    );
+    await awaitTx(tx1);
+    if (!existing) return false;
+    if (timestamp <= (existing.lastReadTimestamp ?? 0)) return false;
+
+    const tx2 = database.transaction(CONVERSATIONS_STORE, 'readwrite');
+    tx2.objectStore(CONVERSATIONS_STORE).put({
+        ...existing,
+        lastReadTimestamp: timestamp,
+    });
+    await awaitTx(tx2);
+    return true;
+}
+
+/** Per-conversation read watermarks, for merging with the synced blob. */
+export async function loadReadMarkers(): Promise<Record<string, number>> {
+    const convs = await loadConversations();
+    const markers: Record<string, number> = {};
+    for (const c of convs) {
+        if (c.lastReadTimestamp)
+            markers[c.conversationId] = c.lastReadTimestamp;
+    }
+    return markers;
+}
+
+/**
+ * Per-conversation count of unread **incoming** messages — original (non-
+ * amendment) messages from someone other than the inbox owner, newer than the
+ * conversation's read watermark. Own sends and self-chat never count (all
+ * `fromUser === userId`); edits/deletes don't count (they amend an existing
+ * bubble, not a new one), matching what the timeline renders. Conversations
+ * with zero unread are omitted from the map.
+ */
+export async function unreadCounts(
+    userId: string,
+): Promise<Map<string, number>> {
+    const database = await openDB();
+    const tx = database.transaction(
+        [CONVERSATIONS_STORE, MESSAGES_STORE],
+        'readonly',
+    );
+    const convs = await awaitReq<StoredConversation[]>(
+        tx.objectStore(CONVERSATIONS_STORE).getAll(),
+    );
+    const lastRead = new Map<string, number>();
+    for (const c of convs) {
+        lastRead.set(c.conversationId, c.lastReadTimestamp ?? 0);
+    }
+    const msgs = await awaitReq<StoredMessage[]>(
+        tx
+            .objectStore(MESSAGES_STORE)
+            .index('userId')
+            .getAll(IDBKeyRange.only(userId)),
+    );
+
+    const counts = new Map<string, number>();
+    for (const m of msgs) {
+        if (m.fromUser === userId) continue; // own / self-chat — never unread
+        if (isAmendment(m.text)) continue; // amendments aren't new bubbles
+        if (m.timestamp > (lastRead.get(m.conversationId) ?? 0)) {
+            counts.set(
+                m.conversationId,
+                (counts.get(m.conversationId) ?? 0) + 1,
+            );
+        }
+    }
+    return counts;
 }
 
 // ── Contacts ─────────────────────────────────────────────────────

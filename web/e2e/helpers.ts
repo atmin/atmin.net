@@ -339,6 +339,33 @@ export async function expectConversationPreview(
 }
 
 /**
+ * Assert the chat-list row for `handle` shows an unread badge reading `count`
+ * (ADR-0026). Pass `null` to assert no badge — the conversation is fully read.
+ */
+export async function expectUnreadBadge(
+    page: Page,
+    handle: string,
+    count: number | null,
+): Promise<void> {
+    const badge = page
+        .locator('li')
+        .filter({ hasText: handle })
+        .getByTestId('unread-badge');
+    if (count === null) await expect(badge).toHaveCount(0);
+    else await expect(badge).toHaveText(String(count));
+}
+
+/** Assert the open conversation shows (or doesn't) a "New" divider (ADR-0026). */
+export async function expectNewDivider(
+    page: Page,
+    present: boolean,
+): Promise<void> {
+    const divider = page.getByTestId('new-divider');
+    if (present) await expect(divider).toBeVisible();
+    else await expect(divider).toHaveCount(0);
+}
+
+/**
  * Read Megolm session state from IndexedDB.
  */
 export async function getMegolmState(page: Page) {

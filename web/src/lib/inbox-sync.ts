@@ -17,6 +17,7 @@ import type { Session } from './auth';
 import { markArchiveIngested, saveMessages } from './db';
 import type { SessionManager } from './megolm-session';
 import { syncMessages } from './messaging';
+import { syncReadMarkers } from './read-markers';
 
 const listeners = new Set<() => void>();
 
@@ -79,6 +80,17 @@ export async function syncAndPublish(
         } catch (err) {
             console.error(`Failed to mark archive ingested ${key}:`, err);
         }
+    }
+
+    // Reconcile read markers with the cross-device blob (ADR-0026): a chat read
+    // on another device stops showing unread here, and any local read this
+    // device made offline is pushed up. Best-effort — a failure (offline) costs
+    // only a deferred reconcile, never local state; the listeners below still
+    // fire so badges reflect freshly synced messages.
+    try {
+        await syncReadMarkers(session);
+    } catch (err) {
+        console.error('Read-marker sync failed:', err);
     }
 
     for (const fn of listeners) {

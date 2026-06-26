@@ -18,6 +18,7 @@ export const path = {
     device: (uid: string, did: string) => `users/${uid}/devices/${did}.json`,
     handle: (h: string) => `handles/${h}.json`,
     contacts: (uid: string) => `users/${uid}/contacts.json`,
+    readMarkers: (uid: string) => `users/${uid}/read-markers.json`,
     user: (uid: string) => `users/${uid}/`,
     devices: (uid: string) => `users/${uid}/devices/`,
     inboxLive: (uid: string) => `inbox/${uid}/live/`,

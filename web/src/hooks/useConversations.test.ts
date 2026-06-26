@@ -15,10 +15,15 @@ vi.mock('@/lib/db', () => ({
     loadConversations: vi.fn().mockResolvedValue([]),
     loadAllContacts: vi.fn().mockResolvedValue(new Map()),
     saveContact: vi.fn().mockResolvedValue(undefined),
+    unreadCounts: vi.fn().mockResolvedValue(new Map()),
 }));
 
 vi.mock('@/lib/inbox-sync', () => ({
     onInboxUpdated: vi.fn().mockReturnValue(vi.fn()),
+}));
+
+vi.mock('@/lib/read-markers', () => ({
+    onReadMarkersChanged: vi.fn().mockReturnValue(vi.fn()),
 }));
 
 vi.mock('@/lib/paths', () => ({

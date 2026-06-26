@@ -7,14 +7,18 @@ import {
     loadConversations,
     type StoredConversation,
     saveContact,
+    unreadCounts,
 } from '@/lib/db';
 import { onInboxUpdated } from '@/lib/inbox-sync';
 import { path } from '@/lib/paths';
+import { onReadMarkersChanged } from '@/lib/read-markers';
 
 export interface ConversationsState {
     conversations: StoredConversation[];
     contacts: Map<string, string>;
     displayNames: Map<string, string>;
+    /** Per-conversation unread incoming-message count (ADR-0026); omits zeros. */
+    unread: Map<string, number>;
     serverOk: boolean | null;
     /**
      * True once the first IndexedDB read has resolved. The list is local data,
@@ -34,6 +38,7 @@ export function useConversations(session: Session): ConversationsState {
     const [displayNames, setDisplayNames] = useState<Map<string, string>>(
         new Map(),
     );
+    const [unread, setUnread] = useState<Map<string, number>>(new Map());
     const [hydrated, setHydrated] = useState(false);
 
     useEffect(() => {
@@ -52,12 +57,14 @@ export function useConversations(session: Session): ConversationsState {
     const { userId, token, backupKey, keyVersion } = session;
     useEffect(() => {
         const refresh = async () => {
-            const [convs, contactMap] = await Promise.all([
+            const [convs, contactMap, unreadMap] = await Promise.all([
                 loadConversations(),
                 loadAllContacts(),
+                unreadCounts(userId),
             ]);
             setConversations(convs);
             setContacts(contactMap);
+            setUnread(unreadMap);
             setHydrated(true);
 
             // Collect all conversation peer IDs
@@ -112,10 +119,29 @@ export function useConversations(session: Session): ConversationsState {
             }
         };
 
-        // Show cached data immediately, then re-read whenever inbox syncs
+        // A read mark (here or merged from another device) changes only unread
+        // counts — recompute those alone, skipping the profile/network refresh.
+        const recomputeUnread = async () => {
+            setUnread(await unreadCounts(userId));
+        };
+
+        // Show cached data immediately, then re-read whenever inbox syncs; a
+        // separate light recompute keeps badges current on read-marker changes.
         refresh();
-        return onInboxUpdated(refresh);
+        const offInbox = onInboxUpdated(refresh);
+        const offRead = onReadMarkersChanged(recomputeUnread);
+        return () => {
+            offInbox();
+            offRead();
+        };
     }, [userId, token, backupKey, keyVersion]);
 
-    return { conversations, contacts, displayNames, serverOk, hydrated };
+    return {
+        conversations,
+        contacts,
+        displayNames,
+        unread,
+        serverOk,
+        hydrated,
+    };
 }

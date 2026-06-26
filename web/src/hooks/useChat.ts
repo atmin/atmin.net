@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { resolve } from '@/lib/api';
 import type { Session } from '@/lib/auth';
 import { uploadContacts } from '@/lib/contact-backup';
 import { base64UrlDecode } from '@/lib/crypto';
 import {
+    getConversationLastRead,
     loadAllContacts,
     loadMessages as loadFromDB,
+    markConversationRead,
     saveContact,
 } from '@/lib/db';
 import { onInboxUpdated } from '@/lib/inbox-sync';
@@ -13,6 +15,10 @@ import type { MediaFile } from '@/lib/media';
 import type { SessionManager } from '@/lib/megolm-session';
 import { conversationId } from '@/lib/messaging';
 import { parseInner } from '@/lib/payload';
+import {
+    notifyReadMarkersChanged,
+    scheduleReadMarkerPush,
+} from '@/lib/read-markers';
 import { useChatSend } from './useChatSend';
 
 export interface Message {
@@ -126,6 +132,11 @@ export interface ChatState {
     online: boolean;
     encryptionReady: boolean;
     chatTitle: string;
+    // The read watermark captured when this conversation was opened (ADR-0026).
+    // The "New" divider renders before the first incoming message newer than
+    // this. Frozen on open so messages arriving mid-view stay below the line
+    // until the next open. null until the boundary is read.
+    newBoundary: number | null;
     sendMessage: (text: string) => Promise<void>;
     sendMedia: (file: File, caption?: string) => Promise<void>;
 }
@@ -140,6 +151,11 @@ export function useChat(
     const [messages, setMessages] = useState<Message[]>([]);
     const [loading, setLoading] = useState(true);
     const [convId, setConvId] = useState<string | null>(null);
+    const [newBoundary, setNewBoundary] = useState<number | null>(null);
+    // Which conversation's "New" boundary is already frozen — so a refresh
+    // (inbox sync while open) doesn't re-read it after we've marked this view
+    // read. Reset implicitly when convId changes.
+    const boundaryConvId = useRef<string | null>(null);
     const [chatTitle, setChatTitle] = useState(
         isSaved ? 'Saved Messages' : (handle ?? ''),
     );
@@ -203,27 +219,69 @@ export function useChat(
 
     // Read from IndexedDB immediately on convId change, then subscribe to
     // inbox updates. useInboxSync (in app.tsx) owns the SSE connection and
-    // calls syncAndPublish; we just re-read IDB whenever it notifies us.
+    // calls syncAndPublish; we just re-read IDB whenever it notifies us. Opening
+    // a chat also marks it read (ADR-0026): the watermark advances to the newest
+    // message, the chats-list/app-icon badges clear, and the read is pushed to
+    // the cross-device blob.
     useEffect(() => {
         if (!convId) return;
+        let cancelled = false;
 
-        const refresh = async () => {
-            try {
-                const all = await loadFromDB(session.userId);
-                const filtered = all
-                    .filter((m) => m.conversationId === convId)
-                    .map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
-                setMessages(toMessages(filtered, session.userId));
-            } catch (err) {
-                console.error('Failed to load messages from IDB:', err);
-            } finally {
-                setLoading(false);
+        // Load the conversation's messages plus the newest stored timestamp
+        // (incl. amendments) — the watermark to mark read at. Pure read: it
+        // sets no state, so the caller can apply messages + loading together.
+        const load = async (): Promise<{ msgs: Message[]; latest: number }> => {
+            const all = await loadFromDB(session.userId);
+            const filtered = all
+                .filter((m) => m.conversationId === convId)
+                .map((m) => ({ ...m, timestamp: new Date(m.timestamp) }));
+            let latest = 0;
+            for (const m of filtered) {
+                latest = Math.max(latest, m.timestamp.getTime());
+            }
+            return { msgs: toMessages(filtered, session.userId), latest };
+        };
+
+        const markRead = async (latest: number) => {
+            if (latest <= 0) return;
+            if (await markConversationRead(convId, latest)) {
+                notifyReadMarkersChanged();
+                scheduleReadMarkerPush(session);
             }
         };
 
-        refresh();
-        return onInboxUpdated(refresh);
-    }, [convId, session.userId]);
+        const refresh = async (initial: boolean) => {
+            try {
+                // Freeze the divider boundary once per open, *before* marking
+                // read, so it reflects what was unseen when the chat opened.
+                if (initial && boundaryConvId.current !== convId) {
+                    boundaryConvId.current = convId;
+                    const lr = await getConversationLastRead(convId);
+                    if (!cancelled) setNewBoundary(lr);
+                }
+                const { msgs, latest } = await load();
+                if (cancelled) return;
+                // Apply messages and clear loading in the same tick (no await
+                // between) so they render together — useChatScroll's
+                // first-paint scroll-to-bottom must fire against the rendered
+                // messages, not the loading placeholder. mark-read runs after,
+                // off the render-timing path.
+                setMessages(msgs);
+                if (initial) setLoading(false);
+                await markRead(latest);
+            } catch (err) {
+                console.error('Failed to load messages from IDB:', err);
+                if (initial && !cancelled) setLoading(false);
+            }
+        };
+
+        refresh(true);
+        const off = onInboxUpdated(() => refresh(false));
+        return () => {
+            cancelled = true;
+            off();
+        };
+    }, [convId, session]);
 
     return {
         messages,
@@ -232,6 +290,7 @@ export function useChat(
         online,
         encryptionReady: !!sessionManager,
         chatTitle,
+        newBoundary,
         sendMessage: sendText,
         sendMedia,
     };

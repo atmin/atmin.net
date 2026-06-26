@@ -9,8 +9,14 @@ interface Props {
 }
 
 export default function ChatsRoute({ session }: Props) {
-    const { conversations, contacts, displayNames, serverOk, hydrated } =
-        useConversations(session);
+    const {
+        conversations,
+        contacts,
+        displayNames,
+        unread,
+        serverOk,
+        hydrated,
+    } = useConversations(session);
     const drafts = useDrafts();
     // Drive forward View Transitions for list → chat / settings (ADR-0023).
     const onOpen = useViewTransitionNavigate();
@@ -21,6 +27,7 @@ export default function ChatsRoute({ session }: Props) {
             conversations={conversations}
             contacts={contacts}
             displayNames={displayNames}
+            unread={unread}
             drafts={drafts}
             userId={session.userId}
             hydrated={hydrated}

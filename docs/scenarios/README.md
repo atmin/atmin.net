@@ -15,6 +15,7 @@ the resulting S3 state, and is used to generate end-to-end tests.
 - [Media](./media.md) — encrypted file upload and download
 - [Compose tray](./compose.md) — stage an attachment (pick / paste / drop), add a companion message, then explicit send
 - [Message amendments](./message-amendments.md) — editing and deleting sent messages via amendment envelopes
+- [Unread messages](./unread-messages.md) — unread counts, the `── New ──` divider, app-icon badge, and zero-knowledge cross-device read sync
 - [Stolen device](./stolen-device.md) — device compromise and token revocation
 - [Invalid token](./invalid-token.md) — server rejects token (401), history survives
 - [Offline mode](./offline-mode.md) — network unavailability, cached view, reconnect

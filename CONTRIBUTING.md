@@ -198,6 +198,7 @@ Single Rust crate (Rocket 0.5). **Stateless by design**: all durable state lives
 | `users/{uid}/devices/{did}.json` | server | Existence = device is valid; deletion = revoked |
 | `users/{uid}/rotation-records/{request_id}.json` | server (`POST /v1/rotate-keys`) | Idempotency record; 24h TTL |
 | `users/{uid}/contacts.json` | client (presigned PUT, AES-256-GCM with backup key) | E2E encrypted |
+| `users/{uid}/read-markers.json` | client (presigned PUT, AES-256-GCM with backup key) | E2E encrypted; `conversation_id → last-read timestamp`, merged per-key `max()` (ADR-0026) |
 | `handles/{handle}.json` | server (projection of `profile.json` public fields) | Resolve cache |
 | `inbox/{uid}/live/{msg_id}` | server (`POST /v1/send`) | JSON envelope |
 | `inbox/{uid}/archive/{date}-{ULID}` | server (`POST /v1/store/compact`) | CBOR array |

@@ -22,6 +22,13 @@ vi.mock('@/lib/crypto', () => ({
 vi.mock('@/lib/db', () => ({
     loadMessages: vi.fn().mockResolvedValue([]),
     saveContact: vi.fn().mockResolvedValue(undefined),
+    getConversationLastRead: vi.fn().mockResolvedValue(0),
+    markConversationRead: vi.fn().mockResolvedValue(false),
+}));
+
+vi.mock('@/lib/read-markers', () => ({
+    notifyReadMarkersChanged: vi.fn(),
+    scheduleReadMarkerPush: vi.fn(),
 }));
 
 vi.mock('@/lib/inbox-sync', () => ({

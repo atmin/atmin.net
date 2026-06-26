@@ -93,6 +93,42 @@ export const WithConversations: Story = {
     },
 };
 
+// Unread counts (ADR-0026): a per-row badge on conversations with unseen
+// incoming messages. Saved Messages and a fully-read conversation show none.
+export const WithUnread: Story = {
+    args: {
+        serverOk: true,
+        conversations: [
+            {
+                conversationId: 'dm:01USER123:01OTHER456',
+                lastMessageText: JSON.stringify({
+                    type: 'text',
+                    body: 'Did you see the latest?',
+                }),
+                lastMessageTimestamp: Date.now() - 1000 * 60 * 2,
+                messageCount: 12,
+            },
+            {
+                conversationId: 'dm:01USER123:01ALICE789',
+                lastMessageText: JSON.stringify({
+                    type: 'text',
+                    body: 'All caught up here',
+                }),
+                lastMessageTimestamp: Date.now() - 1000 * 60 * 60,
+                messageCount: 4,
+            },
+        ],
+        contacts: new Map([
+            ['01OTHER456', 'silver-hawk'],
+            ['01ALICE789', 'gentle-breeze'],
+        ]),
+        displayNames: new Map([['01ALICE789', 'Alice Wonderland']]),
+        // silver-hawk has 3 unread; gentle-breeze is fully read (omitted).
+        unread: new Map([['dm:01USER123:01OTHER456', 3]]),
+        userId: '01USER123',
+    },
+};
+
 // Two special previews: a deleted latest message shows a muted "[deleted]"
 // (mirroring the in-chat placeholder), and an unsent draft shows a red "Draft:"
 // prefix that wins over the stored last message.

@@ -11,6 +11,7 @@ import NotFound from '@/components/NotFound';
 import { OfflineIndicator } from '@/components/OfflineIndicator';
 import { RestoreWarningToast } from '@/components/RestoreWarningToast';
 import { SWUpdateToast } from '@/components/SWUpdateToast';
+import { useAppBadge } from '@/hooks/useAppBadge';
 import { useInboxSync } from '@/hooks/useInboxSync';
 import { useKonstaTheme } from '@/hooks/useKonstaTheme';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -83,6 +84,7 @@ export default function App() {
         clearRestoreWarning,
     } = useSession();
     useInboxSync(session, sessionManager);
+    useAppBadge(session?.userId ?? null);
     const online = useOnlineStatus();
     const [chatSending, setChatSending] = useState(false);
     const swUpdate = useSWUpdate(chatSending);

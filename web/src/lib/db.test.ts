@@ -11,6 +11,7 @@ import {
     deleteDatabase,
     deleteMediaBlob,
     getContact,
+    getConversationLastRead,
     getLatestTimestamp,
     getMediaBlob,
     hasKeyShare,
@@ -21,8 +22,10 @@ import {
     loadMessageIds,
     loadMessages,
     loadOutboundSession,
+    loadReadMarkers,
     loadSyncCursor,
     markArchiveIngested,
+    markConversationRead,
     putMediaBlob,
     recordKeyShare,
     saveContact,
@@ -30,6 +33,7 @@ import {
     saveMessages,
     saveOutboundSession,
     saveSyncCursor,
+    unreadCounts,
 } from './db';
 
 // Setup fake IndexedDB — fresh instance per test
@@ -1150,5 +1154,167 @@ describe('schema migration v8 → v9 (media_cache)', () => {
             cachedAt: 9,
         });
         expect((await getMediaBlob('media/U/img'))?.mime).toBe('image/png');
+    });
+});
+
+// ── Read watermarks (ADR-0026) ───────────────────────────────────────
+
+describe('db - read watermarks', () => {
+    const me = 'U_ME';
+    const conv = `dm:${me}:U_BOB`;
+
+    // Two incoming + one own message in a DM, oldest→newest by ms timestamp.
+    async function seedConversation() {
+        await saveMessages(me, [
+            {
+                id: 'm1',
+                conversationId: conv,
+                fromUser: 'U_BOB',
+                fromDevice: 'D',
+                text: 'one',
+                timestamp: new Date(1000),
+            },
+            {
+                id: 'm2',
+                conversationId: conv,
+                fromUser: 'U_BOB',
+                fromDevice: 'D',
+                text: 'two',
+                timestamp: new Date(2000),
+            },
+            {
+                id: 'm3',
+                conversationId: conv,
+                fromUser: me,
+                fromDevice: 'D',
+                text: 'mine',
+                timestamp: new Date(3000),
+            },
+        ]);
+    }
+
+    it('getConversationLastRead is 0 for an unknown conversation', async () => {
+        expect(await getConversationLastRead('dm:nobody')).toBe(0);
+    });
+
+    it('markConversationRead advances monotonically and reports advancement', async () => {
+        await seedConversation();
+
+        expect(await markConversationRead(conv, 2000)).toBe(true);
+        expect(await getConversationLastRead(conv)).toBe(2000);
+
+        // A lower watermark never lowers the stored value (per-conversation max).
+        expect(await markConversationRead(conv, 1500)).toBe(false);
+        expect(await getConversationLastRead(conv)).toBe(2000);
+
+        // The same watermark is not an advance.
+        expect(await markConversationRead(conv, 2000)).toBe(false);
+
+        // A higher watermark advances.
+        expect(await markConversationRead(conv, 3000)).toBe(true);
+        expect(await getConversationLastRead(conv)).toBe(3000);
+    });
+
+    it('markConversationRead is a no-op when the conversation has no row', async () => {
+        expect(await markConversationRead('dm:ghost', 9999)).toBe(false);
+        expect(await getConversationLastRead('dm:ghost')).toBe(0);
+    });
+
+    it('unreadCounts counts only incoming messages newer than the watermark', async () => {
+        await seedConversation();
+
+        // Nothing read yet → both incoming (m1, m2) count; own m3 never does.
+        expect(await unreadCounts(me)).toEqual(new Map([[conv, 2]]));
+
+        await markConversationRead(conv, 1000); // m1 read, m2 still unseen
+        expect(await unreadCounts(me)).toEqual(new Map([[conv, 1]]));
+
+        await markConversationRead(conv, 3000); // all caught up
+        expect(await unreadCounts(me)).toEqual(new Map()); // zeros omitted
+    });
+
+    it('unreadCounts ignores self-chat and amendments', async () => {
+        // Self-chat: every message is "from me" → never unread.
+        await saveMessages(me, [
+            {
+                id: 's1',
+                conversationId: `self:${me}`,
+                fromUser: me,
+                fromDevice: 'D',
+                text: 'note',
+                timestamp: new Date(1000),
+            },
+        ]);
+
+        // An incoming original plus a later incoming amendment of it. The
+        // amendment is newer than the watermark but must not count as a new
+        // bubble.
+        const del = JSON.stringify({
+            type: 'amendment',
+            target_msg_id: 'b1',
+            action: 'delete',
+        });
+        await saveMessages(me, [
+            {
+                id: 'b1',
+                conversationId: conv,
+                fromUser: 'U_BOB',
+                fromDevice: 'D',
+                text: 'hi',
+                timestamp: new Date(1000),
+            },
+            {
+                id: 'b2',
+                conversationId: conv,
+                fromUser: 'U_BOB',
+                fromDevice: 'D',
+                text: del,
+                timestamp: new Date(5000),
+            },
+        ]);
+
+        // Only the original incoming b1 counts; self-chat and the amendment don't.
+        expect(await unreadCounts(me)).toEqual(new Map([[conv, 1]]));
+    });
+
+    it('loadReadMarkers reflects marked conversations, omitting unmarked ones', async () => {
+        await seedConversation();
+        expect(await loadReadMarkers()).toEqual({});
+
+        await markConversationRead(conv, 2000);
+        expect(await loadReadMarkers()).toEqual({ [conv]: 2000 });
+    });
+
+    it('v9 → v10 backfills lastReadTimestamp to lastMessageTimestamp', async () => {
+        // Hand-build a v9 DB with a conversation row that predates the field.
+        const v9 = await new Promise<IDBDatabase>((resolve, reject) => {
+            const req = indexedDB.open('atmin', 9);
+            req.onerror = () => reject(req.error);
+            req.onsuccess = () => resolve(req.result);
+            req.onupgradeneeded = (event) => {
+                const db = (event.target as IDBOpenDBRequest).result;
+                const s = db.createObjectStore('conversations', {
+                    keyPath: 'conversationId',
+                });
+                s.createIndex('lastMessageTimestamp', 'lastMessageTimestamp');
+            };
+        });
+        const tx = v9.transaction('conversations', 'readwrite');
+        tx.objectStore('conversations').put({
+            conversationId: 'C',
+            lastMessageText: 'hi',
+            lastMessageTimestamp: 42,
+            messageCount: 1,
+        });
+        await new Promise<void>((res, rej) => {
+            tx.oncomplete = () => res();
+            tx.onerror = () => rej(tx.error);
+        });
+        v9.close();
+
+        // Production open path triggers the v10 upgrade + backfill.
+        const convs = await loadConversations();
+        expect(convs[0]?.lastReadTimestamp).toBe(42);
+        expect(await getConversationLastRead('C')).toBe(42);
     });
 });

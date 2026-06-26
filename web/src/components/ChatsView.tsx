@@ -1,4 +1,5 @@
 import {
+    Badge,
     Block,
     BlockTitle,
     Button,
@@ -75,6 +76,8 @@ interface Props {
     conversations: StoredConversation[];
     contacts: Map<string, string>;
     displayNames: Map<string, string>;
+    /** Per-conversation unread incoming-message count (ADR-0026); omits zeros. */
+    unread?: Map<string, number>;
     /** Unsent drafts keyed by conversation handle ("saved" for Saved Messages). */
     drafts?: Map<string, string>;
     userId: string;
@@ -94,6 +97,7 @@ export default function ChatsView({
     conversations,
     contacts,
     displayNames,
+    unread = new Map(),
     drafts = new Map(),
     userId,
     hydrated,
@@ -134,6 +138,24 @@ export default function ChatsView({
     };
     const peerHandle = (uid: string) => contacts.get(uid) ?? uid.slice(0, 8);
     const peerLabel = (uid: string) => displayNames.get(uid) || peerHandle(uid);
+
+    // Right-aligned row meta: last-activity time, with an unread count badge
+    // beneath it when the conversation has unseen incoming messages (ADR-0026).
+    const rowAfter = (conv: StoredConversation) => {
+        const n = unread.get(conv.conversationId) ?? 0;
+        return (
+            <span className="flex flex-col items-end gap-1">
+                <span>{timeAgo(conv.lastMessageTimestamp)}</span>
+                {n > 0 && (
+                    <span data-testid="unread-badge">
+                        <Badge className="bg-primary!">
+                            {n > 99 ? '99+' : n}
+                        </Badge>
+                    </span>
+                )}
+            </span>
+        );
+    };
 
     const startChat = () => {
         const h = handleInput.trim();
@@ -221,7 +243,7 @@ export default function ChatsView({
                                     draft={drafts.get(h)}
                                 />
                             }
-                            after={timeAgo(conv.lastMessageTimestamp)}
+                            after={rowAfter(conv)}
                             media={avatar('💬')}
                             onClick={() => onOpen(`/@${encodeURIComponent(h)}`)}
                         />

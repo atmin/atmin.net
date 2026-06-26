@@ -34,6 +34,12 @@ interface Props {
     sending: boolean;
     online: boolean;
     encryptionReady: boolean;
+    /**
+     * Read watermark captured on open (ADR-0026). A "New" divider renders before
+     * the first incoming message newer than this. null / no message past it →
+     * no divider.
+     */
+    newBoundary?: number | null;
     mediaStates?: Record<string, MediaState>;
     onMediaRequest?: (url: string) => void;
     mediaObserve?: (url: string, el: HTMLElement | null) => void;
@@ -76,6 +82,7 @@ export default function ChatView({
     sending,
     online,
     encryptionReady,
+    newBoundary = null,
     mediaStates = {},
     onMediaRequest = () => {},
     mediaObserve,
@@ -108,6 +115,16 @@ export default function ChatView({
     // date). Read once per render — recomputing in the map would be the same
     // wall-clock for every row anyway.
     const now = new Date();
+    // The first incoming message newer than the read watermark — the "New"
+    // divider renders just above it (ADR-0026). Own sends never trigger it.
+    // Plain in-render derivation (no memo hook in components, per the
+    // architecture rules); null when nothing is unread → no divider.
+    const firstUnreadId =
+        newBoundary == null
+            ? null
+            : (messages.find(
+                  (m) => !m.sent && m.timestamp.getTime() > newBoundary,
+              )?.id ?? null);
     // Editing commits a text amendment; composing sends text OR a staged image
     // (a caption-less image is a valid send).
     const canSend = editing
@@ -315,6 +332,22 @@ export default function ChatView({
                                             dayKey(prev.timestamp);
                                     return (
                                         <Fragment key={msg.id}>
+                                            {msg.id === firstUnreadId && (
+                                                // "New" divider — a full-width
+                                                // rule with a centered label,
+                                                // just above the first message
+                                                // unseen at open (ADR-0026).
+                                                <div
+                                                    data-testid="new-divider"
+                                                    className="my-3 flex items-center gap-3 px-3"
+                                                >
+                                                    <span className="h-px flex-1 bg-primary/40" />
+                                                    <span className="text-xs font-semibold tracking-wider text-primary uppercase">
+                                                        New
+                                                    </span>
+                                                    <span className="h-px flex-1 bg-primary/40" />
+                                                </div>
+                                            )}
                                             {newDay && (
                                                 // Day divider — a centered pill
                                                 // that pins to the top of the

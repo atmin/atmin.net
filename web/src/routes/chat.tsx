@@ -32,6 +32,7 @@ export default function ChatRoute({
         online,
         encryptionReady,
         chatTitle,
+        newBoundary,
         sendMessage,
         sendMedia,
     } = useChat(handle, session, sessionManager);
@@ -102,6 +103,7 @@ export default function ChatRoute({
             sending={sending}
             online={online}
             encryptionReady={encryptionReady}
+            newBoundary={newBoundary}
             mediaStates={mediaStates}
             onMediaRequest={onMediaRequest}
             mediaObserve={mediaObserve}

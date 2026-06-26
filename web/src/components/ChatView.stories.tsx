@@ -95,6 +95,47 @@ export const WithMessages: Story = {
     },
 };
 
+// The "New" divider (ADR-0026): a full-width rule above the first incoming
+// message newer than the read watermark captured on open. Here the boundary
+// sits between the reply (10:31) and the two messages that arrived since, so
+// the divider renders above the first of those. Own sends never trigger it.
+export const WithNewDivider: Story = {
+    args: {
+        chatTitle: 'copper-falcon',
+        isSaved: false,
+        handle: 'copper-falcon',
+        newBoundary: new Date('2024-01-15T10:31:30Z').getTime(),
+        messages: [
+            {
+                id: '1',
+                text: 'A message you already saw',
+                timestamp: new Date('2024-01-15T10:30:00Z'),
+                sent: false,
+            },
+            {
+                id: '2',
+                text: 'Your reply',
+                timestamp: new Date('2024-01-15T10:31:00Z'),
+                sent: true,
+            },
+            {
+                id: '3',
+                text: 'This arrived since you last looked',
+                timestamp: new Date('2024-01-15T10:32:00Z'),
+                sent: false,
+            },
+            {
+                id: '4',
+                text: 'And so did this one',
+                timestamp: new Date('2024-01-15T10:33:00Z'),
+                sent: false,
+            },
+        ],
+        loading: false,
+        sending: false,
+    },
+};
+
 // Day-dividers across a multi-day timeline. Timestamps are anchored relative to
 // render time so the labels always read Today / Yesterday / an older date no
 // matter when the story is opened (the divider label is viewer-local + relative
