@@ -20,6 +20,14 @@ type BadgeNavigator = Navigator & {
  * runs, so a buzz-while-closed refresh needs background delivery — deferred to
  * the native track (ADR-0015). Best-effort throughout; a Badging failure must
  * never break a render path.
+ *
+ * Platform note: this paints the home-screen icon on desktop Chrome/Edge and
+ * Android. On an **installed iOS web app** `setAppBadge` exists (so the
+ * feature-detect passes) but iOS gates it behind notification permission, which
+ * we deliberately do not request (ADR-0015) — so the call is a silent no-op on
+ * iOS. The in-app chats badge + "New" divider carry unread there. Decided to
+ * leave the iOS icon badge unsupported for this milestone rather than prompt for
+ * notifications; revisit with the native/notifications story.
  */
 export function useAppBadge(userId: string | null): void {
     useEffect(() => {

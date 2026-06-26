@@ -102,15 +102,23 @@ the watermark is the *message's* timestamp, not a wall-clock-at-read.
 - No inbox, key, or profile object is touched. Unread tracking adds **no**
   message-protocol state.
 
-## Known limitation — the app icon is "fresh as of last open"
+## Known limitations of the app-icon badge
 
-`setAppBadge` can only run while Alice's app is running. With the app closed the
-SSE connection is down, so the icon badge is frozen at its last foreground value;
-it does not update for messages that arrive while the app is closed. Refreshing
-it in the background needs a wake-up mechanism (Web Push / native), which
-[ADR-0015](../decisions/adr-0015-web-push.md) deliberately defers to the
-native-apps track. This is behaviour, not a bug: the in-app badges and the `New`
-divider are always correct on the next open.
+**Not shown on installed iOS web apps.** `setAppBadge` exists on a Home Screen
+web app (iOS 16.4+), so the feature-detect passes, but iOS only paints the icon
+badge once the web app has been granted **notification permission** — which we
+deliberately don't request ([ADR-0015](../decisions/adr-0015-web-push.md)). So on
+iOS the call is a silent no-op and the home-screen icon shows no badge. This is a
+deliberate scope choice for this milestone, not a bug: the in-app chats-row badge
+and the `New` divider carry unread on iPhone. The icon badge works on desktop
+Chrome/Edge and Android.
+
+**"Fresh as of last open" where it does paint.** `setAppBadge` can only run while
+the app is running. With the app closed the SSE connection is down, so the icon
+badge is frozen at its last foreground value; it does not update for messages
+that arrive while the app is closed. Refreshing it in the background needs a
+wake-up mechanism (Web Push / native), which ADR-0015 defers to the native-apps
+track. The in-app badges and the `New` divider are always correct on the next open.
 
 ## Tests
 

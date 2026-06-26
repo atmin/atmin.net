@@ -75,6 +75,13 @@ Four properties make this near-free and unconditionally correct:
   cosmetic re-show of "new," never data loss.
 - Closed-app badge staleness is out of scope (ADR-0015) — this ADR governs the
   data model, not background delivery.
+- **−** The home-screen **app-icon badge does not appear on installed iOS web
+  apps.** `setAppBadge` exists there (the feature-detect passes) but iOS gates
+  it behind notification permission, which we deliberately don't request
+  (ADR-0015) — so on iOS the call is a silent no-op. Decided to leave it
+  unsupported on iOS this milestone (the in-app chats badge + `New` divider
+  carry unread) rather than prompt for notifications; the icon badge works on
+  desktop Chrome/Edge and Android. Revisit with the native/notifications story.
 - Stays **Draft** until implemented and verified on two real devices (read on one,
   confirm the other catches up) — not flipped to Accepted on optimism.
 
