@@ -44,6 +44,32 @@ apps deliver it with a smaller third-party surface. Push is *only* the
 background-wake-up; foreground delivery stays on SSE
 ([ADR-0004](../decisions/adr-0004-sse-realtime-notifications.md)) with no vendor.
 
+**Why not poll from a PWA service worker instead (avoiding push entirely)?**
+Considered and ruled out. A service worker can't run a background timer — it's
+event-driven and killed when idle, so a `setInterval` stops the moment the app is
+backgrounded. The only API for scheduled wake-ups is **Periodic Background Sync**,
+and it fails on two counts: it's **Chromium-only** (absent in WebKit, so it does
+not exist on an installed iOS web app), and where it does run the browser throttles
+the interval by engagement/battery to roughly **once every ~12 hours** — never the
+per-minute cadence timely delivery needs. On iOS specifically there is *no*
+background web execution mechanism at all: the sole background wake-up is Web Push,
+and Apple requires a push that wakes the worker to surface a **visible
+notification** (no silent badge-only poll). So background polling cannot substitute
+for push, and on iOS the only background path is APNs — which is why timely
+background delivery is inherently a native capability, not a PWA one. (Periodic
+Background Sync remains usable on Android/desktop Chrome for *low-urgency* ~12-hour
+refresh, but that is not message delivery.)
+
+The "notify only when there are messages" outcome *is* reachable — but as
+**event-driven push, not periodic poll-and-suppress**: the conditional moves to
+*when the server chooses to send* (a wake-up only when a message lands → worker
+fetches → shows the notification; no message → no push → nothing), because a worker
+that receives a push **cannot** stay silent (iOS shows a system notification or
+revokes the subscription otherwise). That is strictly the Web Push path above —
+permission prompt + a visible notification per delivered message — viable if made
+**opt-in**, but a decision deferred with the rest of background delivery, not a way
+to avoid push.
+
 - **Desktop (Tauri):** no vendor — keep the SSE connection alive and raise OS
   notifications locally.
 - **Android:** the vendor is optional. A foreground-service persistent connection, or
