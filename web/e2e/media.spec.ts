@@ -59,12 +59,16 @@ function s3(): S3Client {
     });
 }
 
-async function listMediaKeys(): Promise<string[]> {
+// Scope the listing to the caller's own prefix. The e2e bucket is shared
+// across the whole parallel suite, so an unscoped `media/` list returns a
+// single truncated 1000-key page that another test's blobs (e.g. the
+// media-quota invariant's cap seeding) can push this account's object off of.
+async function listMediaKeys(prefix = 'media/'): Promise<string[]> {
     const client = s3();
     const bucket = process.env.E2E_BUCKET;
     if (!bucket) throw new Error('E2E_BUCKET not set');
     const out = await client.send(
-        new ListObjectsV2Command({ Bucket: bucket, Prefix: 'media/' }),
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix }),
     );
     return (out.Contents ?? []).map((o) => o.Key as string);
 }
@@ -448,10 +452,8 @@ test.describe('Media', () => {
         const aliceUid = await alice.evaluate(() =>
             localStorage.getItem('atmin:userId'),
         );
-        const keys = await listMediaKeys();
-        expect(
-            keys.filter((k) => k.startsWith(`media/${aliceUid}/`)).length,
-        ).toBe(1);
+        const keys = await listMediaKeys(`media/${aliceUid}/`);
+        expect(keys).toHaveLength(1);
 
         await aliceCtx.close();
         await bobCtx.close();
