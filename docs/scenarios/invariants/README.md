@@ -89,6 +89,13 @@ links the implementing Playwright file, or marks it as not-yet-written.
 | [I9](./i9-chain-walker.md) | Chain walker recovers history across N rotations | **P1** | `credential-rotation-continuity.spec.ts` |
 | [I10](./i10-key-backup-object-name-safe.md) | Key backups survive any session_id, and never fail silently | **P1** | `key-backup-object-name.spec.ts` |
 | [I11](./i11-no-cross-account-local-leak.md) | A new session never inherits a prior account's local state | **P1** | `no-cross-account-leak.spec.ts` |
+| [I12](./i12-concurrent-sync.md) | Concurrent same-account clients converge | **P0** | `concurrent-sync.spec.ts` |
+| [I13](./i13-media-quota.md) | Media quota is enforced, legible, and freed by delete | **P1** | `media-quota.spec.ts` |
+| [I14](./i14-read-marker-convergence.md) | Read markers converge and never resurrect "New" | **P1** | *(not yet written)* |
+| [I15](./i15-decryptability-closure.md) | Every envelope has a reachable key (backup-queue drain) | **P1** | *(not yet written)* |
+| [I16](./i16-rotation-idempotent-replay.md) | Rotation resolves exactly once under ambiguous failure | **P1** | *(not yet written)* |
+| [I17](./i17-amendment-authorization.md) | Amendments apply only from their author | **P1** | *(not yet written)* |
+| [I18](./i18-cleanup-sweep-safety.md) | The cleanup sweep deletes only what policy names | **P2** | *(not yet written)* |
 
 ## Adding a new invariant
 

@@ -2994,6 +2994,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn presign_media_over_quota_is_413() {
+        // Exhaust the byte quota through the handler in ≤ MAX_MEDIA_BYTES chunks
+        // (a single 1 GiB presign would trip the per-object cap first). Each
+        // grant only optimistically increments the cache — no bytes are stored.
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+
+        let grants = (USER_MEDIA_QUOTA_BYTES / MAX_MEDIA_BYTES) as usize;
+        for i in 0..grants {
+            let resp = client
+                .post("/v1/store/presign")
+                .header(ContentType::JSON)
+                .header(bearer(&token))
+                .body(
+                    serde_json::json!({
+                        "key": format!("media/{UID}/{i:04}"),
+                        "bytes": MAX_MEDIA_BYTES,
+                    })
+                    .to_string(),
+                )
+                .dispatch()
+                .await;
+            assert_eq!(resp.status(), Status::Ok, "grant {i} within quota");
+        }
+
+        // The next chunk crosses 1 GiB → 413 quota_exceeded (DeniedBytes).
+        let resp = client
+            .post("/v1/store/presign")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(
+                serde_json::json!({
+                    "key": format!("media/{UID}/over"),
+                    "bytes": MAX_MEDIA_BYTES,
+                })
+                .to_string(),
+            )
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::PayloadTooLarge);
+        let b: serde_json::Value =
+            serde_json::from_str(&resp.into_string().await.unwrap()).unwrap();
+        assert_eq!(b["error"], "quota_exceeded");
+    }
+
+    #[tokio::test]
     async fn delete_object_owner_only_and_invalidates_quota() {
         let store = MemStore::new();
         let token = seed_account(&store, 1).await;

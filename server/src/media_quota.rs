@@ -207,6 +207,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reserve_over_blob_cap_is_denied() {
+        let q = quota_with(MemStore::new());
+        // Fill exactly to the cap — each within the byte quota (1 byte apiece).
+        for _ in 0..USER_MEDIA_BLOB_CAP {
+            assert_eq!(
+                q.reserve_upload("u", 1).await.unwrap(),
+                Reservation::Granted
+            );
+        }
+        // The cap+1th is denied on count, checked before the byte comparison.
+        assert_eq!(
+            q.reserve_upload("u", 1).await.unwrap(),
+            Reservation::DeniedCount
+        );
+        // Denied → no increment past the cap.
+        assert_eq!(
+            q.get_usage("u").await.unwrap(),
+            (USER_MEDIA_BLOB_CAP as u64, USER_MEDIA_BLOB_CAP)
+        );
+    }
+
+    #[tokio::test]
     async fn get_usage_probes_existing_s3_blobs() {
         let store = MemStore::new();
         let q = quota_with(store);
