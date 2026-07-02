@@ -63,6 +63,34 @@ writes — but the single-instance assumption still holds, so the
 mutexes don't *need* to come out unless multi-instance is the
 goal of the change.
 
+### ⚠️ Single-instance is a correctness invariant, not just a cost setting
+
+Every in-process primitive is correct **only when exactly one instance
+runs**: the handle-claim and rotation per-key mutexes (`keyed_mutex.rs`),
+the device-existence / profile-`key_version` / media-quota caches
+(`cache.rs`, `media_quota.rs`), and the SSE hub (`events.rs`). This is
+`max-scale = 1`, and it is a **correctness precondition**, not a
+performance choice.
+
+If a second instance ever runs, an entire class of races opens at once:
+split-brain handle claim (two registrations win the same handle), split
+key rotation, cross-replica stale device-revocation (a revoked/stolen
+device stays valid on another instance until its cache TTL), N× media
+quota, and cross-instance lost SSE notifications. These are *not* live
+defects today — they are gated shut by the single-instance pin, behind
+the shared-state migration a future ADR will define (Redis SETNX /
+Postgres advisory locks, per ADR-0004). **Bumping `max-scale` above 1
+before that migration lands opens all of them simultaneously.**
+
+`min-scale: 1` (warm, no cold start) is **not** the same as `max-scale:
+1` (never more than one). Scaleway Serverless Containers autoscale by
+default, and the pin is currently **neither documented as a required
+value nor enforced by the deploy pipeline** (`deploy.yml` runs `scw
+container redeploy`, which does not set scale). Until the shared-state
+migration, `max-scale` **must be 1** on the prod and staging containers,
+and that value should be asserted at deploy time rather than left to a
+console default. Tracked in `tasks/pin-single-instance-scale.md`.
+
 ### Resource tiers (for reference)
 
 | Memory | vCPU |

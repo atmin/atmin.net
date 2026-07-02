@@ -24,5 +24,49 @@ this file forward-looking, never a changelog.
   motion; **parked**, take up only if the gap is felt
   ([ADR-0023](../docs/decisions/adr-0023-konsta-ui.md)).
 
+## Resilience & security (from the 2026-07 audit)
+
+Actionable residue of a whole-repo resilience audit, grouped by the shared root
+causes it identified (fix a root cause, several findings die together). Ordered
+by blast radius.
+
+- **[harden-store-authorization](harden-store-authorization.md)** — **P0.**
+  Owner-scope the destructive `compact` path (any user can currently delete any
+  account) + the cross-user read allow-list.
+- **[key-chain-walker-robustness](key-chain-walker-robustness.md)** — **P0.**
+  Try-until-decrypt in `resolveBackupKey`; a rotation retry can silently brick
+  all pre-rotation history. Ships I15/I16.
+- **[paginated-prefix-wipe](paginated-prefix-wipe.md)** — **High.** One shared
+  drain-loop wipe + chunked `delete_objects` → fixes deletion orphaning,
+  compaction wedge, cleanup mid-wipe. Ships I18.
+- **[account-lifecycle-serialization](account-lifecycle-serialization.md)** —
+  **High.** One per-uid lock + resumable delete + inbox-orphan sweep → fixes
+  rotate-resurrects-deleted, permanent handle lockout, post-deletion orphans.
+- **[harden-sender-controlled-fields](harden-sender-controlled-fields.md)** —
+  **High.** Clamp `sent_at` at ingest (permanent read-marker poisoning) +
+  validate `send` object names. Ships I14.
+- **[pin-single-instance-scale](pin-single-instance-scale.md)** — **High.**
+  `max-scale=1` is a correctness invariant but is neither documented nor
+  enforced; verify + pin it in deploy.
+- **abuse-controls** *(no task doc yet — needs ADR-0021 finalized)* — rate
+  limiting (register/PoW, `send`, resolve) + per-user SSE connection cap +
+  per-recipient inbox ceiling + `spawn_blocking` for Argon2 + an unconditional
+  per-object presign size ceiling and quota accounting for the non-media
+  client-writable prefixes (`keys/`, `contacts.json`, `read-markers.json`),
+  which currently bypass both (H6). Folds in L6 (align presign-TTL ≤
+  quota-cache-TTL). L9 (unreverted quota reservation) **deferred** — documented
+  single-instance tradeoff.
+- **[sse-resilience](sse-resilience.md)** — **Medium.** Auto-reconnect +
+  visibility/focus reconcile + tear down a revoked device's open stream.
+- **[live-sync-cursor-robustness](live-sync-cursor-robustness.md)** — **Medium.**
+  Full-list the live prefix + dedup so a below-cursor message isn't stranded.
+- **[harden-under-asserting-invariants](harden-under-asserting-invariants.md)** —
+  **Medium** (test-only, high leverage). Several invariant e2e tests assert less
+  than their doc promises; a fail-everything impl passes them. Also writes I17.
+- **spec-code-drift** *(no task doc yet — doc cleanup)* — undocumented `DELETE
+  /v1/devices`; rotate-keys `rotation_unavailable` vs actual `409 {current:-1}`;
+  error-table 503/`pow_invalid` gaps; ignored `store/list` `limit`; "25 MB" vs
+  MiB; scenario docs referencing stale Go-style paths.
+
 **Shipped:** v0.1 ([mvp-v0.1.md](../docs/specs/mvp-v0.1.md)) · v0.2 — the UI
 revamp ([releases/v0.2.md](../docs/releases/v0.2.md)).
