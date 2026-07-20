@@ -1,7 +1,11 @@
 # I15 — Decryptability closure: every envelope has a reachable key
 
 > Part of the [invariants index](./README.md). Priority **P1**.
-> Spec: `web/e2e/invariants/decryptability-closure.spec.ts` — not yet written.
+> Spec: `web/e2e/invariants/decryptability-closure.spec.ts` — path A (queue
+> drain) not yet written. Path B's walker robustness is now guarded
+> deterministically by `web/src/lib/key-chain.test.ts` (the colliding-links
+> unit test) and end-to-end by
+> [I16](./i16-rotation-idempotent-replay.md)'s rotation-retry spec.
 
 **Statement.** For every message envelope in `inbox/{uid}/` (live or
 archive), the Megolm session key that decrypts it is eventually recoverable

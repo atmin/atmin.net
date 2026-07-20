@@ -79,6 +79,27 @@ describe('key-chain build/append/fetch', () => {
         ]);
     });
 
+    it('appendChainLink dedups by (from,to), keeping the newest link (rotation retry)', async () => {
+        // First POST failed → an orphan {3→4} link; the retry appends a second
+        // {3→4} (the one whose key_version commits). The chain must not fork.
+        await appendChainLink(token, userId, {
+            from: 3,
+            to: 4,
+            iv: 'YWFh',
+            ciphertext: 'b64a', // K4a — abandoned
+        });
+        await appendChainLink(token, userId, {
+            from: 3,
+            to: 4,
+            iv: 'YmJi',
+            ciphertext: 'b64b', // K4b — committed
+        });
+        const chain = await fetchChain(token, userId);
+        const hop = chain.links.filter((l) => l.from === 3 && l.to === 4);
+        expect(hop).toHaveLength(1);
+        expect(hop[0].ciphertext).toBe('b64b');
+    });
+
     it('buildChainLink + decrypt with toKey recovers the prevKey bytes', async () => {
         const prev = await deriveExtractable();
         const next = await deriveExtractable();
@@ -231,6 +252,57 @@ describe('resolveBackupKey', () => {
         expect(await getBackupKey(userId, 1)).toBeDefined();
         await clearBackupKeys();
         expect(await getBackupKey(userId, 1)).toBeUndefined();
+    });
+
+    it('tries every colliding link and returns the one that decrypts (rotation-retry fork)', async () => {
+        // H1: a rotation retry leaves two {1→2} links — one wrapping the old
+        // key under an abandoned fresh-salt key (K2a, never committed) appended
+        // first, one under the key the device actually holds (K2b). A naive
+        // `.find` picks the shadow link and throws on the GCM tag; the walker
+        // must try both and recover v1.
+        const k1 = await deriveExtractable();
+        const k2a = await deriveExtractable();
+        const k2b = await deriveExtractable();
+        const chain: KeyChain = {
+            links: [
+                await buildChainLink(1, 2, k1, k2a), // shadow, first in order
+                await buildChainLink(1, 2, k1, k2b), // real link
+            ],
+        };
+
+        const enc = await backupEncrypt(
+            k1,
+            new TextEncoder().encode('era-1 survives the fork'),
+        );
+        const recovered = await resolveBackupKey(userId, k2b, 2, 1, chain);
+        const decrypted = new Uint8Array(
+            await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: enc.iv as Uint8Array<ArrayBuffer> },
+                recovered,
+                enc.ciphertext as Uint8Array<ArrayBuffer>,
+            ),
+        );
+        expect(new TextDecoder().decode(decrypted)).toBe(
+            'era-1 survives the fork',
+        );
+    });
+
+    it('throws when a hop has links but none decrypts', async () => {
+        // Distinct from a missing hop: links are present for {1→2} but the held
+        // key matches neither — the walker must fail loudly, not silently.
+        const k1 = await deriveExtractable();
+        const k2a = await deriveExtractable();
+        const k2b = await deriveExtractable();
+        const held = await deriveExtractable(); // matches neither link
+        const chain: KeyChain = {
+            links: [
+                await buildChainLink(1, 2, k1, k2a),
+                await buildChainLink(1, 2, k1, k2b),
+            ],
+        };
+        await expect(
+            resolveBackupKey(userId, held, 2, 1, chain),
+        ).rejects.toThrow(/no link .* decrypts/);
     });
 
     it('throws a clear error on a broken chain', async () => {

@@ -94,7 +94,15 @@ export async function buildChainLink(
 }
 
 /**
- * Read the current chain, append the new link, and write it back.
+ * Read the current chain, append the new link, and write it back,
+ * deduping by `(from, to)` so a hop never forks. A rotation retry appends a
+ * second link for the same hop (a fresh-salt key wrapping the same older key)
+ * after the first POST failed; only the last-appended link matches the
+ * `key_version` the rotation finally commits, so any earlier same-hop link is
+ * an abandoned orphan and is dropped (I16 "no fork"). The read walker
+ * (`resolveBackupKey`) is independently robust to a stray collision, so this is
+ * belt-and-suspenders — it keeps the chain clean, not merely decryptable.
+ *
  * Not atomic: a concurrent rotation racing this caller would clobber
  * one of the appends. That race is closed at the rotation flow level
  * — the server's per-uid rotation mutex ensures only one rotation is
@@ -106,6 +114,9 @@ export async function appendChainLink(
     link: KeyChainLink,
 ): Promise<void> {
     const current = await fetchChain(token, userId);
+    current.links = current.links.filter(
+        (l) => !(l.from === link.from && l.to === link.to),
+    );
     current.links.push(link);
     const body = new TextEncoder().encode(JSON.stringify(current));
     const { presigned_url } = await storePresign(
@@ -122,7 +133,10 @@ export async function appendChainLink(
  * intermediate `(userId, version)` in IDB so subsequent reads don't
  * pay the AES-GCM-decrypt cost again.
  *
- * Throws on a broken chain (missing link in the M → N path) or on
+ * Robust to a forked chain: if a hop has more than one link (a rotation
+ * retry left colliding `{from, to}` links), it tries each and accepts the
+ * one that decrypts, rather than trusting append order. Throws on a broken
+ * chain (no link for a hop, or none that decrypts) or on
  * `targetVersion > currentVersion` — caller error.
  */
 export async function resolveBackupKey(
@@ -154,26 +168,49 @@ export async function resolveBackupKey(
             continue;
         }
 
-        const link = chain.links.find(
+        // A rotation retry can leave more than one link for this hop: each
+        // re-attempt wraps the same older key under a fresh-salt newer key, but
+        // only the one under the key this device actually holds (the committed
+        // key_version) decrypts. Append order does not tell us which, so try
+        // every candidate and accept the first whose AES-GCM tag authenticates
+        // (H1). Throw "missing"/"undecryptable" only if none does.
+        const candidates = chain.links.filter(
             (l) => l.to === version && l.from === version - 1,
         );
-        if (!link) {
+        if (candidates.length === 0) {
             throw new Error(
                 `key chain: missing link from v${version - 1} to v${version}`,
             );
         }
-        const iv = b64ToBytes(link.iv);
-        const ct = b64ToBytes(link.ciphertext);
-        const prevBytes = new Uint8Array(
-            await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct),
-        );
-        const prevKey = await crypto.subtle.importKey(
-            'raw',
-            prevBytes,
-            { name: 'AES-GCM' },
-            false,
-            ['encrypt', 'decrypt'],
-        );
+        let prevKey: CryptoKey | null = null;
+        for (const link of candidates) {
+            try {
+                const iv = b64ToBytes(link.iv);
+                const ct = b64ToBytes(link.ciphertext);
+                const prevBytes = new Uint8Array(
+                    await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv },
+                        key,
+                        ct,
+                    ),
+                );
+                prevKey = await crypto.subtle.importKey(
+                    'raw',
+                    prevBytes,
+                    { name: 'AES-GCM' },
+                    false,
+                    ['encrypt', 'decrypt'],
+                );
+                break;
+            } catch {
+                // Wrong link (GCM tag mismatch) — try the next candidate.
+            }
+        }
+        if (!prevKey) {
+            throw new Error(
+                `key chain: no link from v${version - 1} to v${version} decrypts`,
+            );
+        }
         await putBackupKey(userId, version - 1, prevKey);
         key = prevKey;
         version--;

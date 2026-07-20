@@ -1,7 +1,10 @@
 # I16 — Rotation resolves exactly once under ambiguous failure
 
 > Part of the [invariants index](./README.md). Priority **P1**.
-> Spec: `web/e2e/invariants/rotation-idempotent-replay.spec.ts` — not yet written.
+> Spec: `web/e2e/invariants/rotation-idempotent-replay.spec.ts` — covers the
+> no-fork ("exactly one link") + fresh-device-recovery legs. The record-replay
+> and `409`-on-stale-kv legs stay handler-unit-tested (the web client mints a
+> fresh `request_id` per submit, so record replay is unreachable from it).
 
 **Statement.** A `POST /v1/rotate-keys` whose response is lost (committed
 server-side, 5xx or dropped connection seen client-side) leaves the account

@@ -119,9 +119,17 @@ export function useRotateKeys(
             const newKeys = await deriveKeys(newSecret, { extractable: true });
             const newKV = currentKV + 1;
 
-            // 3. Write the chain link BEFORE rotating, per ADR-0012. An
-            //    orphaned link (if step 4 fails) is harmless — it can't
-            //    decrypt anything until a future rotation matches it.
+            // 3. Write the chain link BEFORE rotating, per ADR-0012, so a
+            //    committed rotation always has its link present (the reverse
+            //    order risks a committed rotation with no link → permanent
+            //    history loss). If step 4 fails the link is an orphan, and a
+            //    retry appends a fresh-salt link for the same hop:
+            //    `appendChainLink` dedups by (from, to) so only the one
+            //    matching the committed key_version survives, and the read
+            //    walker (`resolveBackupKey`) tries every matching link and
+            //    accepts the one that decrypts. So a stray collision is now
+            //    harmless — before both guards it shadowed the real link and
+            //    bricked all pre-rotation history (H1).
             setStep('writing-chain');
             const link = await buildChainLink(
                 currentKV,
