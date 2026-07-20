@@ -920,8 +920,11 @@ rejected.
 Server verifies the signature against `auth_public_key` from
 `profile.json`. Server rejects with `401 key_version_stale` if the
 payload's `key_version` does not match the current
-`profile.key_version`. **Replay protection**: reject if `timestamp`
-is more than 5 minutes from server time.
+`profile.key_version`. **Freshness**: the window is one-sided — accept a
+`timestamp` from up to 5 minutes in the past up to 60 seconds in the future
+(clock-skew allowance); a far-future proof is rejected, so one cannot be minted
+ahead and banked. This bounds but does not eliminate replay within the window;
+a nonce-based single-use proof is future work.
 
 ### Add device
 
@@ -1163,10 +1166,23 @@ custom headers).
 ### Storage API (generic S3 proxy)
 
 The server exposes a small set of generic endpoints for all S3 operations.
-Authorization is prefix-scoped: a user's token grants access only to their own prefixes
-(`inbox/{user_id}/`, `keys/{user_id}/`, `media/{user_id}/`, `users/{user_id}/`).
-Reads under `users/` are open (needed to fetch other users' public keys);
-writes are restricted to own uid (see [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md)).
+Authorization is prefix-scoped: a user's token grants full access to their own
+prefixes (`inbox/{user_id}/`, `keys/{user_id}/`, `media/{user_id}/`,
+`users/{user_id}/`). Cross-user access is an explicit read-only allow-list, not
+a blanket `users/` opening:
+
+- `users/{uid}/profile.json` — readable by any authenticated caller (the same
+  public fields the `handles/` projection and `resolve` already expose).
+- `media/{uid}/{ulid}` — any authenticated caller may `GET` a blob whose path
+  they hold (capability-protected; the path arrives inside the encrypted
+  envelope). Delete stays owner-only.
+
+Everything else under another user's prefix — `contacts.json`,
+`read-markers.json`, `devices/`, rotation records, live inbox/keys — is denied,
+and cross-user *listing* (e.g. `users/{other}/devices/`) is rejected: the
+encrypted contacts/read-markers blob alongside the public `salt`/`kdf` would be
+offline backup-key-guess material. Writes are always own-uid only
+(see [ADR-0005](../decisions/adr-0005-profiles-and-contacts.md)).
 
 The server has no knowledge of what the data means — it is an authenticated S3 proxy.
 
@@ -1240,6 +1256,12 @@ Input:
 
 - `prefix` (e.g. `inbox/alice01/live/`)
 - `up_to` (cursor / msg_id)
+
+Compaction lists → archives → **deletes** the live objects, so it is authorized
+owner-only — not with the read allow-list above — and only for the two prefixes
+the client ever compacts: the caller's own `inbox/{uid}/live/` and
+`keys/{uid}/live/`. Any other `prefix` (another user's, or the caller's own
+archive/data subtree) is `403`.
 
 Server behavior:
 

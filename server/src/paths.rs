@@ -42,6 +42,12 @@ pub fn prefix_keys(user_id: &str) -> String {
     format!("keys/{user_id}/")
 }
 
+/// The live key-backup subprefix — `keys/{uid}/live/`. The client compacts it
+/// alongside the live inbox.
+pub fn prefix_keys_live(user_id: &str) -> String {
+    format!("keys/{user_id}/live/")
+}
+
 /// The device subtree — `users/{user_id}/devices/`. Used to spot device keys among
 /// a profile-delete's listing so their cache entries can be evicted.
 pub fn prefix_user_devices(user_id: &str) -> String {
@@ -63,16 +69,45 @@ pub fn key_rotation_record(user_id: &str, request_id: &str) -> String {
 const USERS_ROOT: &str = "users/";
 const DATA_PREFIXES: [&str; 3] = ["inbox/", "keys/", "media/"];
 
-/// Whether `user_id` may access `prefix`: a user's own `inbox/`/`keys/`/`media/`
-/// subtree, plus any `users/…` path (profile and key reads are intentionally
-/// public — resolve, key fetch).
+/// Whether `key` is a cross-user *public* read. The only object under another
+/// user's `users/{uid}/` subtree that any authenticated caller may read is the
+/// profile — the same public fields `GET /v1/resolve/{handle}` and the
+/// `handles/` projection already expose. Everything else there (devices,
+/// contacts, read-markers, rotation-records) is owner-only: the encrypted
+/// `contacts.json`/`read-markers.json` alongside the public `salt`/`kdf` are
+/// material for an *offline* backup-key guess (audit M1).
+fn is_public_user_object(key: &str) -> bool {
+    // Exactly `users/{uid}/profile.json` — one segment, no deeper path.
+    key.strip_prefix(USERS_ROOT)
+        .and_then(|rest| rest.strip_suffix("/profile.json"))
+        .is_some_and(|uid| !uid.is_empty() && !uid.contains('/'))
+}
+
+/// Whether `user_id` may *read/list* under `prefix`: the caller's own
+/// `inbox/`/`keys/`/`media/` data subtree and own `users/{uid}/` subtree, plus
+/// the single cross-user public object (`users/{other}/profile.json`). A
+/// cross-user *listing* — `users/{other}/`, `users/{other}/devices/`, … —
+/// matches neither the own-subtree checks nor the exact-object allow-list, so
+/// it is denied (audit M1: the old blanket `starts_with("users/")` leaked every
+/// victim object and let anyone enumerate devices/rotation history).
 pub fn authorize_prefix(user_id: &str, prefix: &str) -> bool {
     for p in DATA_PREFIXES {
         if prefix.starts_with(&format!("{p}{user_id}/")) {
             return true;
         }
     }
-    prefix.starts_with(USERS_ROOT)
+    prefix.starts_with(&format!("{USERS_ROOT}{user_id}/")) || is_public_user_object(prefix)
+}
+
+/// Whether `user_id` may run a destructive `compact` rooted at `prefix`.
+/// Compaction lists → archives → *deletes* every live object under the prefix,
+/// so — unlike a read — it is authorized owner-only, and only for the two
+/// prefixes the client ever compacts: the caller's own live inbox and live key
+/// backup. The read-permissive [`authorize_prefix`] must never gate this delete
+/// (audit C1: it let any caller compact — hence delete — any `users/{victim}/`
+/// object, e.g. their `profile.json`, remotely destroying the account).
+pub fn authorize_compact_prefix(user_id: &str, prefix: &str) -> bool {
+    prefix == prefix_inbox_live(user_id) || prefix == prefix_keys_live(user_id)
 }
 
 /// Whether `user_id` may *read* `key`. Like [`authorize_prefix`], plus: any
@@ -123,12 +158,21 @@ mod tests {
     }
 
     #[test]
-    fn authorize_prefix_allows_own_data_and_any_user_path() {
+    fn authorize_prefix_allows_own_data_and_only_public_cross_user_reads() {
         assert!(authorize_prefix("u1", "inbox/u1/live/"));
         assert!(authorize_prefix("u1", "keys/u1/live/"));
         assert!(authorize_prefix("u1", "media/u1/"));
-        // Any users/… path is readable (public profile / key fetch).
-        assert!(authorize_prefix("u1", "users/anyone/profile.json"));
+        // The caller's own users/ subtree is fully readable/listable.
+        assert!(authorize_prefix("u1", "users/u1/"));
+        assert!(authorize_prefix("u1", "users/u1/profile.json"));
+        assert!(authorize_prefix("u1", "users/u1/contacts.json"));
+        assert!(authorize_prefix("u1", "users/u1/devices/"));
+        // Cross-user: only the public profile object, never a subtree listing.
+        assert!(authorize_prefix("u1", "users/u2/profile.json"));
+        assert!(!authorize_prefix("u1", "users/u2/"));
+        assert!(!authorize_prefix("u1", "users/u2/devices/"));
+        assert!(!authorize_prefix("u1", "users/u2/contacts.json"));
+        assert!(!authorize_prefix("u1", "users/u2/read-markers.json"));
 
         // Another user's data subtree is denied.
         assert!(!authorize_prefix("u1", "inbox/u2/live/"));
@@ -139,15 +183,33 @@ mod tests {
     }
 
     #[test]
+    fn authorize_compact_prefix_is_owner_only_and_live_only() {
+        // The only two prefixes the client ever compacts, owner-scoped.
+        assert!(authorize_compact_prefix("u1", "inbox/u1/live/"));
+        assert!(authorize_compact_prefix("u1", "keys/u1/live/"));
+
+        // Another user's live prefixes — the C1 account-destruction vector.
+        assert!(!authorize_compact_prefix("u1", "inbox/u2/live/"));
+        assert!(!authorize_compact_prefix("u1", "keys/u2/live/"));
+        // A read-permissive users/ path must never authorize a delete.
+        assert!(!authorize_compact_prefix("u1", "users/u2/profile.json"));
+        assert!(!authorize_compact_prefix("u1", "users/u1/"));
+        // Not the archive prefix, not the bare data subtree.
+        assert!(!authorize_compact_prefix("u1", "inbox/u1/archive/"));
+        assert!(!authorize_compact_prefix("u1", "inbox/u1/"));
+    }
+
+    #[test]
     fn authorize_key_adds_media_capability() {
-        // Own data and any users/ path, same as authorize_prefix.
+        // Own data and the public cross-user profile, same as authorize_prefix.
         assert!(authorize_key("u1", "inbox/u1/live/m"));
         assert!(authorize_key("u1", "users/anyone/profile.json"));
         // Any media blob is readable — even another user's (capability-protected).
         assert!(authorize_key("u1", "media/u2/01ABC"));
-        // But another user's inbox/keys is still denied.
+        // But another user's inbox/keys and non-public users/ objects are denied.
         assert!(!authorize_key("u1", "inbox/u2/live/m"));
         assert!(!authorize_key("u1", "keys/u2/live/s"));
+        assert!(!authorize_key("u1", "users/u2/contacts.json"));
     }
 
     #[test]

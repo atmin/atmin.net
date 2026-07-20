@@ -16,9 +16,9 @@ use crate::media_quota::{
 };
 use crate::model::{DeviceId, Handle, KeyVersion, UserId};
 use crate::paths::{
-    authorize_key, authorize_key_write, authorize_prefix, is_object_name_safe, key_device,
-    key_handle, key_inbox_live, key_profile, key_rotation_record, prefix_inbox, prefix_keys,
-    prefix_media, prefix_user, prefix_user_devices,
+    authorize_compact_prefix, authorize_key, authorize_key_write, authorize_prefix,
+    is_object_name_safe, key_device, key_handle, key_inbox_live, key_profile, key_rotation_record,
+    prefix_inbox, prefix_keys, prefix_media, prefix_user, prefix_user_devices,
 };
 use crate::pow::{self, PowChallenge, PowNonceStore, PowProof};
 use crate::profile::{valid_kdf_params, KdfParams, Profile, PublicHandleData};
@@ -620,7 +620,10 @@ async fn store_compact(
     if req.prefix.is_empty() || req.up_to.is_empty() {
         return Err(ApiError::BadRequest);
     }
-    if !authorize_prefix(user.user_id.as_str(), &req.prefix) {
+    // Compaction deletes every listed live object — authorize it owner-only, not
+    // with the read-permissive `authorize_prefix` (audit C1). Only the caller's
+    // own `inbox/{uid}/live/` and `keys/{uid}/live/` are compactable.
+    if !authorize_compact_prefix(user.user_id.as_str(), &req.prefix) {
         return Err(ApiError::Forbidden);
     }
 
@@ -2257,6 +2260,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn store_object_other_users_contacts_is_403() {
+        // M1: another user's encrypted contacts.json is owner-only — reading it
+        // (ciphertext + the public salt/kdf) is offline backup-key-guess material.
+        const VICTIM: &str = "01BX5ZZKBKACTAV9WEVGEMMVRZ";
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        store
+            .put_object(
+                &format!("users/{VICTIM}/contacts.json"),
+                b"ciphertext",
+                "application/octet-stream",
+            )
+            .await
+            .unwrap();
+        let client = client_with(store).await;
+        let uri = format!("/v1/store/object?key=users/{VICTIM}/contacts.json");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn store_object_other_users_profile_is_readable() {
+        // The one cross-user public read: profile.json exposes the same fields
+        // the resolve/handle projection already does.
+        const OTHER: &str = "01BX5ZZKBKACTAV9WEVGEMMVRZ";
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        store
+            .put_object(
+                &format!("users/{OTHER}/profile.json"),
+                br#"{"user_id":"other"}"#,
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let client = client_with(store).await;
+        let uri = format!("/v1/store/object?key=users/{OTHER}/profile.json");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn store_list_other_users_subtree_is_403() {
+        // M1: no enumerating another user's devices / rotation history.
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        for prefix in [
+            "users/01BX5ZZKBKACTAV9WEVGEMMVRZ/",
+            "users/01BX5ZZKBKACTAV9WEVGEMMVRZ/devices/",
+        ] {
+            let uri = format!("/v1/store/list?prefix={prefix}");
+            let resp = client
+                .get(uri.as_str())
+                .header(bearer(&token))
+                .dispatch()
+                .await;
+            assert_eq!(resp.status(), Status::Forbidden, "prefix={prefix}");
+        }
+    }
+
+    #[tokio::test]
     async fn store_object_missing_is_404() {
         let store = MemStore::new();
         let token = seed_account(&store, 1).await;
@@ -2632,6 +2705,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn add_device_far_future_proof_is_403() {
+        // L3: the freshness window is one-sided — a far future-dated proof is
+        // rejected (a proof minted a few minutes ahead can't be banked for later).
+        let (sk, pk) = proof_keypair();
+        let store = MemStore::new();
+        seed_profile_with_pubkey(&store, &pk, 1).await;
+        let client = client_with(store).await;
+        let future = (Utc::now() + Duration::minutes(5)).to_rfc3339_opts(SecondsFormat::Secs, true);
+        let proof = signed_proof(&sk, UID, DID, &future, 1);
+        let body = serde_json::json!({ "user_id": UID, "device_label": "x", "auth_proof": proof })
+            .to_string();
+        assert_eq!(
+            post_add_device(&client, body).await.status(),
+            Status::Forbidden
+        );
+    }
+
+    #[tokio::test]
     async fn add_device_stale_key_version_is_401() {
         let (sk, pk) = proof_keypair();
         let store = MemStore::new();
@@ -2681,6 +2772,90 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn compact_other_users_profile_is_403_and_preserves_it() {
+        // C1: the account-destruction vector. An attacker with a valid token
+        // POSTs compact on the victim's users/ prefix; the read-permissive path
+        // used to authorize the delete. Must 403, and the victim's profile.json
+        // (whose deletion locks them out forever) must be untouched.
+        const VICTIM: &str = "01BX5ZZKBKACTAV9WEVGEMMVRZ";
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let victim_profile = format!("users/{VICTIM}/profile.json");
+        store
+            .put_object(
+                &victim_profile,
+                br#"{"user_id":"victim"}"#,
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let client = client_with(store).await;
+
+        for prefix in [
+            format!("users/{VICTIM}/profile.json"),
+            format!("users/{VICTIM}/devices/"),
+            format!("users/{VICTIM}/"),
+        ] {
+            let body = serde_json::json!({ "prefix": prefix, "up_to": "~" }).to_string();
+            let resp = client
+                .post("/v1/store/compact")
+                .header(ContentType::JSON)
+                .header(bearer(&token))
+                .body(body)
+                .dispatch()
+                .await;
+            assert_eq!(resp.status(), Status::Forbidden, "prefix={prefix}");
+        }
+
+        // The victim's profile survived every attempt.
+        let uri = format!("/v1/store/object?key={victim_profile}");
+        let resp = client
+            .get(uri.as_str())
+            .header(bearer(&token))
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn compact_own_archive_prefix_is_403() {
+        // Only the two live prefixes are compactable; the archive prefix (and
+        // the bare data subtree) are not — a narrower gate than plain ownership.
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let body = serde_json::json!({ "prefix": format!("inbox/{UID}/archive/"), "up_to": "~" })
+            .to_string();
+        let resp = client
+            .post("/v1/store/compact")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(body)
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Forbidden);
+    }
+
+    #[tokio::test]
+    async fn compact_own_keys_live_is_allowed() {
+        // The second compactable prefix (keys/{uid}/live/) — the messaging path
+        // compacts it alongside the inbox.
+        let store = MemStore::new();
+        let token = seed_account(&store, 1).await;
+        let client = client_with(store).await;
+        let body =
+            serde_json::json!({ "prefix": format!("keys/{UID}/live/"), "up_to": "~" }).to_string();
+        let resp = client
+            .post("/v1/store/compact")
+            .header(ContentType::JSON)
+            .header(bearer(&token))
+            .body(body)
+            .dispatch()
+            .await;
+        assert_eq!(resp.status(), Status::Ok);
     }
 
     #[tokio::test]

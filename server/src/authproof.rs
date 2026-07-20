@@ -51,8 +51,17 @@ pub fn verify(
         .map_err(|_| AuthProofError::VerifyFailed)
 }
 
-/// Max age of an auth proof's timestamp (the ±5-minute freshness window).
+/// Max age of an auth proof's timestamp — the backward freshness window (5 min).
 pub const AUTH_PROOF_MAX_AGE_SECS: i64 = 300;
+
+/// Clock skew tolerated on the *future* side. The freshness window is one-sided:
+/// a proof is valid from its `timestamp` to `timestamp + AUTH_PROOF_MAX_AGE_SECS`,
+/// plus this small forward allowance for a client whose clock runs ahead. A
+/// far-future-dated proof is rejected — it shrinks the forward replay window and
+/// blocks pre-dating (audit L3). NTP-synced clients sit well inside 60 s; the
+/// full replay defence (a server nonce burned on use, or a seen-signature cache)
+/// is deferred as it changes the signed payload / adds shared state.
+pub const AUTH_PROOF_MAX_SKEW_SECS: i64 = 60;
 
 /// A signed auth proof as sent on the wire: a `payload` object plus a base64url
 /// Ed25519 `signature` over its JCS-canonical bytes. The payload is kept as a
@@ -94,7 +103,9 @@ pub fn verify_proof(
     let ts = DateTime::parse_from_rfc3339(&payload.timestamp)
         .map_err(|_| AuthProofError::VerifyFailed)?
         .with_timezone(&Utc);
-    if (now - ts).num_seconds().abs() > AUTH_PROOF_MAX_AGE_SECS {
+    // One-sided window: reject too-old (> max age) and far-future (< -skew) proofs.
+    let age = (now - ts).num_seconds();
+    if !(-AUTH_PROOF_MAX_SKEW_SECS..=AUTH_PROOF_MAX_AGE_SECS).contains(&age) {
         return Err(AuthProofError::VerifyFailed);
     }
     if payload.key_version == 0 {
