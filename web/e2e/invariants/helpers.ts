@@ -12,11 +12,16 @@ const MSG_SELECTOR = '[data-testid="message"]';
 
 // ── Infrastructure ────────────────────────────────────────────────
 
-/** S3Client pointed at the local MinIO instance used by e2e tests. */
+/**
+ * S3Client pointed at the MinIO instance used by e2e tests. The endpoint comes
+ * from `E2E_S3_ENDPOINT` (the Makefile sets it from `MINIO_PORT`, default
+ * :29000 to dodge a clash on the standard 9000); the :9000 fallback is CI's
+ * standalone MinIO, which doesn't set the var.
+ */
 export function makeS3Client(): S3Client {
     return new S3Client({
         region: 'us-east-1',
-        endpoint: 'http://localhost:9000',
+        endpoint: process.env.E2E_S3_ENDPOINT ?? 'http://localhost:9000',
         forcePathStyle: true,
         credentials: {
             accessKeyId: 'minioadmin',

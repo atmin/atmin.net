@@ -50,7 +50,8 @@ function sha256(buf: Buffer | Uint8Array): string {
 function s3(): S3Client {
     return new S3Client({
         region: 'us-east-1',
-        endpoint: 'http://localhost:9000',
+        // See makeS3Client in invariants/helpers.ts for the endpoint story.
+        endpoint: process.env.E2E_S3_ENDPOINT ?? 'http://localhost:9000',
         forcePathStyle: true,
         credentials: {
             accessKeyId: 'minioadmin',

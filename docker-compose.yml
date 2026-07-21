@@ -2,9 +2,13 @@ services:
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
+    # Published on non-standard host ports (default 29000/29001) so a parallel
+    # MinIO on 9000/9001 doesn't clash; override with MINIO_PORT /
+    # MINIO_CONSOLE_PORT (the Makefile exports them). Container-internal ports
+    # stay 9000/9001 — the createbucket alias below and the app both target those.
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-29000}:9000"
+      - "${MINIO_CONSOLE_PORT:-29001}:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin

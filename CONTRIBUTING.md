@@ -111,7 +111,7 @@ desktop-only surfaces (ADR-0023 keeps shadcn available for those).
 | End-to-end flows | Playwright, one spec per `docs/scenarios/*.md` | `web/e2e/` |
 | Invariants (fault-injection) | Playwright with deliberate faults; asserts UI + IDB + S3 layers | `web/e2e/invariants/` |
 
-`make e2e-local` runs Playwright against a native Rust server + Vite + MinIO; pass `SPEC=...` to scope (e.g. `make e2e-local SPEC=media`). `make e2e` runs the full Docker image (used by CI on tags).
+`make e2e-local` runs Playwright against a native Rust server + Vite + MinIO; pass `SPEC=...` to scope (e.g. `make e2e-local SPEC=media`). `make e2e` runs the full Docker image (used by CI on tags). The local MinIO publishes on non-standard host ports (`29000`/`29001`) to avoid clashing with a parallel MinIO on the default `9000`/`9001`; override with `MINIO_PORT=… make e2e-local`.
 
 **e2e specs read as prose.** The test body narrates the flow (`registerUser`, `openChat`, `revokeOtherDevice`); `waitForSelector`, raw locators, and cryptic interaction sequences belong behind semantically-named helpers in `web/e2e/helpers.ts`. Extract opportunistically — boy-scout rule: leave each spec you touch a little more readable.
 

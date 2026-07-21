@@ -1,5 +1,14 @@
 DOCKER ?= docker
 
+# Host ports the local MinIO (docker-compose) publishes. Deliberately
+# non-standard so a parallel MinIO on the default 9000/9001 doesn't clash;
+# override per-run, e.g. `MINIO_PORT=31000 make e2e-local`. The container-
+# internal ports stay 9000/9001 (see docker-compose.yml). CI (deploy.yml) runs
+# its own standalone MinIO on 9000 and is unaffected by these.
+MINIO_PORT ?= 29000
+MINIO_CONSOLE_PORT ?= 29001
+export MINIO_PORT MINIO_CONSOLE_PORT
+
 .PHONY: all build test lint fmt clean dev run e2e e2e-local install
 .PHONY: server-test server-lint server-fmt server-build
 .PHONY: web-dev web-wasm web-build web-test web-lint web-lint-arch web-fmt web-storybook
@@ -158,14 +167,14 @@ e2e: web-build
 		--add-host=host.containers.internal:host-gateway \
 		-e SERVER_SECRET=e2e-test-secret \
 		-e DANGEROUSLY_DISABLE_REGISTRATION_POW=yes-i-am-the-e2e-suite \
-		-e S3_ENDPOINT=http://host.containers.internal:9000 \
-		-e S3_PUBLIC_ENDPOINT=http://localhost:9000 \
+		-e S3_ENDPOINT=http://host.containers.internal:$(MINIO_PORT) \
+		-e S3_PUBLIC_ENDPOINT=http://localhost:$(MINIO_PORT) \
 		-e S3_BUCKET=atmin-e2e-local \
 		-e S3_REGION=us-east-1 \
 		-e S3_ACCESS_KEY=minioadmin \
 		-e S3_SECRET_KEY=minioadmin \
 		atmindotnet:e2e
-	cd web && E2E_BUCKET=atmin-e2e-local pnpm exec playwright test; \
+	cd web && E2E_BUCKET=atmin-e2e-local E2E_S3_ENDPOINT=http://localhost:$(MINIO_PORT) pnpm exec playwright test; \
 		status=$$?; $(DOCKER) rm -f atmin-e2e; exit $$status
 
 # Fast local e2e: runs the embed-spa server binary natively (no docker build) on
@@ -184,8 +193,8 @@ e2e-local: server-build
 	@BUCKET=atmin-e2e-local-$$$$; \
 	export SERVER_SECRET=e2e-test-secret; \
 	export DANGEROUSLY_DISABLE_REGISTRATION_POW=yes-i-am-the-e2e-suite; \
-	export S3_ENDPOINT=http://localhost:9000; \
-	export S3_PUBLIC_ENDPOINT=http://localhost:9000; \
+	export S3_ENDPOINT=http://localhost:$(MINIO_PORT); \
+	export S3_PUBLIC_ENDPOINT=http://localhost:$(MINIO_PORT); \
 	export S3_BUCKET=$$BUCKET; \
 	export S3_REGION=us-east-1; \
 	export S3_ACCESS_KEY=minioadmin; \
@@ -200,7 +209,7 @@ e2e-local: server-build
 		sleep 0.2; \
 	done; \
 	if [ -z "$$up" ]; then echo "server did not come up on :8080" >&2; kill $$SERVER_PID 2>/dev/null || true; exit 1; fi; \
-	cd web && E2E_BUCKET=$$BUCKET pnpm exec playwright test $(SPEC); \
+	cd web && E2E_BUCKET=$$BUCKET E2E_S3_ENDPOINT=http://localhost:$(MINIO_PORT) pnpm exec playwright test $(SPEC); \
 	status=$$?; \
 	kill $$SERVER_PID 2>/dev/null || true; \
 	exit $$status

@@ -7,7 +7,9 @@ import {
 
 const s3 = new S3Client({
     region: 'us-east-1',
-    endpoint: 'http://localhost:9000',
+    // E2E_S3_ENDPOINT: Makefile sets it from MINIO_PORT (default :29000);
+    // :9000 fallback is CI's standalone MinIO.
+    endpoint: process.env.E2E_S3_ENDPOINT ?? 'http://localhost:9000',
     forcePathStyle: true,
     credentials: {
         accessKeyId: 'minioadmin',
