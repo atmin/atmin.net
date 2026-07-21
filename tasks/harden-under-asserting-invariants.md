@@ -43,7 +43,8 @@ Also write the remaining new spec:
   via `putObject`; assert it's inert).
 
 (I12/I13 already implemented; I14 ships with [harden-sender-controlled-fields];
-I15/I16 with [key-chain-walker-robustness]; I18 with [paginated-prefix-wipe].)
+I16 and I15 path B shipped with the key-chain walker fix (I15 path A, the
+queue-drain spec, is still open); I18 with [paginated-prefix-wipe].)
 
 ## Verify
 
@@ -78,7 +79,7 @@ opportunistically or when touching the relevant surface.
   ratchet continuity after invalid-token re-auth; avatar upload / partial
   profile update.
 
-(`restoreSessionKeys` broken-chain → [key-chain-walker-robustness]; SSE
+(`restoreSessionKeys` broken-chain → shipped (key-chain walker try-until-decrypt); SSE
 permanent-disconnect / mid-session 401 → [sse-resilience]; `markConversationRead`
 local concurrency → [harden-sender-controlled-fields] via I14; rotation-record
 24h TTL sweep → spec-code-drift.)

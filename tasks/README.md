@@ -30,12 +30,6 @@ Actionable residue of a whole-repo resilience audit, grouped by the shared root
 causes it identified (fix a root cause, several findings die together). Ordered
 by blast radius.
 
-- **[harden-store-authorization](harden-store-authorization.md)** — **P0.**
-  Owner-scope the destructive `compact` path (any user can currently delete any
-  account) + the cross-user read allow-list.
-- **[key-chain-walker-robustness](key-chain-walker-robustness.md)** — **P0.**
-  Try-until-decrypt in `resolveBackupKey`; a rotation retry can silently brick
-  all pre-rotation history. Ships I15/I16.
 - **[paginated-prefix-wipe](paginated-prefix-wipe.md)** — **High.** One shared
   drain-loop wipe + chunked `delete_objects` → fixes deletion orphaning,
   compaction wedge, cleanup mid-wipe. Ships I18.
@@ -54,7 +48,10 @@ by blast radius.
   per-object presign size ceiling and quota accounting for the non-media
   client-writable prefixes (`keys/`, `contacts.json`, `read-markers.json`),
   which currently bypass both (H6). Folds in L6 (align presign-TTL ≤
-  quota-cache-TTL). L9 (unreverted quota reservation) **deferred** — documented
+  quota-cache-TTL) and the residual auth-proof replay guard (L3): a single-use
+  server nonce or seen-signature TTL cache for add/revoke-device proofs — the
+  one-sided freshness window is in place, but the ≤5-min replay window is not
+  yet closed. L9 (unreverted quota reservation) **deferred** — documented
   single-instance tradeoff.
 - **[sse-resilience](sse-resilience.md)** — **Medium.** Auto-reconnect +
   visibility/focus reconcile + tear down a revoked device's open stream.
@@ -67,6 +64,11 @@ by blast radius.
   /v1/devices`; rotate-keys `rotation_unavailable` vs actual `409 {current:-1}`;
   error-table 503/`pow_invalid` gaps; ignored `store/list` `limit`; "25 MB" vs
   MiB; scenario docs referencing stale Go-style paths.
+- **transparent-rotation-recovery** *(no task doc yet — Low)* — on a
+  lost-response `rotate-keys` retry, recover in place when
+  `KeyVersionStaleError.current` equals the attempted `key_version` instead of
+  hard-logout (L1). The current legible re-auth path (re-login with the new
+  password) is invariant-permitted, so this is UX polish, not correctness.
 
 **Shipped:** v0.1 ([mvp-v0.1.md](../docs/specs/mvp-v0.1.md)) · v0.2 — the UI
 revamp ([releases/v0.2.md](../docs/releases/v0.2.md)).
